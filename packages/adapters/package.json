@@ -1,0 +1,12 @@
+{
+  "name": "@rapi/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@rapi/core": "0.1.0",
+    "fast-xml-parser": "5.11.1"
+  }
+}

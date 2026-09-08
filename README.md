@@ -56,7 +56,36 @@ Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업
 - [구현 로드맵](docs/roadmap.md)
 - [결정 기록](docs/decisions.md)
 
+## 개발 시작
+
+Node.js 22.13 이상과 Docker가 필요하다.
+
+```bash
+npm run bootstrap
+```
+
+이 명령은 의존성을 설치하고 PostgreSQL 16을 로컬 loopback에 기동한 뒤 migration과
+전체 검증을 실행한다. 애플리케이션
+비밀값은 `.env.example`을 참고해 저장소 밖의 `.env` 또는 비밀 관리 도구에 넣는다.
+
+## 실행
+
+`.env.example`을 저장소 밖의 운영 환경 값으로 채운 뒤 다음 프로세스를 실행한다.
+
+```bash
+npm run start:bot
+npm run start:worker
+```
+
+`start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑·승인
+명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
+Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
+Discord DM에 반영된다.
+
 ## 현재 상태
 
-이 저장소는 구현 전 기획 단계다. 다음 구현 단계는 로드맵의 Phase 0부터
-시작하며, 완료 여부는 각 단계의 검증 조건으로 판단한다.
+MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhook 수집,
+정규화·중복 후보·분류·요약, Discord 권한과 명령, Discord/SMTP 발송, 공개 범위가
+보호된 MDX, revision 승인 기반 OMP 실행, 재시작·백업 복구 검증을 포함한다.
+완료 조건별 증거는 [MVP 검증 기록](docs/mvp-verification.md)과
+`tests/manifests/mvp.yaml`에 있다.

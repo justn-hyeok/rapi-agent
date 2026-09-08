@@ -1,0 +1,50 @@
+{
+  "name": "rapi-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "workers/*"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "bootstrap": "./scripts/bootstrap.sh",
+    "clean": "tsc -b --clean",
+    "dev:infra": "docker compose up -d postgres",
+    "db:verify": "./scripts/verify-db.sh",
+    "db:migrate": "./scripts/migrate.sh",
+    "restart:smoke": "./scripts/restart-smoke.sh",
+    "backup": "./scripts/backup.sh",
+    "restore:smoke": "./scripts/restore-smoke.sh",
+    "start:bot": "tsx apps/bot/src/run.ts",
+    "start:worker": "tsx workers/runtime/src/run.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "tsx --test tests/e2e/*.test.ts",
+    "typecheck": "tsc -b --pretty false",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "audit:prod": "npm audit --omit=dev --audit-level=high"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.1",
+    "pg": "8.16.3",
+    "zod": "3.24.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.13.4",
+    "@types/pg": "8.15.5",
+    "eslint": "10.10.0",
+    "prettier": "3.5.0",
+    "tsx": "4.19.3",
+    "typescript": "5.7.3",
+    "typescript-eslint": "8.70.0"
+  }
+}

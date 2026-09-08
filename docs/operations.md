@@ -168,3 +168,18 @@ Discord 운영 채널 또는 DM으로 아래 상황을 알린다.
 - [ ] DB 백업을 별도 환경에서 실제 복원했다.
 - [ ] 공개 MDX 빌드에서 비공개 콘텐츠가 제외된다.
 - [ ] OMP 작업마다 승인 범위와 결과 증거가 연결된다.
+
+## 11. 구현된 운영 명령
+
+```bash
+npm run bootstrap       # 설치, DB, migration, 전체 검증
+npm run db:migrate      # 미적용 migration 적용
+npm run backup          # backups/ 아래 권한 0600 SQL dump 생성
+npm run restore:smoke   # 격리된 임시 DB로 실제 복구 검증
+npm run restart:smoke   # PostgreSQL 재시작 전후 핵심 count 검증
+npm run start:bot       # Discord interaction/webhook 서버
+npm run start:worker    # GitHub/RSS 수집과 배치 발송 worker
+```
+
+서비스 프로세스는 reverse proxy 뒤에서 실행하며 `/health`를 readiness 확인에 쓴다.
+Docker volume `rapi-postgres`는 애플리케이션 컨테이너 교체와 분리해 보존한다.

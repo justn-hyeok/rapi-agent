@@ -1,0 +1,28 @@
+id: rapi-mvp
+version: 1
+revision: working-tree-2026-09-08
+fixtures:
+  github: tests/e2e/mvp.test.ts#githubFixture
+  rss: tests/e2e/mvp.test.ts#rssFixture
+scenarios:
+  - github_and_rss_ingestion
+  - duplicate_delivery_prevention
+  - discord_subscription_and_dm
+  - matching_test_email
+  - public_mdx_build
+  - approved_omp_execution_and_callback
+  - process_and_database_restart_recovery
+  - discord_user_guild_channel_denial
+commands:
+  bootstrap: npm run bootstrap
+  e2e: npm run test:e2e
+  restart: npm run restart:smoke
+artifacts:
+  result: tests/artifacts/mvp-e2e.json
+pass_rules:
+  - all 8 scenarios pass against PostgreSQL 16
+  - repeated events create exactly 2 raw events and 2 normalized items
+  - successful delivery targets are never sent twice
+  - public build contains no private MDX
+  - OMP dispatch is unique per task revision and executor
+  - PostgreSQL restart preserves raw events and delivery attempts

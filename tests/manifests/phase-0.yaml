@@ -1,0 +1,27 @@
+id: phase-0-foundation
+version: 1
+revision: working-tree-2026-09-08
+environment:
+  node: ">=22.13"
+  postgres: "16"
+commands:
+  verify: npm run check
+  dependency_audit: npm run audit:prod
+  infrastructure: npm run dev:infra
+  bootstrap: npm run bootstrap
+  database: npm run db:verify
+fixtures:
+  state_contracts: tests/state-machine.test.ts
+  schemas: tests/contracts.test.ts
+  environment: tests/config.test.ts
+  startup: tests/startup.test.ts
+pass_rules:
+  - formatting, lint, typecheck, and tests exit successfully
+  - invalid environment values fail before adapter startup
+  - terminal states reject further transitions
+  - task dispatch cannot bypass approval
+artifacts:
+  ci: GitHub Actions run
+  local: terminal output
+approval:
+  retention_policy: accepted_2026-09-08

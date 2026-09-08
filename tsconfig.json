@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/core" },
+    { "path": "./packages/config" },
+    { "path": "./packages/db" },
+    { "path": "./packages/adapters" },
+    { "path": "./packages/agent" },
+    { "path": "./apps/bot" },
+    { "path": "./workers/runtime" }
+  ]
+}
