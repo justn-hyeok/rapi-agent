@@ -81,6 +81,10 @@ npm run start:worker
 `0600`으로 제한하고 `ops/systemd`의 unit을 설치한다. Discord interaction endpoint는
 공개 HTTPS reverse proxy의 `/interactions`로 연결한다.
 
+고정 도메인이나 인바운드 HTTPS를 사용할 수 없는 서버에서는
+`rapi-tunnel.service`가 Cloudflare Quick Tunnel을 실행하고 재시작할 때마다 Discord
+interaction endpoint를 자동 갱신한다.
+
 `start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑·승인
 명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
 Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
