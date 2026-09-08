@@ -77,6 +77,10 @@ npm run start:bot
 npm run start:worker
 ```
 
+두 명령은 저장소 루트의 `.env`를 자동으로 읽는다. 운영 서버에서는 파일 권한을
+`0600`으로 제한하고 `ops/systemd`의 unit을 설치한다. Discord interaction endpoint는
+공개 HTTPS reverse proxy의 `/interactions`로 연결한다.
+
 `start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑·승인
 명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
 Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
