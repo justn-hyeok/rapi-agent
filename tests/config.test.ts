@@ -27,7 +27,7 @@ describe("environment configuration", () => {
     );
   });
 
-  it("requires execution and SMTP credentials in production", () => {
+  it("requires SMTP credentials when SMTP is enabled in production", () => {
     assert.throws(
       () =>
         loadEnvironment({
@@ -35,7 +35,7 @@ describe("environment configuration", () => {
           RAPI_ENV: "production",
           EMAIL_TRANSPORT: "smtp",
         }),
-      /OMP_ENDPOINT is required in production.*SMTP_HOST is required for SMTP/,
+      /SMTP_HOST is required for SMTP/,
     );
   });
 });

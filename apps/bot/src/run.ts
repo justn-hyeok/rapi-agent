@@ -1,4 +1,9 @@
-import type { DeliveryAdapter, DeliveryResult } from "@rapi/core";
+import type {
+  DeliveryAdapter,
+  DeliveryResult,
+  OmpAdapter,
+  OmpDispatchResult,
+} from "@rapi/core";
 import {
   DiscordDeliveryAdapter,
   OmpHttpAdapter,
@@ -23,11 +28,17 @@ class DisabledDeliveryAdapter implements DeliveryAdapter {
   }
 }
 
+class DisabledOmpAdapter implements OmpAdapter {
+  dispatch(): Promise<OmpDispatchResult> {
+    return Promise.reject(
+      new Error(
+        "OMP is not configured; set OMP_ENDPOINT to enable development tasks",
+      ),
+    );
+  }
+}
+
 const config = loadEnvironment();
-if (!config.OMP_ENDPOINT)
-  throw new Error("OMP_ENDPOINT is required to run the bot");
-if (!config.WEBHOOK_SECRET)
-  throw new Error("WEBHOOK_SECRET is required to run the bot");
 
 const store = new PostgresStore(config.DATABASE_URL);
 const discord = new DiscordDeliveryAdapter(config.DISCORD_BOT_TOKEN);
@@ -54,7 +65,9 @@ const delivery = new CompositeDeliveryAdapter({
 const agent = new RapiAgent(
   store,
   delivery,
-  new OmpHttpAdapter(config.OMP_ENDPOINT),
+  config.OMP_ENDPOINT
+    ? new OmpHttpAdapter(config.OMP_ENDPOINT)
+    : new DisabledOmpAdapter(),
 );
 const commands = new DiscordCommandService(agent, {
   userIds: config.DISCORD_ALLOWED_USER_IDS,
@@ -77,7 +90,7 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
 const server = createDiscordInteractionServer(
   commands,
   config.DISCORD_PUBLIC_KEY,
-  { agent, secret: config.WEBHOOK_SECRET },
+  config.WEBHOOK_SECRET ? { agent, secret: config.WEBHOOK_SECRET } : undefined,
 );
 server.listen(config.PORT, "127.0.0.1", () => {
   process.stdout.write(`rapi-bot listening on 127.0.0.1:${config.PORT}\n`);

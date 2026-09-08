@@ -41,18 +41,6 @@ export const environmentSchema = z
   })
   .superRefine((value, context) => {
     if (value.RAPI_ENV !== "production") return;
-    for (const key of [
-      "OMP_ENDPOINT",
-      "OMP_CALLBACK_SECRET",
-      "WEBHOOK_SECRET",
-    ] as const) {
-      if (!value[key])
-        context.addIssue({
-          code: "custom",
-          path: [key],
-          message: `${key} is required in production`,
-        });
-    }
     if (value.EMAIL_TRANSPORT === "smtp") {
       for (const key of [
         "EMAIL_FROM",
