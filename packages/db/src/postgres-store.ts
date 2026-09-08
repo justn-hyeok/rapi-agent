@@ -589,6 +589,33 @@ export class PostgresStore {
         task.rows[0].state !== "awaiting_approval"
       )
         throw new Error("Task revision is not awaiting approval");
+      const taskRevision = await client.query<{
+        specification: Record<string, unknown>;
+      }>(
+        "SELECT specification FROM task_revisions WHERE task_id=$1 AND revision=$2",
+        [taskId, revision],
+      );
+      const requested = Array.isArray(
+        taskRevision.rows[0]?.specification.permissions,
+      )
+        ? taskRevision.rows[0].specification.permissions.map(String)
+        : [];
+      const knownPermissions = new Set([
+        "repo:read",
+        "repo:write",
+        "commit:create",
+        "push",
+        "pull_request:create",
+        "deploy",
+      ]);
+      if (
+        permissions.some(
+          (permission) =>
+            !knownPermissions.has(permission) ||
+            !requested.includes(permission),
+        )
+      )
+        throw new Error("Approval permissions exceed the requested task scope");
       const approvalId = randomUUID();
       await client.query(
         "INSERT INTO approvals (id,task_id,task_revision,approver_id,permission_scope,decision,expires_at,discord_message_ref) VALUES ($1,$2,$3,$4,$5::jsonb,'approved',$6,$7)",
@@ -629,8 +656,12 @@ export class PostgresStore {
       );
       const row = task.rows[0];
       if (!row) throw new Error("Task not found");
-      const approval = await client.query<{ id: string }>(
-        "SELECT id FROM approvals WHERE task_id=$1 AND task_revision=$2 AND decision='approved' AND expires_at>now() ORDER BY created_at DESC LIMIT 1",
+      const approval = await client.query<{
+        id: string;
+        permission_scope: string[];
+        expires_at: Date;
+      }>(
+        "SELECT id,permission_scope,expires_at FROM approvals WHERE task_id=$1 AND task_revision=$2 AND decision='approved' AND expires_at>now() ORDER BY created_at DESC LIMIT 1",
         [taskId, row.current_revision],
       );
       if (!approval.rows[0])
@@ -663,7 +694,16 @@ export class PostgresStore {
       );
       return {
         attemptId: attempt.rows[0]!.id,
-        specification: revision.rows[0]!.specification,
+        specification: {
+          ...revision.rows[0]!.specification,
+          task_id: taskId,
+          task_revision: row.current_revision,
+          execution_attempt_id: attempt.rows[0]!.id,
+          workspace_ref: `omp:${attempt.rows[0]!.id}`,
+          approval_id: approval.rows[0]!.id,
+          approval_expires_at: approval.rows[0]!.expires_at.toISOString(),
+          permissions: approval.rows[0]!.permission_scope,
+        },
         idempotencyKey: key,
         existingReceipt: attempt.rows[0]!.receipt_id,
       };
@@ -695,6 +735,7 @@ export class PostgresStore {
   async applyCallback(
     callbackId: string,
     attemptId: string,
+    receiptId: string,
     stateVersion: number,
     state: string,
     payload: Record<string, unknown>,
@@ -703,12 +744,15 @@ export class PostgresStore {
       const attempt = await client.query<{
         state_version: number;
         task_id: string;
+        receipt_id: string | null;
       }>(
-        "SELECT state_version,task_id FROM execution_attempts WHERE id=$1 FOR UPDATE",
+        "SELECT state_version,task_id,receipt_id FROM execution_attempts WHERE id=$1 FOR UPDATE",
         [attemptId],
       );
       const row = attempt.rows[0];
       if (!row) throw new Error("Execution attempt not found");
+      if (!row.receipt_id || row.receipt_id !== receiptId)
+        throw new Error("OMP receipt does not match the execution attempt");
       const applied = stateVersion > row.state_version;
       await client.query(
         "INSERT INTO callback_events (callback_event_id,execution_attempt_id,state_version,payload,applied) VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (callback_event_id) DO NOTHING",

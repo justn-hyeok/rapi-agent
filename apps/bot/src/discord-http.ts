@@ -146,7 +146,10 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 export function createDiscordInteractionServer(
   service: DiscordCommandService,
   publicKey: string,
-  webhook?: { agent: RapiAgent; secret: string },
+  integrations?: {
+    webhook?: { agent: RapiAgent; secret: string };
+    omp?: { agent: RapiAgent; secret: string };
+  },
 ) {
   return createServer(async (request, response) => {
     try {
@@ -155,11 +158,22 @@ export function createDiscordInteractionServer(
       if (request.method !== "POST")
         return json(response, 404, { error: "not found" });
       const body = await readBody(request);
-      if (request.url?.startsWith("/webhooks/") && webhook) {
+      if (request.url === "/omp/callback" && integrations?.omp) {
+        const signature = request.headers["x-omp-signature"];
+        if (typeof signature !== "string")
+          return json(response, 401, { error: "missing OMP signature" });
+        const applied = await integrations.omp.agent.receiveOmpCallback(
+          body,
+          signature,
+          integrations.omp.secret,
+        );
+        return json(response, 202, { applied });
+      }
+      if (request.url?.startsWith("/webhooks/") && integrations?.webhook) {
         const signature = request.headers["x-rapi-signature"];
         if (
           typeof signature !== "string" ||
-          !verifyWebhookSignature(body, signature, webhook.secret)
+          !verifyWebhookSignature(body, signature, integrations.webhook.secret)
         ) {
           return json(response, 401, { error: "invalid webhook signature" });
         }
@@ -167,7 +181,7 @@ export function createDiscordInteractionServer(
           request.url.slice("/webhooks/".length),
         );
         const payload = JSON.parse(body.toString("utf8")) as ExternalItem;
-        const result = await webhook.agent.ingestExternalItem(
+        const result = await integrations.webhook.agent.ingestExternalItem(
           sourceId,
           payload,
         );

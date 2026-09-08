@@ -1,0 +1,21 @@
+[Unit]
+Description=Rapi OMP Codex execution service
+After=network-online.target rapi-bot.service
+Wants=network-online.target
+Requires=rapi-bot.service
+
+[Service]
+Type=simple
+User=justn
+WorkingDirectory=/home/justn/rapi-agent
+ExecStart=/usr/local/bin/npm run start:omp
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/justn/omp-workspaces /home/justn/.codex
+
+[Install]
+WantedBy=multi-user.target

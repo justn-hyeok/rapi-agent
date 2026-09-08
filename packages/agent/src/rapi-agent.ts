@@ -323,6 +323,7 @@ export class RapiAgent {
       throw new Error("Invalid OMP callback signature");
     const callback = JSON.parse(rawBody.toString("utf8")) as {
       callback_event_id: string;
+      receipt_id: string;
       execution_attempt_id: string;
       state_version: number;
       state: "running" | "blocked" | "completed" | "failed" | "cancelled";
@@ -338,6 +339,7 @@ export class RapiAgent {
     const applied = await this.store.applyCallback(
       callback.callback_event_id,
       callback.execution_attempt_id,
+      callback.receipt_id,
       callback.state_version,
       callback.state,
       callback as unknown as Record<string, unknown>,

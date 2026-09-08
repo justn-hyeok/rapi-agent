@@ -90,7 +90,14 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
 const server = createDiscordInteractionServer(
   commands,
   config.DISCORD_PUBLIC_KEY,
-  config.WEBHOOK_SECRET ? { agent, secret: config.WEBHOOK_SECRET } : undefined,
+  {
+    ...(config.WEBHOOK_SECRET
+      ? { webhook: { agent, secret: config.WEBHOOK_SECRET } }
+      : {}),
+    ...(config.OMP_CALLBACK_SECRET
+      ? { omp: { agent, secret: config.OMP_CALLBACK_SECRET } }
+      : {}),
+  },
 );
 server.listen(config.PORT, "127.0.0.1", () => {
   process.stdout.write(`rapi-bot listening on 127.0.0.1:${config.PORT}\n`);

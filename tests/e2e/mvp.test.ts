@@ -292,6 +292,7 @@ describe("rapi-agent MVP", () => {
       const callback = Buffer.from(
         JSON.stringify({
           callback_event_id: "callback-1",
+          receipt_id: String(approval.data?.receiptId),
           execution_attempt_id: attemptId,
           state_version: 2,
           state: "completed",

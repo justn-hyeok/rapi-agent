@@ -74,6 +74,7 @@ npm run bootstrap
 
 ```bash
 npm run start:bot
+npm run start:omp
 npm run start:worker
 ```
 
@@ -89,6 +90,13 @@ interaction endpoint를 자동 갱신한다.
 명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
 Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
 Discord DM에 반영된다.
+
+`start:omp`는 승인된 개발 작업을 전용 Git clone에 준비하고 Codex CLI로 실행한다.
+봇에는 receipt를 즉시 반환하고 실행 상태와 결과 증거를 HMAC 서명 callback으로
+전달한다. 실행기 자식 프로세스에는 Discord, 데이터베이스, callback 비밀값을
+전달하지 않는다. 기본 저장소, 허용 저장소 루트, 작업공간은
+`OMP_DEFAULT_REPOSITORY`, `OMP_ALLOWED_REPOSITORY_ROOTS`, `OMP_WORKSPACE_ROOT`로
+제한한다.
 
 ## 현재 상태
 
