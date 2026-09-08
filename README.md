@@ -98,6 +98,17 @@ Discord DM에 반영된다.
 `OMP_DEFAULT_REPOSITORY`, `OMP_ALLOWED_REPOSITORY_ROOTS`, `OMP_WORKSPACE_ROOT`로
 제한한다.
 
+Discord 명령은 모두 한글이며 작업 실행에는 JSON이 필요 없다.
+
+```text
+/작업 내용:로그인 오류 고치고 관련 테스트 돌려줘
+/승인
+```
+
+그 밖의 명령은 `/브리핑`, `/검색`, `/구독`, `/구독해제`, `/수집원`,
+`/발송내역`, `/취소`다. `/승인`과 `/취소`는 해당 사용자의 가장 최근 작업을
+대상으로 한다.
+
 ## 현재 상태
 
 MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhook 수집,

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { describe, it } from "node:test";
 import { verifyWebhookSignature } from "@rapi/adapters";
-import { canonicalizeUrl, splitDiscordMessage } from "@rapi/core";
+import {
+  assertDiscordAccess,
+  canonicalizeUrl,
+  splitDiscordMessage,
+} from "@rapi/core";
 import {
   slashCommandDefinitions,
   verifyDiscordRequest,
@@ -54,21 +58,41 @@ describe("external input boundaries", () => {
     assert.ok(chunks.every((chunk) => chunk.length <= 1900));
   });
 
-  it("registers every supported slash command with required inputs", () => {
+  it("registers simple Korean slash commands", () => {
     assert.equal(slashCommandDefinitions.length, 9);
+    assert.deepEqual(
+      slashCommandDefinitions.map((command) => command.name),
+      [
+        "브리핑",
+        "검색",
+        "구독",
+        "구독해제",
+        "수집원",
+        "발송내역",
+        "작업",
+        "승인",
+        "취소",
+      ],
+    );
     const subscribe = slashCommandDefinitions.find(
-      (command) => command.name === "subscribe",
+      (command) => command.name === "구독",
     );
     const approve = slashCommandDefinitions.find(
-      (command) => command.name === "approve",
+      (command) => command.name === "승인",
     );
     assert.deepEqual(
-      subscribe.options.map((option) => option.name),
-      ["subscription"],
+      subscribe?.options?.map((option) => option.name),
+      ["이름", "키워드", "분야", "주기"],
     );
-    assert.deepEqual(
-      approve.options.map((option) => option.name),
-      ["task_id", "revision", "permissions", "message_ref"],
+    assert.equal(approve?.options, undefined);
+  });
+
+  it("allows every channel when no channel allowlist is configured", () => {
+    assert.doesNotThrow(() =>
+      assertDiscordAccess(
+        { userId: "100", guildId: "200", channelId: "300" },
+        { userIds: ["100"], guildIds: ["200"] },
+      ),
     );
   });
 });

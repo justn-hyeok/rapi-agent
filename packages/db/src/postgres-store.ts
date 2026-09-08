@@ -514,6 +514,21 @@ export class PostgresStore {
     return result.rows;
   }
 
+  async activeSourceIds(): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      "SELECT id FROM sources WHERE state='active' ORDER BY created_at",
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async latestActiveSubscription(ownerId: string): Promise<string | null> {
+    const result = await this.pool.query<{ id: string }>(
+      "SELECT id FROM subscriptions WHERE owner_id=$1 AND active=true ORDER BY updated_at DESC LIMIT 1",
+      [ownerId],
+    );
+    return result.rows[0]?.id ?? null;
+  }
+
   async deliveryStatus(): Promise<Array<Record<string, unknown>>> {
     const result = await this.pool.query(
       "SELECT id,state,period_start,period_end FROM delivery_batches ORDER BY created_at DESC LIMIT 20",
@@ -787,6 +802,45 @@ export class PostgresStore {
     );
     if (!result.rows[0]) throw new Error("Task not found");
     return result.rows[0].state;
+  }
+
+  async latestAwaitingTask(ownerId: string): Promise<{
+    id: string;
+    revision: number;
+    permissions: string[];
+  } | null> {
+    const result = await this.pool.query<{
+      id: string;
+      current_revision: number;
+      permissions: string[] | null;
+    }>(
+      `SELECT t.id,t.current_revision,r.specification->'permissions' AS permissions
+       FROM task_requests t JOIN task_revisions r
+       ON r.task_id=t.id AND r.revision=t.current_revision
+       WHERE t.requester_id=$1 AND t.state='awaiting_approval'
+       ORDER BY t.updated_at DESC LIMIT 1`,
+      [ownerId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          revision: row.current_revision,
+          permissions: Array.isArray(row.permissions)
+            ? row.permissions.map(String)
+            : [],
+        }
+      : null;
+  }
+
+  async latestCancellableTask(ownerId: string): Promise<string | null> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM task_requests WHERE requester_id=$1
+       AND state NOT IN ('completed','failed','rejected','expired','cancelled')
+       ORDER BY updated_at DESC LIMIT 1`,
+      [ownerId],
+    );
+    return result.rows[0]?.id ?? null;
   }
 
   async cancelTask(taskId: string): Promise<void> {

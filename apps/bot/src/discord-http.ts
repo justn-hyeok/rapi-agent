@@ -7,7 +7,6 @@ import {
 import {
   DiscordCommandService,
   RapiAgent,
-  slashCommands,
   type DiscordCommand,
 } from "@rapi/agent";
 import { verifyWebhookSignature, type ExternalItem } from "@rapi/adapters";
@@ -40,67 +39,67 @@ const stringOption = (name: string, description: string, required = true) => ({
   required,
 });
 
+export const discordCommandAliases = {
+  브리핑: "brief",
+  검색: "search",
+  구독: "subscribe",
+  구독해제: "unsubscribe",
+  수집원: "sources",
+  발송내역: "deliveries",
+  작업: "task",
+  승인: "approve",
+  취소: "cancel",
+} as const satisfies Record<string, DiscordCommand["name"]>;
+
 export const slashCommandDefinitions = [
   {
-    name: "brief",
-    description: "Create and deliver a briefing",
+    name: "브리핑",
+    description: "최근 24시간 브리핑을 만들어 보냅니다",
+    type: 1,
+  },
+  {
+    name: "검색",
+    description: "수집한 항목을 검색합니다",
+    type: 1,
+    options: [stringOption("검색어", "찾을 내용을 입력하세요")],
+  },
+  {
+    name: "구독",
+    description: "Discord 알림 구독을 만듭니다",
     type: 1,
     options: [
-      stringOption("subscription_id", "Subscription ID"),
-      stringOption("period_start", "ISO period start"),
-      stringOption("period_end", "ISO period end"),
+      stringOption("이름", "구독 이름"),
+      stringOption("키워드", "쉼표로 구분한 포함 키워드", false),
+      stringOption("분야", "쉼표로 구분한 분야", false),
+      stringOption("주기", "즉시, 매일, 매주 중 하나", false),
     ],
   },
   {
-    name: "search",
-    description: "Search collected items",
+    name: "구독해제",
+    description: "알림 구독을 해제합니다",
     type: 1,
-    options: [stringOption("query", "Search query")],
+    options: [stringOption("이름", "해제할 구독 이름")],
+  },
+  { name: "수집원", description: "수집원 상태를 확인합니다", type: 1 },
+  { name: "발송내역", description: "최근 발송 상태를 확인합니다", type: 1 },
+  {
+    name: "작업",
+    description: "Codex 개발 작업을 준비합니다",
+    type: 1,
+    options: [stringOption("내용", "할 일을 한글로 입력하세요")],
   },
   {
-    name: "subscribe",
-    description: "Create or update a subscription",
+    name: "승인",
+    description: "가장 최근 작업을 승인하고 실행합니다",
     type: 1,
-    options: [stringOption("subscription", "Subscription JSON")],
   },
   {
-    name: "unsubscribe",
-    description: "Disable a subscription",
+    name: "취소",
+    description: "가장 최근 진행 중인 작업을 취소합니다",
     type: 1,
-    options: [stringOption("name", "Subscription name")],
-  },
-  { name: "sources", description: "Show source health", type: 1 },
-  { name: "deliveries", description: "Show delivery status", type: 1 },
-  {
-    name: "task",
-    description: "Create a development task",
-    type: 1,
-    options: [stringOption("specification", "Task specification JSON")],
-  },
-  {
-    name: "approve",
-    description: "Approve and dispatch a task revision",
-    type: 1,
-    options: [
-      stringOption("task_id", "Task ID"),
-      {
-        type: 4,
-        name: "revision",
-        description: "Task revision",
-        required: true,
-      },
-      stringOption("permissions", "Approved permission JSON array"),
-      stringOption("message_ref", "Approval message reference"),
-    ],
-  },
-  {
-    name: "cancel",
-    description: "Cancel a task",
-    type: 1,
-    options: [stringOption("task_id", "Task ID")],
   },
 ] satisfies Array<{
-  name: (typeof slashCommands)[number];
+  name: string;
   description: string;
   type: number;
   options?: Array<Record<string, unknown>>;
@@ -205,7 +204,7 @@ export function createDiscordInteractionServer(
         guild_id?: string;
         channel_id?: string;
         data?: {
-          name?: DiscordCommand["name"];
+          name?: string;
           options?: Array<{ name: string; value: unknown }>;
         };
       };
@@ -213,6 +212,14 @@ export function createDiscordInteractionServer(
       const userId = interaction.member?.user?.id ?? interaction.user?.id;
       if (!userId || !interaction.data?.name)
         return json(response, 400, { error: "invalid interaction" });
+      const commandName = (
+        discordCommandAliases as Record<
+          string,
+          DiscordCommand["name"] | undefined
+        >
+      )[interaction.data.name];
+      if (!commandName)
+        return json(response, 400, { error: "unknown interaction command" });
       const options = Object.fromEntries(
         (interaction.data.options ?? []).map((option) => [
           option.name,
@@ -220,6 +227,12 @@ export function createDiscordInteractionServer(
         ]),
       );
       const aliases: Record<string, string> = {
+        검색어: "query",
+        이름: "name",
+        키워드: "keywords",
+        분야: "categories",
+        주기: "cadence",
+        내용: "content",
         subscription_id: "subscriptionId",
         period_start: "periodStart",
         period_end: "periodEnd",
@@ -243,7 +256,7 @@ export function createDiscordInteractionServer(
             ? { channelId: interaction.channel_id }
             : {}),
         },
-        { name: interaction.data.name, options },
+        { name: commandName, options },
       );
       return json(response, 200, {
         type: 4,

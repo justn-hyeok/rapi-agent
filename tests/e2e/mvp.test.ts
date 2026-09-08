@@ -319,6 +319,24 @@ describe("rapi-agent MVP", () => {
         false,
       );
 
+      const simpleTask = await commands.execute(
+        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
+        {
+          name: "task",
+          options: { content: "한글로 간단한 작업을 수행한다" },
+        },
+      );
+      assert.match(simpleTask.messages[0]!, /\/승인/);
+      const simpleApproval = await commands.execute(
+        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
+        { name: "approve", options: {} },
+      );
+      assert.match(simpleApproval.messages[0]!, /OMP에 전달/);
+      assert.equal(
+        omp.dispatches.at(-1)?.specification.goal,
+        "한글로 간단한 작업을 수행한다",
+      );
+
       await assert.rejects(
         commands.execute(
           { userId: "intruder", guildId: "guild-1", channelId: "channel-1" },

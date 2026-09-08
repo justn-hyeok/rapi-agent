@@ -39,6 +39,23 @@ function requiredString(
   return value;
 }
 
+function optionalString(
+  options: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const value = options[name];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function commaSeparated(value?: string): string[] {
+  return value
+    ? value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : [];
+}
+
 export class DiscordCommandService {
   constructor(
     private readonly agent: RapiAgent,
@@ -53,10 +70,33 @@ export class DiscordCommandService {
     const ownerId = identity.userId;
     switch (command.name) {
       case "subscribe": {
-        const input = command.options.subscription as
+        const supplied = command.options.subscription as
           | SubscriptionInput
           | undefined;
-        if (!input || input.ownerId !== ownerId)
+        const cadenceInput = optionalString(command.options, "cadence");
+        const cadence =
+          cadenceInput === "즉시"
+            ? "immediate"
+            : cadenceInput === "매주"
+              ? "weekly"
+              : "daily";
+        const input: SubscriptionInput = supplied ?? {
+          ownerId,
+          name: requiredString(command.options, "name"),
+          sourceIds: await this.agent.store.activeSourceIds(),
+          categories: commaSeparated(
+            optionalString(command.options, "categories"),
+          ),
+          includeKeywords: commaSeparated(
+            optionalString(command.options, "keywords"),
+          ),
+          excludeKeywords: [],
+          cadence,
+          timezone: "Asia/Seoul",
+          channels: [{ channel: "discord_dm", recipientId: ownerId }],
+          maxItems: 20,
+        };
+        if (input.ownerId !== ownerId)
           throw new Error("Subscription owner must match the Discord user");
         const subscriptionId = await this.agent.createSubscription(input);
         return {
@@ -76,12 +116,16 @@ export class DiscordCommandService {
         };
       }
       case "brief": {
-        const subscriptionId = requiredString(
-          command.options,
-          "subscriptionId",
-        );
-        const start = new Date(requiredString(command.options, "periodStart"));
-        const end = new Date(requiredString(command.options, "periodEnd"));
+        const subscriptionId =
+          optionalString(command.options, "subscriptionId") ??
+          (await this.agent.store.latestActiveSubscription(ownerId));
+        if (!subscriptionId) throw new Error("활성 구독이 없습니다.");
+        const end = optionalString(command.options, "periodEnd")
+          ? new Date(requiredString(command.options, "periodEnd"))
+          : new Date();
+        const start = optionalString(command.options, "periodStart")
+          ? new Date(requiredString(command.options, "periodStart"))
+          : new Date(end.getTime() - 24 * 60 * 60_000);
         const batch = await this.agent.freezeBatch(subscriptionId, start, end);
         const state = await this.agent.deliverBatch(batch.id);
         const message = `브리핑 ${batch.id}: ${batch.items.length}개 항목, ${state}`;
@@ -110,30 +154,50 @@ export class DiscordCommandService {
         return { messages: splitDiscordMessage(JSON.stringify(rows, null, 2)) };
       }
       case "task": {
-        const specification = command.options.specification as
+        const supplied = command.options.specification as
           | Record<string, unknown>
           | undefined;
-        if (!specification) throw new Error("Missing task specification");
+        const content = optionalString(command.options, "content");
+        const specification =
+          supplied ??
+          (content
+            ? {
+                goal: content,
+                requirements: [content],
+                acceptance_criteria: [
+                  "요청한 변경을 완료한다.",
+                  "관련 검사를 통과한다.",
+                ],
+                permissions: ["repo:write", "commit:create"],
+                forbidden_actions: ["push", "pull request", "deploy"],
+                timeout_seconds: 1800,
+              }
+            : undefined);
+        if (!specification) throw new Error("작업 내용을 입력하세요.");
         const task = await this.agent.createTask(ownerId, specification);
         return {
           messages: [
-            `작업 ${task.taskId} revision ${task.revision} 승인이 필요합니다.`,
+            `작업을 준비했습니다. 실행하려면 /승인 을 입력하세요.\n작업 ID: ${task.taskId}`,
           ],
           data: task,
         };
       }
       case "approve": {
-        const taskId = requiredString(command.options, "taskId");
-        const revision = Number(command.options.revision);
+        const latest = await this.agent.store.latestAwaitingTask(ownerId);
+        const taskId = optionalString(command.options, "taskId") ?? latest?.id;
+        if (!taskId) throw new Error("승인할 작업이 없습니다.");
+        const revision = command.options.revision
+          ? Number(command.options.revision)
+          : (latest?.revision ?? 1);
         const permissions = Array.isArray(command.options.permissions)
           ? command.options.permissions.map(String)
-          : [];
+          : (latest?.permissions ?? []);
         await this.agent.approveTask(
           taskId,
           revision,
           ownerId,
           permissions,
-          requiredString(command.options, "messageRef"),
+          optionalString(command.options, "messageRef") ?? "discord-command",
         );
         const dispatch = await this.agent.dispatchTask(taskId);
         return {
@@ -144,9 +208,11 @@ export class DiscordCommandService {
         };
       }
       case "cancel": {
-        await this.agent.store.cancelTask(
-          requiredString(command.options, "taskId"),
-        );
+        const taskId =
+          optionalString(command.options, "taskId") ??
+          (await this.agent.store.latestCancellableTask(ownerId));
+        if (!taskId) throw new Error("취소할 작업이 없습니다.");
+        await this.agent.store.cancelTask(taskId);
         return { messages: ["작업을 취소했습니다."] };
       }
     }

@@ -247,6 +247,7 @@ function promptFor(specification: Specification): string {
     "Stay inside this clone and do not read application secrets.",
     `Approved permissions: ${JSON.stringify(specification.permissions)}.`,
     "Do not commit, push, create a pull request, or deploy unless that exact permission is approved.",
+    "If commit:create is approved, create a focused commit after the checks pass.",
     "Run the acceptance checks and report changed files, commands run, test results, and remaining limitations.",
     "Task specification:",
     JSON.stringify(specification, null, 2),
