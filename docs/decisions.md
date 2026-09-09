@@ -140,7 +140,7 @@ A shared deterministic prefix parser and explicit Discord options fix selection
 in the revision; remembered preferences do not change execution routing.
 
 Use Cursor OAuth from the service user's existing login and Command Code's
-`CMD_API_KEY`, supplied in `.env` followed by a service restart. Use the CLI coding
+`COMMAND_CODE_API_KEY`, supplied in `.env` followed by a service restart. Use the CLI coding
 harness rather than GOAT's HTTP endpoint. Keep secrets out of other child
 processes, logs and reports. Health exposes only binary/config presence, not an
 assertion of valid authentication. Preserve owner-authorized broad permissions,

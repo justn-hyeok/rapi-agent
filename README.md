@@ -163,6 +163,6 @@ and `/작업 내용:오류 고쳐줘 공급자:commandcode 모델:vendor/model`.
 The optional `공급자` option overrides a leading provider directive. Omitted provider
 means Codex with `gpt-5.3-codex-spark`; Cursor and Command Code use their own default
 model when `모델` is omitted. Selection applies only to the current task revision.
-Set optional `CMD_API_KEY` in `.env` and restart the OMP service for Command Code.
+Set optional `COMMAND_CODE_API_KEY` in `.env` and restart the OMP service for Command Code.
 For Cursor, run `cursor-agent login` as the OMP service user; OAuth stays in
 `~/.cursor`. See [provider operations](docs/operations.md#omp-provider-setup).

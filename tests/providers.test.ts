@@ -189,7 +189,7 @@ test("secrets route only to Command Code and are redacted from generic output", 
   const env = {
     PATH: "/bin",
     HOME: "/home/test",
-    CMD_API_KEY: "test-command-secret",
+    COMMAND_CODE_API_KEY: "test-command-secret",
     CURSOR_CREDENTIALS: "test-cursor-secret",
     CURSOR_AUTH: "test-cursor-auth",
     DISCORD_BOT_TOKEN: "test-discord-secret",
@@ -204,8 +204,8 @@ test("secrets route only to Command Code and are redacted from generic output", 
     const child = providerEnvironment(provider, env);
     assert.equal(child.HOME, env.HOME);
     assert.equal(
-      child.CMD_API_KEY,
-      provider === "commandcode" ? env.CMD_API_KEY : undefined,
+      child.COMMAND_CODE_API_KEY,
+      provider === "commandcode" ? env.COMMAND_CODE_API_KEY : undefined,
     );
     for (const key of [
       "CURSOR_CREDENTIALS",
@@ -216,26 +216,31 @@ test("secrets route only to Command Code and are redacted from generic output", 
       assert.equal(child[key], undefined);
   }
   assert.equal(
+    providerEnvironment("commandcode", { CMD_API_KEY: "legacy-key" })
+      .COMMAND_CODE_API_KEY,
+    "legacy-key",
+  );
+  assert.equal(
     redactChat(
       '{"accessToken":"oauth-value","cursorCredentials":"credential-value"}',
     ),
     '{"accessToken":"[REDACTED]","cursorCredentials":"[REDACTED]"}',
   );
   const previous = {
-    CMD_API_KEY: process.env.CMD_API_KEY,
+    COMMAND_CODE_API_KEY: process.env.COMMAND_CODE_API_KEY,
     CURSOR_CREDENTIALS: process.env.CURSOR_CREDENTIALS,
   };
   try {
-    process.env.CMD_API_KEY = env.CMD_API_KEY;
+    process.env.COMMAND_CODE_API_KEY = env.COMMAND_CODE_API_KEY;
     process.env.CURSOR_CREDENTIALS = env.CURSOR_CREDENTIALS;
     assert.ok(
-      !redactChat(`${env.CMD_API_KEY} ${env.CURSOR_CREDENTIALS}`).includes(
-        "test-",
-      ),
+      !redactChat(
+        `${env.COMMAND_CODE_API_KEY} ${env.CURSOR_CREDENTIALS}`,
+      ).includes("test-"),
     );
     assert.ok(
       !redactChat(
-        "CMD_API_KEY=unknown-secret CURSOR_CREDENTIALS=unknown-oauth",
+        "COMMAND_CODE_API_KEY=unknown-secret CURSOR_CREDENTIALS=unknown-oauth",
       ).includes("unknown-"),
     );
   } finally {
@@ -253,7 +258,11 @@ test("readiness checks binary and provider authentication state", async () => {
   const loggedIn = async () => ({ stdout: "Logged in as test@example.com\n" });
   const loggedOut = async () => ({ stdout: "Not logged in\n" });
   assert.deepEqual(
-    await providerReadiness("commandcode", { CMD_API_KEY: "fake" }, exists),
+    await providerReadiness(
+      "commandcode",
+      { COMMAND_CODE_API_KEY: "fake" },
+      exists,
+    ),
     { binary: true, configured: true, authentication: "not_verified" },
   );
   assert.equal(
@@ -272,5 +281,8 @@ test("readiness checks binary and provider authentication state", async () => {
     false,
   );
   assert.match(providerFailure("cursor", 1), /cursor-agent login/);
-  assert.match(providerFailure("commandcode", 1), /CMD_API_KEY.*restart/);
+  assert.match(
+    providerFailure("commandcode", 1),
+    /COMMAND_CODE_API_KEY.*restart/,
+  );
 });

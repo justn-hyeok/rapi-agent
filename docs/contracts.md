@@ -147,4 +147,4 @@ CLI invocation uses argument arrays. `repo:write` maps to Codex
 callback signatures, state versions, and idempotency keys retain their contracts.
 Provider startup/authentication errors fail the receipt with actionable guidance.
 Secrets are filtered from child environments and redacted from execution logs,
-reports and failure messages; only Command Code receives `CMD_API_KEY`.
+reports and failure messages; only Command Code receives `COMMAND_CODE_API_KEY`.

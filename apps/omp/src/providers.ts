@@ -16,15 +16,19 @@ export function providerEnvironment(
   provider?: Provider,
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return Object.fromEntries(
+  const safe = Object.fromEntries(
     Object.entries(source).filter(
       ([key]) =>
-        (provider === "commandcode" && key === "CMD_API_KEY") ||
         !/TOKEN|SECRET|PASSWORD|API_KEY|DATABASE_URL|PRIVATE_KEY|CURSOR.*(?:AUTH|CREDENTIAL)|CREDENTIAL/i.test(
           key,
         ),
     ),
   );
+  const commandCodeKey =
+    source.COMMAND_CODE_API_KEY?.trim() || source.CMD_API_KEY?.trim();
+  return provider === "commandcode" && commandCodeKey
+    ? { ...safe, COMMAND_CODE_API_KEY: commandCodeKey }
+    : safe;
 }
 export function buildProviderCommand(
   spec: {
@@ -85,7 +89,7 @@ export function buildProviderCommand(
 export function providerFailure(provider: Provider, code: number): string {
   const help =
     provider === "commandcode"
-      ? "Check CMD_API_KEY in .env and restart the OMP service."
+      ? "Check COMMAND_CODE_API_KEY in .env and restart the OMP service."
       : provider === "cursor"
         ? "Run cursor-agent login as the OMP service user; check ~/.cursor OAuth credentials."
         : "Run codex login as the OMP service user.";
@@ -111,7 +115,10 @@ export async function providerReadiness(
   } catch {
     /* unavailable */
   }
-  if (provider === "commandcode") configured = Boolean(env.CMD_API_KEY?.trim());
+  if (provider === "commandcode")
+    configured = Boolean(
+      env.COMMAND_CODE_API_KEY?.trim() || env.CMD_API_KEY?.trim(),
+    );
   else if (provider === "cursor" && binary) {
     try {
       const result = await status(providerBinaries.cursor, ["status"]);

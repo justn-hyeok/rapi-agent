@@ -211,9 +211,9 @@ OMP uses installed CLI coding harnesses, not a direct model endpoint:
 | --- | --- | --- | --- |
 | `codex` (default) | `/usr/local/bin/codex` | `codex login` as service user | `--approve-for-me` |
 | `cursor` | `/home/justn/.local/bin/cursor-agent` | `cursor-agent login` as service user; OAuth under `~/.cursor` | `--force` |
-| `commandcode` | `/usr/local/bin/command-code` | `CMD_API_KEY` | `--yolo` |
+| `commandcode` | `/usr/local/bin/command-code` | `COMMAND_CODE_API_KEY` | `--yolo` |
 
-Put `CMD_API_KEY` in the production `.env` yourself, then restart the OMP service
+Put `COMMAND_CODE_API_KEY` in the production `.env` yourself, then restart the OMP service
 (`sudo systemctl restart rapi-omp`). Never paste keys into Discord or task specs.
 The key is passed only to the Command Code child environment, not Codex, Cursor,
 or Git children. OAuth credentials are not copied into clones or printed.
