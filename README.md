@@ -133,6 +133,16 @@ MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhoo
 
 ## 자연어 실행·상태·기억
 
+Discord access uses three ordered tiers. `USER` can search, receive briefings,
+manage personal subscriptions, ask questions, and manage personal memory.
+`ADMIN` additionally enables or disables ChatOps channels. `SUPERADMIN` can also
+run and cancel natural-language code changes and create, approve, or cancel OMP
+tasks. `DISCORD_ALLOWED_USER_IDS` remains a legacy superadmin list;
+`DISCORD_SUPERADMIN_USER_IDS`, `DISCORD_ADMIN_USER_IDS`, `DISCORD_USER_IDS`,
+`DISCORD_ADMIN_ROLE_IDS`, and `DISCORD_USER_ROLE_IDS` add explicit assignments.
+User IDs take precedence over role IDs, and a Discord role never grants
+`SUPERADMIN`.
+
 ```text
 라피야! 로그인 오류 고쳐줘
 라피야! 지금 뭐 하는 중이야?

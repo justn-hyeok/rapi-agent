@@ -71,6 +71,19 @@ const agent = new RapiAgent(
 );
 const commands = new DiscordCommandService(agent, {
   userIds: config.DISCORD_ALLOWED_USER_IDS,
+  ...(config.DISCORD_SUPERADMIN_USER_IDS
+    ? { superadminUserIds: config.DISCORD_SUPERADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_ADMIN_USER_IDS
+    ? { adminUserIds: config.DISCORD_ADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_USER_IDS ? { userUserIds: config.DISCORD_USER_IDS } : {}),
+  ...(config.DISCORD_ADMIN_ROLE_IDS
+    ? { adminRoleIds: config.DISCORD_ADMIN_ROLE_IDS }
+    : {}),
+  ...(config.DISCORD_USER_ROLE_IDS
+    ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
+    : {}),
   ...(config.DISCORD_ALLOWED_GUILD_IDS
     ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
     : {}),

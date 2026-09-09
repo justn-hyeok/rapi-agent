@@ -1,13 +1,35 @@
 import { mkdir } from "node:fs/promises";
 import WebSocket from "ws";
 import { loadEnvironment } from "@rapi/config";
-import { splitDiscordMessage } from "@rapi/core";
+import { assertDiscordAccess, splitDiscordMessage } from "@rapi/core";
 import { discordChatMessageSchema, redactChat } from "@rapi/contracts";
 import { PostgresStore, ChatOpsStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
 
 const config = loadEnvironment();
+const discordAccess = {
+  userIds: config.DISCORD_ALLOWED_USER_IDS,
+  ...(config.DISCORD_SUPERADMIN_USER_IDS
+    ? { superadminUserIds: config.DISCORD_SUPERADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_ADMIN_USER_IDS
+    ? { adminUserIds: config.DISCORD_ADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_USER_IDS ? { userUserIds: config.DISCORD_USER_IDS } : {}),
+  ...(config.DISCORD_ADMIN_ROLE_IDS
+    ? { adminRoleIds: config.DISCORD_ADMIN_ROLE_IDS }
+    : {}),
+  ...(config.DISCORD_USER_ROLE_IDS
+    ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
+    : {}),
+  ...(config.DISCORD_ALLOWED_GUILD_IDS
+    ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
+    : {}),
+  ...(config.DISCORD_ALLOWED_CHANNEL_IDS
+    ? { channelIds: config.DISCORD_ALLOWED_CHANNEL_IDS }
+    : {}),
+};
 const store = new PostgresStore(config.DATABASE_URL);
 const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
@@ -72,12 +94,25 @@ async function enqueue(raw: unknown): Promise<void> {
   if (
     message.author.bot ||
     !message.guild_id ||
-    !config.DISCORD_ALLOWED_USER_IDS.includes(message.author.id) ||
     !message.content.trimStart().startsWith("라피야!") ||
     !(await store.chatChannelEnabled(message.guild_id, message.channel_id))
   )
     return;
-  await chat.receive(message);
+  let accessLevel;
+  try {
+    accessLevel = assertDiscordAccess(
+      {
+        userId: message.author.id,
+        guildId: message.guild_id,
+        channelId: message.channel_id,
+        ...(message.member?.roles ? { roleIds: message.member.roles } : {}),
+      },
+      discordAccess,
+    );
+  } catch {
+    return;
+  }
+  await chat.receive(message, accessLevel);
 }
 
 let socket: WebSocket | undefined;

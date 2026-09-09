@@ -11,6 +11,7 @@ import {
   slashCommandDefinitions,
   verifyDiscordRequest,
 } from "../apps/bot/src/discord-http.js";
+import { requiredCommandAccess } from "../packages/agent/src/discord-commands.js";
 
 describe("external input boundaries", () => {
   it("verifies Discord Ed25519 requests", () => {
@@ -103,5 +104,56 @@ describe("external input boundaries", () => {
         { userIds: ["100"], guildIds: ["200"] },
       ),
     );
+  });
+
+  it("resolves USER, ADMIN and SUPERADMIN without role escalation", () => {
+    const policy = {
+      userIds: ["owner"],
+      adminRoleIds: ["admin-role"],
+      userRoleIds: ["user-role"],
+      guildIds: ["guild"],
+    };
+    assert.equal(
+      assertDiscordAccess({ userId: "owner", guildId: "guild" }, policy),
+      "superadmin",
+    );
+    assert.equal(
+      assertDiscordAccess(
+        { userId: "admin", guildId: "guild", roleIds: ["admin-role"] },
+        policy,
+      ),
+      "admin",
+    );
+    assert.equal(
+      assertDiscordAccess(
+        { userId: "member", guildId: "guild", roleIds: ["user-role"] },
+        policy,
+      ),
+      "user",
+    );
+    assert.throws(
+      () =>
+        assertDiscordAccess(
+          { userId: "member", guildId: "guild", roleIds: ["user-role"] },
+          policy,
+          "admin",
+        ),
+      /ADMIN/,
+    );
+    assert.throws(
+      () =>
+        assertDiscordAccess(
+          { userId: "intruder", guildId: "guild", roleIds: ["other"] },
+          policy,
+        ),
+      /not allowed/,
+    );
+  });
+
+  it("assigns command tiers", () => {
+    assert.equal(requiredCommandAccess("search"), "user");
+    assert.equal(requiredCommandAccess("chat_enable"), "admin");
+    assert.equal(requiredCommandAccess("task"), "superadmin");
+    assert.equal(requiredCommandAccess("approve"), "superadmin");
   });
 });

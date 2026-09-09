@@ -42,6 +42,11 @@ export const discordChatMessageSchema = z.object({
     id: z.string().min(1).max(100),
     bot: z.boolean().optional(),
   }),
+  member: z
+    .object({
+      roles: z.array(z.string().min(1).max(100)).default([]),
+    })
+    .optional(),
 });
 export type DiscordChatMessage = z.infer<typeof discordChatMessageSchema>;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);

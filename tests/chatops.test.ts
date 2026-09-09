@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { routeIntent, capabilities } from "../apps/chat/src/router.js";
-import { mayRetry, memoryPack } from "../apps/chat/src/orchestrator.js";
+import {
+  mayRetry,
+  memoryPack,
+  requiredChatAccess,
+} from "../apps/chat/src/orchestrator.js";
 import {
   cleanupArtifacts,
   codexEnvironment,
@@ -45,6 +49,15 @@ test("model directives use Spark by default and preserve explicit choices", () =
     explicit: true,
   });
   assert.throws(() => resolveCodexModel("gpt-6-astra;touch /tmp/x"));
+});
+
+test("natural-language execution remains SUPERADMIN-only", () => {
+  assert.equal(requiredChatAccess("answer"), "user");
+  assert.equal(requiredChatAccess("remember"), "user");
+  assert.equal(requiredChatAccess("status"), "user");
+  assert.equal(requiredChatAccess("execute"), "superadmin");
+  assert.equal(requiredChatAccess("loop"), "superadmin");
+  assert.equal(requiredChatAccess("cancel"), "superadmin");
 });
 
 const corpus: Array<[string, ChatRoute]> = [

@@ -1,6 +1,8 @@
 import {
   assertDiscordAccess,
+  assertDiscordLevel,
   splitDiscordMessage,
+  type DiscordAccessLevel,
   type DiscordAllowlists,
   type DiscordIdentity,
   type SubscriptionInput,
@@ -30,6 +32,14 @@ export interface DiscordCommand {
 export interface DiscordCommandResult {
   messages: string[];
   data?: Record<string, unknown>;
+}
+
+export function requiredCommandAccess(
+  command: DiscordCommand["name"],
+): DiscordAccessLevel {
+  if (["task", "approve", "cancel"].includes(command)) return "superadmin";
+  if (["chat_enable", "chat_disable"].includes(command)) return "admin";
+  return "user";
 }
 
 function requiredString(
@@ -69,7 +79,8 @@ export class DiscordCommandService {
     identity: DiscordIdentity,
     command: DiscordCommand,
   ): Promise<DiscordCommandResult> {
-    assertDiscordAccess(identity, this.allowlists);
+    const level = assertDiscordAccess(identity, this.allowlists);
+    assertDiscordLevel(level, requiredCommandAccess(command.name));
     const ownerId = identity.userId;
     switch (command.name) {
       case "subscribe": {

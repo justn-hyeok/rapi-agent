@@ -215,7 +215,7 @@ export function createDiscordInteractionServer(
       }
       const interaction = JSON.parse(body.toString("utf8")) as {
         type: number;
-        member?: { user?: { id?: string } };
+        member?: { user?: { id?: string }; roles?: string[] };
         user?: { id?: string };
         guild_id?: string;
         channel_id?: string;
@@ -272,6 +272,9 @@ export function createDiscordInteractionServer(
           ...(interaction.guild_id ? { guildId: interaction.guild_id } : {}),
           ...(interaction.channel_id
             ? { channelId: interaction.channel_id }
+            : {}),
+          ...(interaction.member?.roles
+            ? { roleIds: interaction.member.roles }
             : {}),
         },
         { name: commandName, options },

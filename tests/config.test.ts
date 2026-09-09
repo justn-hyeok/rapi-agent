@@ -13,8 +13,16 @@ const validEnvironment = {
 
 describe("environment configuration", () => {
   it("parses allowlists before application startup", () => {
-    const config = loadEnvironment(validEnvironment);
+    const config = loadEnvironment({
+      ...validEnvironment,
+      DISCORD_SUPERADMIN_USER_IDS: "100",
+      DISCORD_ADMIN_ROLE_IDS: "300",
+      DISCORD_USER_ROLE_IDS: "400,500",
+    });
     assert.deepEqual(config.DISCORD_ALLOWED_USER_IDS, ["100", "200"]);
+    assert.deepEqual(config.DISCORD_SUPERADMIN_USER_IDS, ["100"]);
+    assert.deepEqual(config.DISCORD_ADMIN_ROLE_IDS, ["300"]);
+    assert.deepEqual(config.DISCORD_USER_ROLE_IDS, ["400", "500"]);
   });
   it("reports invalid fields without exposing values", () => {
     assert.throws(
