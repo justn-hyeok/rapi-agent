@@ -1,7 +1,11 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import { defaultProviderModel, type Provider } from "@rapi/contracts";
+
+const execFileAsync = promisify(execFile);
 
 export const providerBinaries: Record<Provider, string> = {
   codex: "/usr/local/bin/codex",
@@ -91,6 +95,13 @@ export async function providerReadiness(
   provider: Provider,
   env: NodeJS.ProcessEnv = process.env,
   exists: (file: string, mode?: number) => Promise<void> = access,
+  status: (
+    file: string,
+    args: string[],
+  ) => Promise<{ stdout: string }> = async (file, args) =>
+    execFileAsync(file, args, { timeout: 5_000, env }) as Promise<{
+      stdout: string;
+    }>,
 ) {
   let binary = false;
   let configured = false;
@@ -101,14 +112,18 @@ export async function providerReadiness(
     /* unavailable */
   }
   if (provider === "commandcode") configured = Boolean(env.CMD_API_KEY?.trim());
-  else {
-    const config =
-      provider === "cursor"
-        ? path.join(env.HOME ?? "", ".cursor")
-        : path.join(
-            env.CODEX_HOME ?? path.join(env.HOME ?? "", ".codex"),
-            "auth.json",
-          );
+  else if (provider === "cursor" && binary) {
+    try {
+      const result = await status(providerBinaries.cursor, ["status"]);
+      configured = /^Logged in\b/im.test(result.stdout);
+    } catch {
+      /* login required */
+    }
+  } else if (provider === "codex") {
+    const config = path.join(
+      env.CODEX_HOME ?? path.join(env.HOME ?? "", ".codex"),
+      "auth.json",
+    );
     try {
       await exists(config);
       configured = true;

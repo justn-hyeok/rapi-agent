@@ -245,11 +245,13 @@ test("secrets route only to Command Code and are redacted from generic output", 
   }
 });
 
-test("readiness checks presence without credentials or network calls", async () => {
+test("readiness checks binary and provider authentication state", async () => {
   const exists = async () => {};
   const missing = async () => {
     throw new Error("missing");
   };
+  const loggedIn = async () => ({ stdout: "Logged in as test@example.com\n" });
+  const loggedOut = async () => ({ stdout: "Not logged in\n" });
   assert.deepEqual(
     await providerReadiness("commandcode", { CMD_API_KEY: "fake" }, exists),
     { binary: true, configured: true, authentication: "not_verified" },
@@ -260,8 +262,14 @@ test("readiness checks presence without credentials or network calls", async () 
   );
   assert.equal((await providerReadiness("cursor", {}, missing)).binary, false);
   assert.equal(
-    (await providerReadiness("cursor", { HOME: "/fake" }, exists)).configured,
+    (await providerReadiness("cursor", { HOME: "/fake" }, exists, loggedIn))
+      .configured,
     true,
+  );
+  assert.equal(
+    (await providerReadiness("cursor", { HOME: "/fake" }, exists, loggedOut))
+      .configured,
+    false,
   );
   assert.match(providerFailure("cursor", 1), /cursor-agent login/);
   assert.match(providerFailure("commandcode", 1), /CMD_API_KEY.*restart/);
