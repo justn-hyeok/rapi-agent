@@ -22,9 +22,16 @@ trap cleanup EXIT
 
 tables=$("${compose[@]}" exec -T postgres psql -U rapi -d rapi_restore_smoke -Atc \
   "SELECT count(*) FROM pg_tables WHERE schemaname='public';")
+chatops_tables=$("${compose[@]}" exec -T postgres psql -U rapi -d rapi_restore_smoke -Atc \
+  "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('chatops_runs', 'chatops_events', 'chatops_memory', 'chatops_memory_events');")
 if [[ "$tables" -lt 19 ]]; then
   echo "Restore smoke expected at least 19 tables, found $tables" >&2
   exit 1
 fi
 
-echo "Backup restore verified: $tables tables."
+if [[ "$chatops_tables" -ne 4 ]]; then
+  echo "Restore smoke expected all 4 ChatOps capability tables, found $chatops_tables" >&2
+  exit 1
+fi
+
+echo "Backup restore verified: $tables tables including 4 ChatOps tables."

@@ -53,7 +53,8 @@ export class PostgresStore {
     if (!database.rows[0]?.name.endsWith("_test"))
       throw new Error("Refusing to reset a database without an _test suffix");
     await this.pool
-      .query(`TRUNCATE chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
+      .query(`TRUNCATE chatops_memory_events, chatops_memory, chatops_events, chatops_runs,
+      chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
       task_requests, mdx_publications, delivery_attempts, delivery_batch_items, delivery_batches,
       subscriptions, summaries, classifications, item_relations, source_items, queue_jobs,
       source_cursors, raw_events, sources RESTART IDENTITY CASCADE`);
