@@ -123,7 +123,9 @@ export async function providerReadiness(
   else if (provider === "cursor" && binary) {
     try {
       const result = await status(providerBinaries.cursor, ["status"]);
-      configured = /^Logged in\b/im.test(result.stdout);
+      configured =
+        !/\bNot logged in\b/i.test(result.stdout) &&
+        /\bLogged in\b/i.test(result.stdout);
     } catch {
       /* login required */
     }

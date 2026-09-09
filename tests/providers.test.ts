@@ -256,7 +256,9 @@ test("readiness checks binary and provider authentication state", async () => {
   const missing = async () => {
     throw new Error("missing");
   };
-  const loggedIn = async () => ({ stdout: "Logged in as test@example.com\n" });
+  const loggedIn = async () => ({
+    stdout: "✓ Logged in as test@example.com\n",
+  });
   const loggedOut = async () => ({ stdout: "Not logged in\n" });
   assert.deepEqual(
     await providerReadiness(
