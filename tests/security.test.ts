@@ -82,11 +82,18 @@ describe("external input boundaries", () => {
     const approve = slashCommandDefinitions.find(
       (command) => command.name === "승인",
     );
+    const task = slashCommandDefinitions.find(
+      (command) => command.name === "작업",
+    );
     assert.deepEqual(
       subscribe?.options?.map((option) => option.name),
       ["이름", "키워드", "분야", "주기"],
     );
     assert.equal(approve?.options, undefined);
+    assert.deepEqual(
+      task?.options?.map((option) => option.name),
+      ["내용", "모델"],
+    );
   });
 
   it("allows every channel when no channel allowlist is configured", () => {

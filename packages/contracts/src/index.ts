@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { codexModelSchema, DEFAULT_CODEX_MODEL } from "./models.js";
 
 export const visibilitySchema = z.enum(["private", "unlisted", "public"]);
 export const deliveryStateSchema = z.enum([
@@ -43,6 +44,7 @@ export const taskSpecificationSchema = z.object({
   repository: z.string().min(1),
   base_revision: z.string().min(1),
   workspace_ref: z.string().min(1),
+  model: codexModelSchema.default(DEFAULT_CODEX_MODEL),
   goal: z.string().min(1),
   non_goals: z.array(z.string()),
   requirements: z.array(z.string().min(1)).min(1),
@@ -76,3 +78,4 @@ export type TaskSpecification = z.infer<typeof taskSpecificationSchema>;
 export type ExecutionCallback = z.infer<typeof executionCallbackSchema>;
 
 export * from "./chatops.js";
+export * from "./models.js";

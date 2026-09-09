@@ -6,6 +6,7 @@ import {
   type SubscriptionInput,
 } from "@rapi/core";
 import { RapiAgent } from "./rapi-agent.js";
+import { parseModelDirective, resolveCodexModel } from "@rapi/contracts";
 
 export const slashCommands = [
   "brief",
@@ -187,12 +188,17 @@ export class DiscordCommandService {
           | Record<string, unknown>
           | undefined;
         const content = optionalString(command.options, "content");
+        const requestedModel = optionalString(command.options, "model");
+        const parsed = content ? parseModelDirective(content) : undefined;
         const specification =
           supplied ??
           (content
             ? {
-                goal: content,
-                requirements: [content],
+                goal: parsed!.task,
+                requirements: [parsed!.task],
+                model: requestedModel
+                  ? resolveCodexModel(requestedModel)
+                  : parsed!.model,
                 acceptance_criteria: [
                   "요청한 변경을 완료한다.",
                   "관련 검사를 통과한다.",

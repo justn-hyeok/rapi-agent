@@ -4,6 +4,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
+import { resolveCodexModel } from "@rapi/contracts";
 import type {
   DeliveryAdapter,
   DeliveryTarget,
@@ -268,7 +269,18 @@ export class RapiAgent {
     )
       ? "high"
       : "low";
-    return this.store.createTask(requesterId, specification, risk);
+    return this.store.createTask(
+      requesterId,
+      {
+        ...specification,
+        model: resolveCodexModel(
+          typeof specification.model === "string"
+            ? specification.model
+            : undefined,
+        ),
+      },
+      risk,
+    );
   }
 
   approveTask(

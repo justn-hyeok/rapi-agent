@@ -20,5 +20,7 @@ done
 # The new migration must also tolerate reapplication after an interrupted migrator.
 "${compose[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U rapi -d rapi_test \
   < packages/db/migrations/0004_chatops_capabilities.sql >/dev/null
+"${compose[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U rapi -d rapi_test \
+  < packages/db/migrations/0005_chatops_model_routing.sql >/dev/null
 DATABASE_URL="postgresql://rapi:rapi-local-only@127.0.0.1:$test_port/rapi_test" \
   ./node_modules/.bin/tsx --test --test-concurrency=1 tests/e2e/*.test.ts

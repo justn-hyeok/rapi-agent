@@ -1,4 +1,5 @@
 import {
+  parseModelDirective,
   redactChat,
   type ChatScope,
   type ChatRun,
@@ -51,7 +52,7 @@ export function renderRun(run: ChatRun): string {
     interrupted: "작업 상태 확인 후 명시적으로 재요청",
   };
   const e = run.evidence;
-  return `${run.id}: ${labels[run.phase]}\n확신: ${["reported_done", "interrupted", "cancel_requested"].includes(run.phase) ? "목표/종료 미확정" : "저장된 관찰 기준"} · 다음: ${next[run.phase]}\n근거: 시도 ${e.attempt ?? 0}, 종료 ${e.exitCode ?? "미관찰"}${e.reason ? `, ${e.reason}` : ""}${e.after ? `, Git ${e.after.head.slice(0, 8)}` : ""}${e.verification ? `, diff 검사 ${e.verification.exitCode === 0 ? "통과" : "실패"}` : " · 검사 미관찰"}`;
+  return `${run.id}: ${labels[run.phase]}\n모델: ${run.model} · 확신: ${["reported_done", "interrupted", "cancel_requested"].includes(run.phase) ? "목표/종료 미확정" : "저장된 관찰 기준"} · 다음: ${next[run.phase]}\n근거: 시도 ${e.attempt ?? 0}, 종료 ${e.exitCode ?? "미관찰"}${e.reason ? `, ${e.reason}` : ""}${e.after ? `, Git ${e.after.head.slice(0, 8)}` : ""}${e.verification ? `, diff 검사 ${e.verification.exitCode === 0 ? "통과" : "실패"}` : " · 검사 미관찰"}`;
 }
 export function mayRetry(
   result: ProcessResult,
@@ -106,11 +107,19 @@ export class ChatOrchestrator {
       channel: message.channel_id,
       owner: message.author.id,
     };
-    const text = redactChat(
+    const rawText = redactChat(
       message.content.trimStart().replace(/^라피야!\s*/, ""),
     ).slice(0, 20000);
+    const selection = parseModelDirective(rawText);
+    const text = selection.task;
     const route = routeIntent(text);
-    const admission = await this.store.claim(scope, message.id, text, route);
+    const admission = await this.store.claim(
+      scope,
+      message.id,
+      text,
+      route,
+      selection.model,
+    );
     if (!admission.inserted) return;
     if (route === "status") {
       const runs = await this.store.recent(scope);
@@ -201,6 +210,7 @@ export class ChatOrchestrator {
             : route === "execute"
               ? "execute"
               : "answer",
+          selection.model,
         );
         try {
           await active.done;
@@ -229,6 +239,7 @@ export class ChatOrchestrator {
     prepared: ChatRun | undefined,
     text: string,
     route: "execute" | "loop" | "answer",
+    model: string,
   ): Promise<void> {
     let run: ChatRun | undefined = prepared;
     const start = Date.now();
@@ -301,6 +312,7 @@ export class ChatOrchestrator {
                 ? "\n이전 시도는 실패했지만 Git 변화가 관찰됐다. 현재 변경을 확인하고 남은 실패를 해결한다."
                 : ""),
             execute: route !== "answer",
+            model,
             signal: active.controller.signal,
             timeoutMs: Math.min(
               180000,

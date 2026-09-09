@@ -3,13 +3,14 @@ import { mkdtemp, readFile, rm, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
+  DEFAULT_CODEX_MODEL,
   redactChat,
   textDigest,
   type GitObservation,
   type RunEvidence,
 } from "@rapi/contracts";
 const exec = promisify(execFile);
-export const MODEL = "gpt-6-astra";
+export const MODEL = DEFAULT_CODEX_MODEL;
 export type ProcessResult = {
   exitCode: number | null;
   signal: string | null;
@@ -147,6 +148,7 @@ export async function cleanupArtifacts(workspace: string): Promise<void> {
 }
 export type ExecuteInput = {
   prompt: string;
+  model?: string;
   execute: boolean;
   signal: AbortSignal;
   timeoutMs: number;
@@ -201,7 +203,7 @@ export class CodexExecutor implements Executor {
           "--ignore-user-config",
           "--ephemeral",
           "--model",
-          MODEL,
+          input.model ?? MODEL,
           ...(input.execute
             ? ["--dangerously-bypass-approvals-and-sandbox"]
             : ["--sandbox", "read-only"]),

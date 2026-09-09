@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { codexModelSchema } from "./models.js";
 
 export const chatRouteSchema = z.enum([
   "answer",
@@ -92,7 +93,7 @@ export const chatRunSchema = z.object({
   message_id: z.string(),
   route: z.enum(["execute", "loop"]),
   phase: runPhaseSchema,
-  model: z.literal("gpt-6-astra"),
+  model: codexModelSchema,
   task_digest: digestSchema,
   created_at: z.coerce.date(),
   updated_at: z.coerce.date(),

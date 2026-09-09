@@ -238,6 +238,7 @@ test("Discord duplicate admission, live status and actual cancellation bypass qu
     await ready;
     await chat.receive(request);
     assert.equal(calls, 1);
+    assert.equal((await store.recent(s))[0]?.model, "gpt-5.3-codex-spark");
     await chat.receive(message("지금 뭐 하는 중이야?"));
     assert.ok(output.some((text) => text.includes("실행 중")));
     assert.ok(
@@ -417,11 +418,14 @@ test("explicit memory UX is deduplicated and injected as bounded data into read-
     assert.ok(output[0]?.includes(memories[0]!.id));
     await chat.receive(message("어떤 언어가 좋아?"));
     assert.equal(prompts.length, 1);
-    assert.equal(prompts[0]?.execute, false);
+    assert.equal(prompts[0].execute, false);
+    assert.equal(prompts[0].model, "gpt-5.3-codex-spark");
     assert.ok(prompts[0].prompt.includes(memories[0]!.digest));
+    await chat.receive(message("아스트라로 어떤 언어가 좋아?"));
+    assert.equal(prompts[1].model, "gpt-6-astra");
     await chat.receive(message(`기억 ${memories[0]!.id} 잊어줘`));
     assert.equal((await store.memories(s)).length, 0);
-    assert.equal(prompts.length, 1);
+    assert.equal(prompts.length, 2);
   } finally {
     await chat.shutdown();
     await db.close();

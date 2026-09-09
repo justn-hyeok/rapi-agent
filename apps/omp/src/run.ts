@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { codexModelSchema, DEFAULT_CODEX_MODEL } from "@rapi/contracts";
 
 const permissionSchema = z.enum([
   "repo:read",
@@ -30,6 +31,7 @@ const specificationSchema = z
     approval_id: z.string().min(1),
     approval_expires_at: z.string().datetime({ offset: true }),
     workspace_ref: z.string().min(1),
+    model: codexModelSchema.default(DEFAULT_CODEX_MODEL),
     goal: z.string().min(1),
     repository: z.string().min(1).optional(),
     base_revision: z.string().min(1).default("HEAD"),
@@ -327,6 +329,8 @@ async function execute(receipt: Receipt): Promise<void> {
         "exec",
         "--ignore-user-config",
         "--ephemeral",
+        "--model",
+        specification.model,
         ...sandboxArguments,
         "--color",
         "never",

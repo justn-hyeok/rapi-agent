@@ -375,6 +375,23 @@ describe("rapi-agent MVP", () => {
         omp.dispatches.at(-1)?.specification.goal,
         "한글로 간단한 작업을 수행한다",
       );
+      assert.equal(
+        omp.dispatches.at(-1)?.specification.model,
+        "gpt-5.3-codex-spark",
+      );
+
+      const astraTask = await commands.execute(
+        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
+        {
+          name: "task",
+          options: { content: "오류를 고친다", model: "아스트라" },
+        },
+      );
+      await commands.execute(
+        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
+        { name: "approve", options: { taskId: astraTask.data?.taskId } },
+      );
+      assert.equal(omp.dispatches.at(-1)?.specification.model, "gpt-6-astra");
 
       await assert.rejects(
         commands.execute(

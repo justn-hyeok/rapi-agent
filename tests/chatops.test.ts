@@ -14,11 +14,38 @@ import {
   runProcess,
 } from "../apps/chat/src/executor.js";
 import {
+  DEFAULT_CODEX_MODEL,
+  parseModelDirective,
+  resolveCodexModel,
   redactChat,
   textDigest,
   runEvidenceSchema,
   type ChatRoute,
 } from "@rapi/contracts";
+
+test("model directives use Spark by default and preserve explicit choices", () => {
+  assert.deepEqual(parseModelDirective("오류 고쳐줘"), {
+    model: DEFAULT_CODEX_MODEL,
+    task: "오류 고쳐줘",
+    explicit: false,
+  });
+  assert.deepEqual(parseModelDirective("아스트라로 오류 고쳐줘"), {
+    model: "gpt-6-astra",
+    task: "오류 고쳐줘",
+    explicit: true,
+  });
+  assert.deepEqual(parseModelDirective("모델: gpt-5.6-sol 오류 고쳐줘"), {
+    model: "gpt-5.6-sol",
+    task: "오류 고쳐줘",
+    explicit: true,
+  });
+  assert.deepEqual(parseModelDirective("오류 고쳐줘, 모델: 아스트라"), {
+    model: "gpt-6-astra",
+    task: "오류 고쳐줘",
+    explicit: true,
+  });
+  assert.throws(() => resolveCodexModel("gpt-6-astra;touch /tmp/x"));
+});
 
 const corpus: Array<[string, ChatRoute]> = [
   ["라피야! 오류 고쳐줘", "execute"],

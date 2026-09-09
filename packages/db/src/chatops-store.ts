@@ -23,6 +23,7 @@ export class ChatOpsStore {
     message: string,
     text: string,
     route: ChatRoute,
+    model: string,
   ): Promise<{ inserted: boolean; run?: ChatRun }> {
     scopeSchema.parse(scope);
     const safe = redactChat(text).slice(0, 20000);
@@ -34,7 +35,7 @@ export class ChatOpsStore {
       if (!claim.rowCount) return { inserted: false };
       if (route !== "execute" && route !== "loop") return { inserted: true };
       const result = await client.query(
-        `INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1,$2,$3,$4,$5,$6,'gpt-6-astra',$7) RETURNING *`,
+        `INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
         [
           randomUUID(),
           scope.guild,
@@ -42,6 +43,7 @@ export class ChatOpsStore {
           scope.owner,
           message,
           route,
+          model,
           textDigest(safe),
         ],
       );
@@ -53,10 +55,11 @@ export class ChatOpsStore {
     message: string,
     route: "execute" | "loop",
     task: string,
+    model = "gpt-5.3-codex-spark",
   ): Promise<ChatRun | undefined> {
     scopeSchema.parse(scope);
     const result = await this.db.pool.query(
-      `INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1,$2,$3,$4,$5,$6,'gpt-6-astra',$7) ON CONFLICT(message_id) DO NOTHING RETURNING *`,
+      `INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(message_id) DO NOTHING RETURNING *`,
       [
         randomUUID(),
         scope.guild,
@@ -64,6 +67,7 @@ export class ChatOpsStore {
         scope.owner,
         message,
         route,
+        model,
         textDigest(redactChat(task).slice(0, 20000)),
       ],
     );

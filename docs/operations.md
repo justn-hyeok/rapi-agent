@@ -198,3 +198,7 @@ Docker volume `rapi-postgres`는 애플리케이션 컨테이너 교체와 분�
 테스트를 직접 실행할 때도 정확히 `rapi_test` 이름이 아니면 거부한다.
 상태 조회, 실제 취소, interrupted 복구와 알려진 한계는
 [운영 상세](chatops-capabilities.md)를 참고한다.
+
+기본 실행 모델은 `gpt-5.3-codex-spark`다. ChatOps 요청의 `아스트라로 …`,
+`…, 모델: gpt-6-astra` 또는 `/작업`의 선택 항목 `모델`로 실행별 모델을 지정한다.
+선택 결과는 ChatOps 실행 행 또는 OMP 작업 명세에 저장한다.
