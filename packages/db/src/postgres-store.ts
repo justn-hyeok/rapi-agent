@@ -47,6 +47,11 @@ export class PostgresStore {
   }
 
   async resetForTests(): Promise<void> {
+    const database = await this.pool.query<{ name: string }>(
+      "SELECT current_database() AS name",
+    );
+    if (!database.rows[0]?.name.endsWith("_test"))
+      throw new Error("Refusing to reset a database without an _test suffix");
     await this.pool
       .query(`TRUNCATE chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
       task_requests, mdx_publications, delivery_attempts, delivery_batch_items, delivery_batches,

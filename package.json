@@ -29,7 +29,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
-    "test:e2e": "tsx --test tests/e2e/*.test.ts",
+    "test:e2e": "./scripts/test-e2e.sh",
     "typecheck": "tsc -b --pretty false",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "audit:prod": "npm audit --omit=dev --audit-level=high"
