@@ -12,6 +12,7 @@ const store = new PostgresStore(config.DATABASE_URL);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
 const prefix = "라피야!";
+const model = "gpt-6-astra";
 const intents = (1 << 0) | (1 << 9) | (1 << 15);
 
 await mkdir(chatWorkspace, { recursive: true });
@@ -40,7 +41,8 @@ async function answerWithCodex(
     "항상 자연스러운 한국어로 직접 답한다.",
     "일반 질문, 서버 운영, 현재 코드베이스 질문에 모두 답한다.",
     "간결하게 답하되 필요한 명령이나 근거는 구체적으로 쓴다.",
-    "코드 변경이나 배포 요청은 직접 실행하지 말고 `/작업` 후 `/승인`을 사용하도록 안내한다.",
+    "허용된 사용자가 요청한 서버 운영, 코드 수정, 테스트, 배포 작업은 필요한 도구를 사용해 직접 끝까지 수행한다.",
+    "비밀값과 인증 정보는 읽거나 답변에 노출하지 않는다.",
     "현재 대화:",
     ...messages.map((message) =>
       message.role === "user"
@@ -58,8 +60,9 @@ async function answerWithCodex(
           "exec",
           "--ignore-user-config",
           "--ephemeral",
-          "--sandbox",
-          "read-only",
+          "--model",
+          model,
+          "--dangerously-bypass-approvals-and-sandbox",
           "--color",
           "never",
           "--output-last-message",

@@ -11,11 +11,7 @@ WorkingDirectory=/home/justn/rapi-agent
 ExecStart=/usr/local/bin/npm run start:chat
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/justn/rapi-chat /home/justn/.codex
 
 [Install]
 WantedBy=multi-user.target
