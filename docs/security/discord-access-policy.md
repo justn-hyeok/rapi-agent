@@ -12,12 +12,15 @@ allowlist에 더해 `DISCORD_ALLOWED_GUILD_IDS`와 `DISCORD_ALLOWED_CHANNEL_IDS`
 `DISCORD_ADMIN_USER_IDS`와 `DISCORD_ADMIN_ROLE_IDS`는 ADMIN,
 `DISCORD_USER_IDS`와 `DISCORD_USER_ROLE_IDS`는 USER를 부여한다. SUPERADMIN은
 Discord 역할만으로 부여하지 않고 명시적인 사용자 ID로만 부여한다.
+`DISCORD_GUILD_MEMBERS_ARE_USERS=true`이면 허용된 guild에서 Discord가 확인한
+멤버는 별도 등록 없이 USER다. 해당 멤버가 Discord Administrator 권한을 가진
+역할을 받으면 ADMIN으로 판정한다. 이 승격은 SUPERADMIN에는 적용되지 않는다.
 
-| 등급 | 허용 범위 |
-| --- | --- |
-| USER | 브리핑, 검색, 개인 구독, 상태 조회, 자연어 질문과 개인 기억 |
-| ADMIN | USER 기능과 ChatOps 채널 활성화·비활성화 |
-| SUPERADMIN | ADMIN 기능과 코드 실행·반복·취소, OMP 작업·승인·취소 |
+| 등급       | 허용 범위                                                   |
+| ---------- | ----------------------------------------------------------- |
+| USER       | 브리핑, 검색, 개인 구독, 상태 조회, 자연어 질문과 개인 기억 |
+| ADMIN      | USER 기능과 ChatOps 채널 활성화·비활성화                    |
+| SUPERADMIN | ADMIN 기능과 코드 실행·반복·취소, OMP 작업·승인·취소        |
 
 권한 검사는 자연어 처리나 명령 라우팅보다 먼저 수행한다. ID가 없거나 형식이
 잘못된 설정은 기동 전에 거부한다. 거부된 요청은 민감한 payload 없이 사용자,

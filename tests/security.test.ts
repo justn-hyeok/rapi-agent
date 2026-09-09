@@ -150,6 +150,37 @@ describe("external input boundaries", () => {
     );
   });
 
+  it("registers guild members as USER and honors Discord administrator roles", () => {
+    const policy = {
+      userIds: ["owner"],
+      guildIds: ["guild"],
+      guildMembersAreUsers: true,
+    };
+    assert.equal(
+      assertDiscordAccess(
+        { userId: "member", guildId: "guild", roleIds: [] },
+        policy,
+      ),
+      "user",
+    );
+    assert.equal(
+      assertDiscordAccess(
+        {
+          userId: "moderator",
+          guildId: "guild",
+          roleIds: ["some-role"],
+          guildPermissions: "8",
+        },
+        policy,
+      ),
+      "admin",
+    );
+    assert.throws(
+      () => assertDiscordAccess({ userId: "dm-user" }, policy),
+      /not allowed/,
+    );
+  });
+
   it("assigns command tiers", () => {
     assert.equal(requiredCommandAccess("search"), "user");
     assert.equal(requiredCommandAccess("chat_enable"), "admin");

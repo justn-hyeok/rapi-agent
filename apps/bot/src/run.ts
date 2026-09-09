@@ -84,6 +84,7 @@ const commands = new DiscordCommandService(agent, {
   ...(config.DISCORD_USER_ROLE_IDS
     ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
     : {}),
+  guildMembersAreUsers: config.DISCORD_GUILD_MEMBERS_ARE_USERS,
   ...(config.DISCORD_ALLOWED_GUILD_IDS
     ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
     : {}),

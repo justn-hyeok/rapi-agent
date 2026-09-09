@@ -142,6 +142,10 @@ tasks. `DISCORD_ALLOWED_USER_IDS` remains a legacy superadmin list;
 `DISCORD_ADMIN_ROLE_IDS`, and `DISCORD_USER_ROLE_IDS` add explicit assignments.
 User IDs take precedence over role IDs, and a Discord role never grants
 `SUPERADMIN`.
+With `DISCORD_GUILD_MEMBERS_ARE_USERS=true`, every member of an allowed guild is
+automatically treated as `USER`. Granting that member any Discord role with the
+Administrator permission raises them to `ADMIN`; the bot refreshes guild role
+permissions at most once per minute for natural-language messages.
 
 ```text
 라피야! 로그인 오류 고쳐줘

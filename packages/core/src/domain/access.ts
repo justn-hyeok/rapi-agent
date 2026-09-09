@@ -3,6 +3,7 @@ export interface DiscordIdentity {
   guildId?: string;
   channelId?: string;
   roleIds?: readonly string[];
+  guildPermissions?: string;
 }
 
 export type DiscordAccessLevel = "user" | "admin" | "superadmin";
@@ -15,6 +16,7 @@ export interface DiscordAllowlists {
   userUserIds?: readonly string[];
   adminRoleIds?: readonly string[];
   userRoleIds?: readonly string[];
+  guildMembersAreUsers?: boolean;
   guildIds?: readonly string[];
   channelIds?: readonly string[];
 }
@@ -50,17 +52,30 @@ export function assertDiscordAccess(
     }
   }
   const roles = identity.roleIds ?? [];
+  let discordAdministrator: boolean;
+  try {
+    discordAdministrator =
+      identity.guildPermissions !== undefined &&
+      (BigInt(identity.guildPermissions) & (1n << 3n)) !== 0n;
+  } catch {
+    throw new Error("Discord permissions are invalid");
+  }
   const level: DiscordAccessLevel | undefined =
     allowlists.userIds.includes(identity.userId) ||
     allowlists.superadminUserIds?.includes(identity.userId)
       ? "superadmin"
-      : allowlists.adminUserIds?.includes(identity.userId) ||
+      : discordAdministrator ||
+          allowlists.adminUserIds?.includes(identity.userId) ||
           allowlists.adminRoleIds?.some((role) => roles.includes(role))
         ? "admin"
         : allowlists.userUserIds?.includes(identity.userId) ||
             allowlists.userRoleIds?.some((role) => roles.includes(role))
           ? "user"
-          : undefined;
+          : allowlists.guildMembersAreUsers &&
+              identity.guildId !== undefined &&
+              identity.roleIds !== undefined
+            ? "user"
+            : undefined;
   if (!level) throw new Error("Discord user is not allowed");
   assertDiscordLevel(level, required);
   return level;

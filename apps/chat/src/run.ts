@@ -23,6 +23,7 @@ const discordAccess = {
   ...(config.DISCORD_USER_ROLE_IDS
     ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
     : {}),
+  guildMembersAreUsers: config.DISCORD_GUILD_MEMBERS_ARE_USERS,
   ...(config.DISCORD_ALLOWED_GUILD_IDS
     ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
     : {}),
@@ -87,6 +88,36 @@ async function sendMessage(
   return message.id;
 }
 
+const roleCache = new Map<
+  string,
+  { expiresAt: number; permissions: Map<string, bigint> }
+>();
+
+async function guildPermissions(
+  guildId: string,
+  roleIds: readonly string[],
+): Promise<string> {
+  let cached = roleCache.get(guildId);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    const response = await discordRequest(`/guilds/${guildId}/roles`);
+    const roles = (await response.json()) as Array<{
+      id: string;
+      permissions: string;
+    }>;
+    cached = {
+      expiresAt: Date.now() + 60_000,
+      permissions: new Map(
+        roles.map((role) => [role.id, BigInt(role.permissions)]),
+      ),
+    };
+    roleCache.set(guildId, cached);
+  }
+  let permissions = cached.permissions.get(guildId) ?? 0n;
+  for (const roleId of roleIds)
+    permissions |= cached.permissions.get(roleId) ?? 0n;
+  return permissions.toString();
+}
+
 async function enqueue(raw: unknown): Promise<void> {
   const parsed = discordChatMessageSchema.safeParse(raw);
   if (!parsed.success) return;
@@ -100,12 +131,14 @@ async function enqueue(raw: unknown): Promise<void> {
     return;
   let accessLevel;
   try {
+    const roles = message.member?.roles ?? [];
     accessLevel = assertDiscordAccess(
       {
         userId: message.author.id,
         guildId: message.guild_id,
         channelId: message.channel_id,
-        ...(message.member?.roles ? { roleIds: message.member.roles } : {}),
+        roleIds: roles,
+        guildPermissions: await guildPermissions(message.guild_id, roles),
       },
       discordAccess,
     );
