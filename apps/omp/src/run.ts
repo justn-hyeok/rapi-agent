@@ -1,3 +1,4 @@
+import { specificationSchema, type Specification } from "./specification.js";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer, type ServerResponse } from "node:http";
@@ -11,45 +12,21 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
-import { codexModelSchema, DEFAULT_CODEX_MODEL } from "@rapi/contracts";
+import { redactChat } from "@rapi/contracts";
+import {
+  assertProviderReady,
+  buildProviderCommand,
+  providerEnvironment,
+  providerFailure,
+  providerReadiness,
+} from "./providers.js";
 
-const permissionSchema = z.enum([
-  "repo:read",
-  "repo:write",
-  "commit:create",
-  "push",
-  "pull_request:create",
-  "deploy",
-]);
-
-const specificationSchema = z
-  .object({
-    task_id: z.string().min(1),
-    task_revision: z.number().int().positive(),
-    execution_attempt_id: z.string().min(1),
-    approval_id: z.string().min(1),
-    approval_expires_at: z.string().datetime({ offset: true }),
-    workspace_ref: z.string().min(1),
-    model: codexModelSchema.default(DEFAULT_CODEX_MODEL),
-    goal: z.string().min(1),
-    repository: z.string().min(1).optional(),
-    base_revision: z.string().min(1).default("HEAD"),
-    non_goals: z.array(z.string()).default([]),
-    requirements: z.array(z.string()).default([]),
-    acceptance_criteria: z.array(z.string()).default([]),
-    permissions: z.array(permissionSchema).default([]),
-    forbidden_actions: z.array(z.string()).default([]),
-    timeout_seconds: z.number().int().min(30).max(7200).default(1800),
-  })
-  .passthrough();
-
-type Specification = z.infer<typeof specificationSchema>;
 type Receipt = {
   idempotencyKey: string;
   receiptId: string;
   specification: Specification;
   state: "accepted" | "running" | "completed" | "failed";
+  reason?: string;
 };
 
 const port = Number(process.env.OMP_PORT ?? "3200");
@@ -124,7 +101,7 @@ async function run(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: options.env ?? process.env,
+      env: options.env ?? providerEnvironment(),
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdout: Buffer[] = [];
@@ -174,21 +151,6 @@ async function resolveRepository(
   ]);
   if (result.code !== 0) throw new Error("Repository is not a Git worktree");
   return result.stdout.trim();
-}
-
-function codexEnvironment(): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => {
-      const upper = key.toUpperCase();
-      return !(
-        upper.includes("TOKEN") ||
-        upper.includes("SECRET") ||
-        upper.includes("PASSWORD") ||
-        upper.includes("API_KEY") ||
-        upper === "DATABASE_URL"
-      );
-    }),
-  );
 }
 
 async function sendCallback(
@@ -260,10 +222,11 @@ async function execute(receipt: Receipt): Promise<void> {
   receipt.state = "running";
   await saveReceipt(receipt);
   await sendCallback(receipt, 1, "running");
-  const specification = receipt.specification;
+  const specification = specificationSchema.parse(receipt.specification);
   let workspace = "";
   let reportPath = "";
   try {
+    await assertProviderReady(specification.provider);
     const repository = await resolveRepository(specification);
     workspace = path.join(
       workspaceRoot,
@@ -320,39 +283,37 @@ async function execute(receipt: Receipt): Promise<void> {
       "rev-parse",
       "HEAD",
     ]);
-    const sandboxArguments = specification.permissions.includes("repo:write")
-      ? ["--approve-for-me"]
-      : ["--sandbox", "read-only"];
-    const codex = await run(
-      "/usr/local/bin/codex",
-      [
-        "exec",
-        "--ignore-user-config",
-        "--ephemeral",
-        "--model",
-        specification.model,
-        ...sandboxArguments,
-        "--color",
-        "never",
-        "--output-last-message",
-        reportPath,
-        "-C",
-        workspace,
-        "-",
-      ],
-      {
-        cwd: workspace,
-        input: promptFor(specification),
-        timeoutMs: specification.timeout_seconds * 1000,
-        env: codexEnvironment(),
-      },
+    const command = buildProviderCommand(
+      specification,
+      workspace,
+      reportPath,
+      promptFor(specification),
     );
+    const result = await run(command.command, command.args, {
+      cwd: workspace,
+      ...(command.input === undefined ? {} : { input: command.input }),
+      timeoutMs: specification.timeout_seconds * 1000,
+      env: providerEnvironment(specification.provider),
+    });
     const logPath = path.join(workspace, "omp-execution.log");
-    await writeFile(logPath, `${codex.stdout}\n${codex.stderr}`, {
+    await writeFile(logPath, redactChat(`${result.stdout}\n${result.stderr}`), {
       mode: 0o600,
     });
-    if (codex.code !== 0)
-      throw new Error(`Codex exited with status ${codex.code}`);
+    if (command.stdoutReport) {
+      await writeFile(reportPath, redactChat(result.stdout), { mode: 0o600 });
+    } else {
+      try {
+        await writeFile(
+          reportPath,
+          redactChat(await readFile(reportPath, "utf8")),
+          { mode: 0o600 },
+        );
+      } catch (error) {
+        if (result.code === 0) throw error;
+      }
+    }
+    if (result.code !== 0)
+      throw new Error(providerFailure(specification.provider, result.code));
 
     let revision = await run("git", ["-C", workspace, "rev-parse", "HEAD"]);
     if (
@@ -401,9 +362,11 @@ async function execute(receipt: Receipt): Promise<void> {
       ],
     });
   } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "OMP execution failed";
+    const reason = redactChat(
+      error instanceof Error ? error.message : "OMP execution failed",
+    );
     receipt.state = "failed";
+    receipt.reason = reason;
     await saveReceipt(receipt);
     try {
       await sendCallback(receipt, 2, "failed", {
@@ -413,7 +376,7 @@ async function execute(receipt: Receipt): Promise<void> {
       });
     } catch (callbackError) {
       process.stderr.write(
-        `${callbackError instanceof Error ? callbackError.message : "Callback failed"}\n`,
+        `${redactChat(callbackError instanceof Error ? callbackError.message : "Callback failed")}\n`,
       );
     }
   }
@@ -431,7 +394,18 @@ function start(receipt: Receipt): void {
 const server = createServer(async (request, response) => {
   try {
     if (request.method === "GET" && request.url === "/health")
-      return json(response, 200, { status: "ok", executor: "codex" });
+      return json(response, 200, {
+        status: "ok",
+        executor: "omp",
+        providers: Object.fromEntries(
+          await Promise.all(
+            (["codex", "cursor", "commandcode"] as const).map(
+              async (provider) =>
+                [provider, await providerReadiness(provider)] as const,
+            ),
+          ),
+        ),
+      });
     if (request.method !== "POST" || request.url !== "/dispatch")
       return json(response, 404, { error: "not found" });
     const idempotencyKey = request.headers["idempotency-key"];
@@ -468,7 +442,9 @@ const server = createServer(async (request, response) => {
     });
   } catch (error) {
     return json(response, 500, {
-      reason: error instanceof Error ? error.message : "OMP request failed",
+      reason: redactChat(
+        error instanceof Error ? error.message : "OMP request failed",
+      ),
     });
   }
 });
@@ -483,7 +459,7 @@ for (const file of await readdir(receiptRoot)) {
       start(receipt);
   } catch (error) {
     process.stderr.write(
-      `Could not resume ${file}: ${error instanceof Error ? error.message : "invalid receipt"}\n`,
+      `Could not resume ${file}: ${redactChat(error instanceof Error ? error.message : "invalid receipt")}\n`,
     );
   }
 }

@@ -4,9 +4,9 @@ export const DEFAULT_CODEX_MODEL = "gpt-5.3-codex-spark";
 
 export const codexModelSchema = z
   .string()
-  .min(2)
-  .max(80)
-  .regex(/^[a-z0-9][a-z0-9._-]+$/);
+  .min(1)
+  .max(128)
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/);
 
 const aliases: Record<string, string> = {
   spark: DEFAULT_CODEX_MODEL,
@@ -32,7 +32,7 @@ const modelName =
 export function resolveCodexModel(value?: string): string {
   if (!value?.trim()) return DEFAULT_CODEX_MODEL;
   const normalized = value.trim().toLowerCase();
-  return codexModelSchema.parse(aliases[normalized] ?? normalized);
+  return codexModelSchema.parse(aliases[normalized] ?? value.trim());
 }
 
 export function parseModelDirective(input: string): {

@@ -6,7 +6,7 @@ import {
   type SubscriptionInput,
 } from "@rapi/core";
 import { RapiAgent } from "./rapi-agent.js";
-import { parseModelDirective, resolveCodexModel } from "@rapi/contracts";
+import { parseTaskSelection, resolveProviderSelection } from "@rapi/contracts";
 
 export const slashCommands = [
   "brief",
@@ -189,16 +189,21 @@ export class DiscordCommandService {
           | undefined;
         const content = optionalString(command.options, "content");
         const requestedModel = optionalString(command.options, "model");
-        const parsed = content ? parseModelDirective(content) : undefined;
+        const parsed = content
+          ? parseTaskSelection(
+              content,
+              optionalString(command.options, "provider"),
+              requestedModel,
+            )
+          : undefined;
         const specification =
           supplied ??
           (content
             ? {
                 goal: parsed!.task,
                 requirements: [parsed!.task],
-                model: requestedModel
-                  ? resolveCodexModel(requestedModel)
-                  : parsed!.model,
+                provider: parsed!.provider,
+                model: parsed!.model,
                 acceptance_criteria: [
                   "요청한 변경을 완료한다.",
                   "관련 검사를 통과한다.",
@@ -209,10 +214,11 @@ export class DiscordCommandService {
               }
             : undefined);
         if (!specification) throw new Error("작업 내용을 입력하세요.");
+        const selection = resolveProviderSelection(specification);
         const task = await this.agent.createTask(ownerId, specification);
         return {
           messages: [
-            `작업을 준비했습니다. 실행하려면 /승인 을 입력하세요.\n작업 ID: ${task.taskId}`,
+            `작업을 준비했습니다. 실행하려면 /승인 을 입력하세요.\n작업 ID: ${task.taskId} · ${selection.provider} / ${selection.model ?? "공급자 기본 모델"}`,
           ],
           data: task,
         };
@@ -237,7 +243,7 @@ export class DiscordCommandService {
         const dispatch = await this.agent.dispatchTask(taskId);
         return {
           messages: [
-            `작업을 승인하고 OMP에 전달했습니다: ${dispatch.receiptId}`,
+            `작업을 승인하고 OMP에 전달했습니다: ${dispatch.receiptId} · ${dispatch.provider} / ${dispatch.model ?? "공급자 기본 모델"}`,
           ],
           data: dispatch,
         };

@@ -124,3 +124,27 @@ Phase의 manifest가 구체화한다. manifest가 없으면 그 Phase의 완료�
 `@rapi/contracts`의 ChatOps Zod schemas와 migration 0004의 DB trigger를 함께
 사용한다. 실행 보고와 확인된 검사, 메모리 내용과 권한을 구분한다. 상세 상태 전이와
 revision/evidence binding은 [ChatOps 계약](chatops-capabilities.md)에 정의한다.
+
+### OMP provider selection
+
+`provider` is `codex | cursor | commandcode`, default `codex`. `model` is optional:
+omission resolves to `gpt-5.3-codex-spark` for Codex and remains omitted for Cursor
+and Command Code. Model IDs are 1–128 characters, start with an ASCII letter or
+number, and contain only letters, numbers, `.`, `_`, `:`, `/`, `-`. Codex retains
+its Korean/English model aliases at the service boundary. Invalid IDs/providers
+are rejected; there is no automatic provider fallback.
+
+The service stores provider/model in the task revision before approval. Existing
+specs and resumable receipts without a provider retain Codex/Spark defaults.
+English/Korean aliases are `codex`/`코덱스`, `cursor`/`커서`, and
+`commandcode`/`command code`/`goat`/`고트`/`커맨드코드`. Only an unquoted leading
+`커서로 …`, `고트로 …`, or `cursor: …` directive in the current `/작업` content
+selects a provider. The explicit `공급자` option wins; history and memory never
+participate. The separate natural-language ChatOps executor remains Codex.
+
+CLI invocation uses argument arrays. `repo:write` maps to Codex
+`--approve-for-me`, Cursor `--force`, or Command Code `--yolo`. Result, evidence,
+callback signatures, state versions, and idempotency keys retain their contracts.
+Provider startup/authentication errors fail the receipt with actionable guidance.
+Secrets are filtered from child environments and redacted from execution logs,
+reports and failure messages; only Command Code receives `CMD_API_KEY`.

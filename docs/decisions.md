@@ -130,3 +130,19 @@ D-008의 Astra 고정 정책을 대체한다. ChatOps와 OMP의 기본 모델은
 모델을 명시하면 그 실행에만 적용하고 실행 기록에 보존한다. 모델 지시가 기억이나
 이전 대화에 있어도 현재 실행 모델을 바꾸지 않는다. 지원되지 않는 모델은 자동
 fallback하지 않는다.
+
+## D-010: OMP multi-provider CLI execution (accepted, 2026-09-09)
+
+Extend the revision-approved OMP path with Codex, Cursor and Command Code CLI
+adapters. Codex/Spark remains the backward-compatible default. Cursor and Command
+Code use provider defaults unless the current task explicitly selects a model.
+A shared deterministic prefix parser and explicit Discord options fix selection
+in the revision; remembered preferences do not change execution routing.
+
+Use Cursor OAuth from the service user's existing login and Command Code's
+`CMD_API_KEY`, supplied in `.env` followed by a service restart. Use the CLI coding
+harness rather than GOAT's HTTP endpoint. Keep secrets out of other child
+processes, logs and reports. Health exposes only binary/config presence, not an
+assertion of valid authentication. Preserve owner-authorized broad permissions,
+existing approval/idempotency/evidence behavior, and the separate Codex ChatOps
+executor. This extends D-009's OMP model policy without changing ChatOps routing.

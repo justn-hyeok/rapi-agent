@@ -202,3 +202,39 @@ Docker volume `rapi-postgres`는 애플리케이션 컨테이너 교체와 분�
 기본 실행 모델은 `gpt-5.3-codex-spark`다. ChatOps 요청의 `아스트라로 …`,
 `…, 모델: gpt-6-astra` 또는 `/작업`의 선택 항목 `모델`로 실행별 모델을 지정한다.
 선택 결과는 ChatOps 실행 행 또는 OMP 작업 명세에 저장한다.
+
+## OMP provider setup
+
+OMP uses installed CLI coding harnesses, not a direct model endpoint:
+
+| Provider | Binary | Authentication | `repo:write` flag |
+| --- | --- | --- | --- |
+| `codex` (default) | `/usr/local/bin/codex` | `codex login` as service user | `--approve-for-me` |
+| `cursor` | `/home/justn/.local/bin/cursor-agent` | `cursor-agent login` as service user; OAuth under `~/.cursor` | `--force` |
+| `commandcode` | `/usr/local/bin/command-code` | `CMD_API_KEY` | `--yolo` |
+
+Put `CMD_API_KEY` in the production `.env` yourself, then restart the OMP service
+(`sudo systemctl restart rapi-omp`). Never paste keys into Discord or task specs.
+The key is passed only to the Command Code child environment, not Codex, Cursor,
+or Git children. OAuth credentials are not copied into clones or printed.
+Command Code v1.51.3 runs with `--no-session --skip-onboarding --no-auto-update`;
+its GOAT endpoint is not used directly because OMP needs the CLI coding tools.
+
+Run Cursor login externally with the same HOME/user as the OMP service. A service
+restart is needed after changing environment configuration. Re-register Discord
+commands after updating the bot to expose the optional `공급자` and `모델` fields.
+
+Examples: `/작업 내용:커서로 오류 고쳐줘`, `/작업 내용:고트로 오류 고쳐줘`,
+`/작업 내용:오류 고쳐줘 공급자:cursor 모델:MODEL_ID`. Codex defaults to Spark;
+other providers omit `--model` unless selected. Read-only tasks receive no write
+permission flag (Codex additionally uses its read-only sandbox). Provider CLI
+permissions are not an OS isolation boundary; existing approved broad authority
+and commit/push/deploy policy remain in effect.
+
+`GET http://127.0.0.1:3200/health` reports `providers.codex`, `providers.cursor`,
+and `providers.commandcode`: `binary` checks executable presence, `configured`
+checks Codex auth-file/Cursor directory presence or a nonempty Command Code key.
+`authentication: not_verified` means this does not contact the provider or prove
+credentials are valid. Failed receipts give installation/login/restart guidance;
+inspect the redacted `omp-execution.log` for execution failures. Cursor and Command
+Code stdout becomes `omp-result.md`; Codex retains its final-message output file.

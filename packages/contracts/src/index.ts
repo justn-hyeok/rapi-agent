@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { codexModelSchema, DEFAULT_CODEX_MODEL } from "./models.js";
+import { providerFields, defaultProviderModel } from "./providers.js";
 
 export const visibilitySchema = z.enum(["private", "unlisted", "public"]);
 export const deliveryStateSchema = z.enum([
@@ -37,26 +37,28 @@ export const taskPermissionSchema = z.enum([
 const identifierSchema = z.string().min(1).max(200);
 const isoDateTimeSchema = z.string().datetime({ offset: true });
 
-export const taskSpecificationSchema = z.object({
-  task_id: identifierSchema,
-  task_revision: z.number().int().positive(),
-  execution_attempt_id: identifierSchema,
-  repository: z.string().min(1),
-  base_revision: z.string().min(1),
-  workspace_ref: z.string().min(1),
-  model: codexModelSchema.default(DEFAULT_CODEX_MODEL),
-  goal: z.string().min(1),
-  non_goals: z.array(z.string()),
-  requirements: z.array(z.string().min(1)).min(1),
-  acceptance_criteria: z.array(z.string().min(1)).min(1),
-  permissions: z.array(taskPermissionSchema),
-  forbidden_actions: z.array(z.string().min(1)),
-  approval_id: identifierSchema,
-  approval_expires_at: isoDateTimeSchema,
-  timeout_seconds: z.number().int().positive(),
-  result_report_ref: z.string().min(1),
-  required_evidence: z.array(z.string().min(1)),
-});
+export const taskSpecificationSchema = z
+  .object({
+    task_id: identifierSchema,
+    task_revision: z.number().int().positive(),
+    execution_attempt_id: identifierSchema,
+    repository: z.string().min(1),
+    base_revision: z.string().min(1),
+    workspace_ref: z.string().min(1),
+    ...providerFields,
+    goal: z.string().min(1),
+    non_goals: z.array(z.string()),
+    requirements: z.array(z.string().min(1)).min(1),
+    acceptance_criteria: z.array(z.string().min(1)).min(1),
+    permissions: z.array(taskPermissionSchema),
+    forbidden_actions: z.array(z.string().min(1)),
+    approval_id: identifierSchema,
+    approval_expires_at: isoDateTimeSchema,
+    timeout_seconds: z.number().int().positive(),
+    result_report_ref: z.string().min(1),
+    required_evidence: z.array(z.string().min(1)),
+  })
+  .transform(defaultProviderModel);
 
 export const executionCallbackSchema = z.object({
   callback_event_id: identifierSchema,
@@ -79,3 +81,5 @@ export type ExecutionCallback = z.infer<typeof executionCallbackSchema>;
 
 export * from "./chatops.js";
 export * from "./models.js";
+
+export * from "./providers.js";

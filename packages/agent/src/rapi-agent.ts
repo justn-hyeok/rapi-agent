@@ -4,7 +4,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
-import { resolveCodexModel } from "@rapi/contracts";
+import { resolveProviderSelection } from "@rapi/contracts";
 import type {
   DeliveryAdapter,
   DeliveryTarget,
@@ -273,11 +273,7 @@ export class RapiAgent {
       requesterId,
       {
         ...specification,
-        model: resolveCodexModel(
-          typeof specification.model === "string"
-            ? specification.model
-            : undefined,
-        ),
+        ...resolveProviderSelection(specification),
       },
       risk,
     );
@@ -301,14 +297,19 @@ export class RapiAgent {
     );
   }
 
-  async dispatchTask(
-    taskId: string,
-  ): Promise<{ attemptId: string; receiptId: string }> {
+  async dispatchTask(taskId: string): Promise<{
+    attemptId: string;
+    receiptId: string;
+    provider: string;
+    model?: string | undefined;
+  }> {
     const prepared = await this.store.prepareDispatch(taskId, "omp");
+    const selection = resolveProviderSelection(prepared.specification);
     if (prepared.existingReceipt)
       return {
         attemptId: prepared.attemptId,
         receiptId: prepared.existingReceipt,
+        ...selection,
       };
     const result = await this.omp.dispatch(
       prepared.specification,
@@ -320,7 +321,11 @@ export class RapiAgent {
       result.accepted,
       result.reason,
     );
-    return { attemptId: prepared.attemptId, receiptId: result.receiptId };
+    return {
+      attemptId: prepared.attemptId,
+      receiptId: result.receiptId,
+      ...selection,
+    };
   }
 
   async receiveOmpCallback(

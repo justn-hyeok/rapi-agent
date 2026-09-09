@@ -92,7 +92,7 @@ describe("external input boundaries", () => {
     assert.equal(approve?.options, undefined);
     assert.deepEqual(
       task?.options?.map((option) => option.name),
-      ["내용", "모델"],
+      ["내용", "공급자", "모델"],
     );
   });
 

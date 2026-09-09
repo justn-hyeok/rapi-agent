@@ -96,10 +96,11 @@ export const slashCommandDefinitions = [
   },
   {
     name: "작업",
-    description: "Codex 개발 작업을 준비합니다",
+    description: "OMP 개발 작업을 준비합니다",
     type: 1,
     options: [
       stringOption("내용", "할 일을 한글로 입력하세요"),
+      stringOption("공급자", "codex, cursor, commandcode (고트)", false),
       stringOption("모델", "스파크, 아스트라 또는 정확한 모델 ID", false),
     ],
   },
@@ -249,6 +250,7 @@ export function createDiscordInteractionServer(
         주기: "cadence",
         내용: "content",
         모델: "model",
+        공급자: "provider",
         subscription_id: "subscriptionId",
         period_start: "periodStart",
         period_end: "periodEnd",

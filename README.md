@@ -92,7 +92,7 @@ interaction endpoint를 자동 갱신한다.
 Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
 Discord DM에 반영된다.
 
-`start:omp`는 승인된 개발 작업을 전용 Git clone에 준비하고 Codex CLI로 실행한다.
+`start:omp`는 승인된 개발 작업을 전용 Git clone에 준비하고 선택한 공급자의 CLI로 실행한다 (기본 Codex).
 봇에는 receipt를 즉시 반환하고 실행 상태와 결과 증거를 HMAC 서명 callback으로
 전달한다. 실행기 자식 프로세스에는 Discord, 데이터베이스, callback 비밀값을
 전달하지 않는다. 기본 저장소, 허용 저장소 루트, 작업공간은
@@ -157,3 +157,12 @@ MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhoo
 
 검증: `npm run check`, `npm run test:e2e`, `npm run audit:prod`.
 E2E는 자동으로 폐기되는 별도 PostgreSQL의 `rapi_test`만 사용한다.
+
+OMP supports `/작업 내용:커서로 오류 고쳐줘`, `/작업 내용:고트로 오류 고쳐줘`,
+and `/작업 내용:오류 고쳐줘 공급자:commandcode 모델:vendor/model`.
+The optional `공급자` option overrides a leading provider directive. Omitted provider
+means Codex with `gpt-5.3-codex-spark`; Cursor and Command Code use their own default
+model when `모델` is omitted. Selection applies only to the current task revision.
+Set optional `CMD_API_KEY` in `.env` and restart the OMP service for Command Code.
+For Cursor, run `cursor-agent login` as the OMP service user; OAuth stays in
+`~/.cursor`. See [provider operations](docs/operations.md#omp-provider-setup).
