@@ -14,6 +14,8 @@ export const slashCommands = [
   "unsubscribe",
   "sources",
   "deliveries",
+  "chat_enable",
+  "chat_disable",
   "task",
   "approve",
   "cancel",
@@ -152,6 +154,33 @@ export class DiscordCommandService {
       case "deliveries": {
         const rows = await this.agent.store.deliveryStatus();
         return { messages: splitDiscordMessage(JSON.stringify(rows, null, 2)) };
+      }
+      case "chat_enable": {
+        if (!identity.guildId || !identity.channelId)
+          throw new Error("서버 채널에서 실행하세요.");
+        await this.agent.store.enableChatChannel(
+          identity.guildId,
+          identity.channelId,
+          ownerId,
+        );
+        return {
+          messages: [
+            "이 채널에서 ChatOps를 시작합니다. `라피야!` 뒤에 질문을 적어주세요.",
+          ],
+        };
+      }
+      case "chat_disable": {
+        if (!identity.channelId) throw new Error("서버 채널에서 실행하세요.");
+        const disabled = await this.agent.store.disableChatChannel(
+          identity.channelId,
+        );
+        return {
+          messages: [
+            disabled
+              ? "이 채널의 ChatOps를 껐습니다."
+              : "이 채널에서는 ChatOps가 켜져 있지 않습니다.",
+          ],
+        };
       }
       case "task": {
         const supplied = command.options.specification as

@@ -48,7 +48,7 @@ export class PostgresStore {
 
   async resetForTests(): Promise<void> {
     await this.pool
-      .query(`TRUNCATE callback_events, execution_attempts, approvals, task_revisions,
+      .query(`TRUNCATE chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
       task_requests, mdx_publications, delivery_attempts, delivery_batch_items, delivery_batches,
       subscriptions, summaries, classifications, item_relations, source_items, queue_jobs,
       source_cursors, raw_events, sources RESTART IDENTITY CASCADE`);
@@ -841,6 +841,81 @@ export class PostgresStore {
       [ownerId],
     );
     return result.rows[0]?.id ?? null;
+  }
+
+  async enableChatChannel(
+    guildId: string,
+    channelId: string,
+    enabledBy: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO chat_channels (guild_id,channel_id,enabled_by)
+       VALUES ($1,$2,$3) ON CONFLICT (channel_id) DO UPDATE
+       SET guild_id=EXCLUDED.guild_id,enabled_by=EXCLUDED.enabled_by,
+           enabled=true,updated_at=now()`,
+      [guildId, channelId, enabledBy],
+    );
+  }
+
+  async disableChatChannel(channelId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE chat_channels SET enabled=false,updated_at=now() WHERE channel_id=$1 AND enabled=true",
+      [channelId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async chatChannelEnabled(
+    guildId: string,
+    channelId: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM chat_channels WHERE guild_id=$1 AND channel_id=$2 AND enabled=true",
+      [guildId, channelId],
+    );
+    return Boolean(result.rows[0]);
+  }
+
+  async appendChatMessage(input: {
+    guildId: string;
+    channelId: string;
+    discordMessageId?: string;
+    authorId: string;
+    role: "user" | "assistant";
+    content: string;
+  }): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO chat_messages
+       (id,guild_id,channel_id,discord_message_id,author_id,role,content)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (discord_message_id) DO NOTHING`,
+      [
+        randomUUID(),
+        input.guildId,
+        input.channelId,
+        input.discordMessageId ?? null,
+        input.authorId,
+        input.role,
+        input.content.slice(0, 20_000),
+      ],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async recentChatMessages(
+    channelId: string,
+    limit = 12,
+  ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+    const result = await this.pool.query<{
+      role: "user" | "assistant";
+      content: string;
+    }>(
+      `SELECT role,content FROM (
+         SELECT role,content,created_at FROM chat_messages
+         WHERE channel_id=$1 ORDER BY created_at DESC LIMIT $2
+       ) recent ORDER BY created_at`,
+      [channelId, limit],
+    );
+    return result.rows;
   }
 
   async cancelTask(taskId: string): Promise<void> {

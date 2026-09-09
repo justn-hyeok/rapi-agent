@@ -59,7 +59,7 @@ describe("external input boundaries", () => {
   });
 
   it("registers simple Korean slash commands", () => {
-    assert.equal(slashCommandDefinitions.length, 9);
+    assert.equal(slashCommandDefinitions.length, 11);
     assert.deepEqual(
       slashCommandDefinitions.map((command) => command.name),
       [
@@ -69,6 +69,8 @@ describe("external input boundaries", () => {
         "구독해제",
         "수집원",
         "발송내역",
+        "대화채널",
+        "대화해제",
         "작업",
         "승인",
         "취소",

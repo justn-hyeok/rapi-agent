@@ -8,6 +8,7 @@
     { "path": "./packages/adapters" },
     { "path": "./packages/agent" },
     { "path": "./apps/bot" },
+    { "path": "./apps/chat" },
     { "path": "./apps/omp" },
     { "path": "./workers/runtime" }
   ]

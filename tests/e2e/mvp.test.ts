@@ -47,6 +47,41 @@ describe("rapi-agent MVP", () => {
 
     try {
       await store.resetForTests();
+      await store.enableChatChannel("guild-1", "channel-1", "owner-1");
+      assert.equal(
+        await store.chatChannelEnabled("guild-1", "channel-1"),
+        true,
+      );
+      assert.equal(
+        await store.appendChatMessage({
+          guildId: "guild-1",
+          channelId: "channel-1",
+          discordMessageId: "chat-message-1",
+          authorId: "owner-1",
+          role: "user",
+          content: "서버 상태 알려줘",
+        }),
+        true,
+      );
+      assert.equal(
+        await store.appendChatMessage({
+          guildId: "guild-1",
+          channelId: "channel-1",
+          discordMessageId: "chat-message-1",
+          authorId: "owner-1",
+          role: "user",
+          content: "중복 메시지",
+        }),
+        false,
+      );
+      assert.deepEqual(await store.recentChatMessages("channel-1"), [
+        { role: "user", content: "서버 상태 알려줘" },
+      ]);
+      assert.equal(await store.disableChatChannel("channel-1"), true);
+      assert.equal(
+        await store.chatChannelEnabled("guild-1", "channel-1"),
+        false,
+      );
       const githubSource = await agent.createSource(
         "github",
         "example/rapi",
@@ -197,15 +232,19 @@ describe("rapi-agent MVP", () => {
         "approved-browser-session",
         "private",
       );
-      await agent.ingestExternalItem(privateSource, {
-        externalId: "aside-1",
-        url: "https://private.example/item",
-        title: "Private research",
-        body: "Information from an authenticated browser session.",
-        author: null,
-        publishedAt: "2026-09-08T00:30:00Z",
-        metadata: { session: "private" },
-      });
+      await agent.ingestExternalItem(
+        privateSource,
+        {
+          externalId: "aside-1",
+          url: "https://private.example/item",
+          title: "Private research",
+          body: "Information from an authenticated browser session.",
+          author: null,
+          publishedAt: "2026-09-08T00:30:00Z",
+          metadata: { session: "private" },
+        },
+        new Date("2026-09-08T01:00:00Z"),
+      );
       const privateSubscription = await agent.createSubscription({
         ownerId: "owner-1",
         name: "private",

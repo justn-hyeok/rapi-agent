@@ -1,0 +1,21 @@
+[Unit]
+Description=Rapi Discord Gateway ChatOps service
+After=network-online.target rapi-bot.service
+Wants=network-online.target
+Requires=rapi-bot.service
+
+[Service]
+Type=simple
+User=justn
+WorkingDirectory=/home/justn/rapi-agent
+ExecStart=/usr/local/bin/npm run start:chat
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/justn/rapi-chat /home/justn/.codex
+
+[Install]
+WantedBy=multi-user.target

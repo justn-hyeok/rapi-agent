@@ -22,6 +22,7 @@
     "backup": "./scripts/backup.sh",
     "restore:smoke": "./scripts/restore-smoke.sh",
     "start:bot": "node --env-file=.env --import tsx apps/bot/src/run.ts",
+    "start:chat": "node --env-file=.env --import tsx apps/chat/src/run.ts",
     "start:omp": "node --env-file=.env --import tsx apps/omp/src/run.ts",
     "start:worker": "node --env-file=.env --import tsx workers/runtime/src/run.ts",
     "format": "prettier --write .",

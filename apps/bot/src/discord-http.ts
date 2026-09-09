@@ -46,6 +46,8 @@ export const discordCommandAliases = {
   구독해제: "unsubscribe",
   수집원: "sources",
   발송내역: "deliveries",
+  대화채널: "chat_enable",
+  대화해제: "chat_disable",
   작업: "task",
   승인: "approve",
   취소: "cancel",
@@ -82,6 +84,16 @@ export const slashCommandDefinitions = [
   },
   { name: "수집원", description: "수집원 상태를 확인합니다", type: 1 },
   { name: "발송내역", description: "최근 발송 상태를 확인합니다", type: 1 },
+  {
+    name: "대화채널",
+    description: "현재 채널에서 라피 ChatOps를 켭니다",
+    type: 1,
+  },
+  {
+    name: "대화해제",
+    description: "현재 채널의 라피 ChatOps를 끕니다",
+    type: 1,
+  },
   {
     name: "작업",
     description: "Codex 개발 작업을 준비합니다",
