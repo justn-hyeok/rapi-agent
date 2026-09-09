@@ -62,6 +62,7 @@ export function buildProviderCommand(
       : provider === "cursor"
         ? [
             "--print",
+            "--trust",
             "--output-format",
             "text",
             ...modelArgs,

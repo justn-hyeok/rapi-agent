@@ -163,6 +163,7 @@ test("provider commands preserve prompts as one argument and map write permissio
         assert.ok(result.args.includes(prompt));
         assert.equal(result.stdoutReport, true);
         assert.equal(result.input, undefined);
+        if (provider === "cursor") assert.ok(result.args.includes("--trust"));
       }
       const explicit = buildProviderCommand(
         { provider, model: "vendor/Model:1", permissions: [] },
