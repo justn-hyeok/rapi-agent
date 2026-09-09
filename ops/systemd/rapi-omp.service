@@ -1,5 +1,5 @@
 [Unit]
-Description=Rapi OMP Codex execution service
+Description=Rapi OMP execution service
 After=network-online.target rapi-bot.service
 Wants=network-online.target
 Requires=rapi-bot.service
@@ -15,7 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/justn/omp-workspaces /home/justn/.codex
+ReadWritePaths=/home/justn/omp-workspaces /home/justn/.codex /home/justn/.cursor /home/justn/.commandcode
 
 [Install]
 WantedBy=multi-user.target
