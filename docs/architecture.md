@@ -166,3 +166,9 @@ rapi-agent/
 
 패키지 매니저와 프레임워크는 구현 시작 시 최소 의존성과 운영 적합성을 비교해
 고정하고 lockfile을 단일 기준으로 삼는다.
+
+## 자연어 ChatOps capability release
+
+Gateway, 결정론적 라우터, 오케스트레이터, Codex 프로세스 어댑터를 분리했다.
+자연어 실행과 기억의 상태는 PostgreSQL이 소유하며 기존 slash OMP 흐름과 병존한다.
+구현 위치, 흐름, 취소·복구·자원 한도는 [ChatOps 구조](chatops-capabilities.md)를 따른다.

@@ -90,3 +90,35 @@ model policy를 실제 corpus 평가 후 정한다. 공급자를 도메인 코�
 - 선택과 근거
 - 운영·보안·비용 영향
 - 재검토 조건
+
+## D-008: native ChatOps capability release (accepted, 2026-09-09)
+
+결정자: 소유자의 명시 요청과 구현 담당자. 자연어 채팅에서는 명확한 변경·배포
+요청을 즉시 실행할 넓은 권한을 사용한다. 따라서 D-005의 OMP 전용 실행 설명과
+운영 문서의 매번 승인 초안은 이 자연어 경로에 한해 대체한다. `/작업`과 `/승인`의
+기존 revision 승인 계약은 유지한다. ChatOps 모델은 `gpt-6-astra`로 고정한다.
+
+문제: 단일 채팅 함수가 질문과 변경 권한을 구분하지 않고 실행 상태·취소·복구·
+검토된 기억을 제공하지 않았다. 별도 Hermes 서버나 파일 ledger 대신 기존
+TypeScript/Zod/PostgreSQL에 독립 구현한다. 준비·보고·검증을 분리하고 DB가 상태
+전이를 강제하며, 명시 요청 기억만 자동 승인하고 실패 시 제한된 반복을 수행한다.
+운영 영향과 현재 한계는 [ChatOps 계약](chatops-capabilities.md)에 기술한다.
+재검토 조건은 다중 Gateway, 프로젝트별 목표 검증기, 영속 outbox, 외부 실행기
+취소 receipt가 필요한 시점이다.
+
+### Provenance
+
+아이디어 참고: [oh-my-hermes](https://github.com/rlaope/oh-my-hermes),
+로컬 분석 `/tmp/rapi-oh-my-hermes-astra-analysis.md` 및 영감 checkout의 고정 commit
+`cfd13771c8621b952bcd3fdb6794a343baca0f99`.
+참고 영역은 `src/routing/chat.py`, `src/runtime/records.py`,
+`src/runtime/claims.py`, `src/workflows/memory.py`, `src/workflows/goal_loop.py`,
+`src/coding/fanout_dispatch.py`와 LICENSE다. 원본 라이선스는 MIT,
+`Copyright (c) 2026 oh-my-hermes contributors`다.
+
+차용 종류는 준비와 관찰의 분리, 인용문 권한 배제, 검토된 기억과 bounded loop라는
+설계 원칙이다. 원본 코드·schema·fixture·문장을 복사하거나 번역하지 않았으며,
+Hermes/oh-my-hermes 런타임 의존성을 추가하지 않았다. 독립적인 한국어 corpus,
+실제 Node child 취소, PostgreSQL 전이·증거 binding·기억 lifecycle·중복 메시지
+검사로 수용한다. 이후 코드 또는 상당한 본문을 차용하면 MIT 원문 고지를 함께
+추가해야 한다.

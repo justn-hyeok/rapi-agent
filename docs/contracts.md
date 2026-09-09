@@ -118,3 +118,9 @@ Aside 세션, 비공개 저장소, Discord DM, 이메일 수신자 정보에서 
 로드맵의 “고정 corpus”, “주요 클라이언트”, “대표 출처” 같은 표현은 해당
 Phase의 manifest가 구체화한다. manifest가 없으면 그 Phase의 완료를 주장할 수
 없다.
+
+## 자연어 실행·기억 계약
+
+`@rapi/contracts`의 ChatOps Zod schemas와 migration 0004의 DB trigger를 함께
+사용한다. 실행 보고와 확인된 검사, 메모리 내용과 권한을 구분한다. 상세 상태 전이와
+revision/evidence binding은 [ChatOps 계약](chatops-capabilities.md)에 정의한다.

@@ -183,3 +183,18 @@ npm run start:worker    # GitHub/RSS 수집과 배치 발송 worker
 
 서비스 프로세스는 reverse proxy 뒤에서 실행하며 `/health`를 readiness 확인에 쓴다.
 Docker volume `rapi-postgres`는 애플리케이션 컨테이너 교체와 분리해 보존한다.
+
+## 자연어 ChatOps 운영 정책 (D-008)
+
+허용된 소유자의 명확한 자연어 변경·배포 요청은 그 자체로 실행 권한이며 반복
+승인을 요구하지 않는다. 이는 위 승인 초안의 자연어 ChatOps 경로를 대체한다.
+`/작업`·`/승인`은 기존 동작을 유지한다. 배포 시 기존 `npm run db:migrate`가
+0004를 적용한 뒤 기존 `rapi-chat.service`를 사용한다. 이번 구현 작업에서는
+운영 migration, 서비스 변경, 배포를 수행하지 않는다.
+
+`npm run test:e2e`는 `compose.test.yaml`의 임시 PostgreSQL을 임의 로컬 포트에
+기동하고 **rapi_test만** 사용한다. migration 재적용도 검사하며 EXIT trap으로
+컨테이너·네트워크를 정리한다. 운영 Compose 또는 DB에는 연결하지 않는다.
+테스트를 직접 실행할 때도 정확히 `rapi_test` 이름이 아니면 거부한다.
+상태 조회, 실제 취소, interrupted 복구와 알려진 한계는
+[운영 상세](chatops-capabilities.md)를 참고한다.

@@ -1,102 +1,38 @@
-import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdir } from "node:fs/promises";
 import WebSocket from "ws";
 import { loadEnvironment } from "@rapi/config";
 import { splitDiscordMessage } from "@rapi/core";
-import { PostgresStore } from "@rapi/db";
+import { discordChatMessageSchema, redactChat } from "@rapi/contracts";
+import { PostgresStore, ChatOpsStore } from "@rapi/db";
+import { CodexExecutor, cleanupArtifacts } from "./executor.js";
+import { ChatOrchestrator } from "./orchestrator.js";
 
 const config = loadEnvironment();
 const store = new PostgresStore(config.DATABASE_URL);
+const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
-const prefix = "라피야!";
-const model = "gpt-6-astra";
 const intents = (1 << 0) | (1 << 9) | (1 << 15);
-
 await mkdir(chatWorkspace, { recursive: true });
-
-function codexEnvironment(): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => {
-      const upper = key.toUpperCase();
-      return !(
-        upper.includes("TOKEN") ||
-        upper.includes("SECRET") ||
-        upper.includes("PASSWORD") ||
-        upper.includes("API_KEY") ||
-        upper === "DATABASE_URL"
-      );
-    }),
-  );
-}
-
-async function answerWithCodex(
-  messages: Array<{ role: "user" | "assistant"; content: string }>,
-): Promise<string> {
-  const outputPath = path.join(chatWorkspace, `${randomUUID()}.txt`);
-  const prompt = [
-    "너는 개인 Discord ChatOps 비서 라피다.",
-    "항상 자연스러운 한국어로 직접 답한다.",
-    "일반 질문, 서버 운영, 현재 코드베이스 질문에 모두 답한다.",
-    "간결하게 답하되 필요한 명령이나 근거는 구체적으로 쓴다.",
-    "허용된 사용자가 요청한 서버 운영, 코드 수정, 테스트, 배포 작업은 필요한 도구를 사용해 직접 끝까지 수행한다.",
-    "비밀값과 인증 정보는 읽거나 답변에 노출하지 않는다.",
-    "현재 대화:",
-    ...messages.map((message) =>
-      message.role === "user"
-        ? `사용자: ${message.content}`
-        : `라피: ${message.content}`,
-    ),
-    "라피:",
-  ].join("\n\n");
-
-  const result = await new Promise<{ code: number; stderr: string }>(
-    (resolve, reject) => {
-      const child = spawn(
-        "/usr/local/bin/codex",
-        [
-          "exec",
-          "--ignore-user-config",
-          "--ephemeral",
-          "--model",
-          model,
-          "--dangerously-bypass-approvals-and-sandbox",
-          "--color",
-          "never",
-          "--output-last-message",
-          outputPath,
-          "-C",
-          repository,
-          "-",
-        ],
-        {
-          env: codexEnvironment(),
-          stdio: ["pipe", "ignore", "pipe"],
-        },
-      );
-      const errors: Buffer[] = [];
-      child.stderr.on("data", (chunk: Buffer) => errors.push(chunk));
-      child.on("error", reject);
-      const timeout = setTimeout(() => child.kill("SIGTERM"), 180_000);
-      timeout.unref();
-      child.on("close", (code) => {
-        clearTimeout(timeout);
-        resolve({
-          code: code ?? 1,
-          stderr: Buffer.concat(errors).toString("utf8"),
-        });
-      });
-      child.stdin.end(prompt);
-    },
-  );
-  if (result.code !== 0)
-    throw new Error(
-      result.stderr.trim().split("\n").at(-1) ?? "Codex 응답 실패",
-    );
-  return (await readFile(outputPath, "utf8")).trim();
-}
+// One Gateway owner per database. Losing this session stops execution.
+const lease = await store.pool.connect();
+const lock = await lease.query<{ acquired: boolean }>(
+  "SELECT pg_try_advisory_lock(731904226) AS acquired",
+);
+if (!lock.rows[0]?.acquired) throw new Error("ChatOps instance already active");
+await runs.recover();
+await cleanupArtifacts(chatWorkspace);
+const chat = new ChatOrchestrator(
+  runs,
+  new CodexExecutor(repository, chatWorkspace),
+  async (channel, content) => {
+    for (const chunk of splitDiscordMessage(redactChat(content)))
+      await sendMessage(channel, chunk);
+  },
+);
+lease.on("error", () => {
+  void chat.shutdown().finally(() => process.exit(1));
+});
 
 async function discordRequest(
   route: string,
@@ -107,14 +43,11 @@ async function discordRequest(
   headers.set("content-type", "application/json");
   const response = await fetch(`https://discord.com/api/v10${route}`, {
     ...init,
+    signal: AbortSignal.timeout(10000),
     headers,
   });
   if (!response.ok) throw new Error(`Discord API returned ${response.status}`);
   return response;
-}
-
-async function sendTyping(channelId: string): Promise<void> {
-  await discordRequest(`/channels/${channelId}/typing`, { method: "POST" });
 }
 
 async function sendMessage(
@@ -132,80 +65,19 @@ async function sendMessage(
   return message.id;
 }
 
-type MessageEvent = {
-  id: string;
-  guild_id?: string;
-  channel_id: string;
-  content: string;
-  author: { id: string; bot?: boolean };
-};
-
-const channelQueues = new Map<string, Promise<void>>();
-
-function enqueue(message: MessageEvent): void {
-  const previous = channelQueues.get(message.channel_id) ?? Promise.resolve();
-  const next = previous
-    .then(() => handleMessage(message))
-    .catch((error: unknown) => {
-      process.stderr.write(
-        `ChatOps error: ${error instanceof Error ? error.message : "unknown error"}\n`,
-      );
-    })
-    .finally(() => {
-      if (channelQueues.get(message.channel_id) === next)
-        channelQueues.delete(message.channel_id);
-    });
-  channelQueues.set(message.channel_id, next);
-}
-
-async function handleMessage(message: MessageEvent): Promise<void> {
+async function enqueue(raw: unknown): Promise<void> {
+  const parsed = discordChatMessageSchema.safeParse(raw);
+  if (!parsed.success) return;
+  const message = parsed.data;
   if (
     message.author.bot ||
     !message.guild_id ||
     !config.DISCORD_ALLOWED_USER_IDS.includes(message.author.id) ||
-    !message.content.trimStart().startsWith(prefix) ||
+    !message.content.trimStart().startsWith("라피야!") ||
     !(await store.chatChannelEnabled(message.guild_id, message.channel_id))
   )
     return;
-
-  const question = message.content.trimStart().slice(prefix.length).trim();
-  if (!question) {
-    await sendMessage(message.channel_id, "응. `라피야!` 뒤에 질문을 적어줘.");
-    return;
-  }
-  const inserted = await store.appendChatMessage({
-    guildId: message.guild_id,
-    channelId: message.channel_id,
-    discordMessageId: message.id,
-    authorId: message.author.id,
-    role: "user",
-    content: question,
-  });
-  if (!inserted) return;
-
-  await sendTyping(message.channel_id);
-  const typing = setInterval(() => {
-    void sendTyping(message.channel_id).catch(() => undefined);
-  }, 8000);
-  try {
-    const context = await store.recentChatMessages(message.channel_id);
-    const answer = await answerWithCodex(context);
-    const chunks = splitDiscordMessage(answer || "답변을 만들지 못했습니다.");
-    let responseId: string | undefined;
-    for (const chunk of chunks) {
-      responseId = await sendMessage(message.channel_id, chunk);
-    }
-    await store.appendChatMessage({
-      guildId: message.guild_id,
-      channelId: message.channel_id,
-      ...(responseId ? { discordMessageId: responseId } : {}),
-      authorId: config.DISCORD_APPLICATION_ID,
-      role: "assistant",
-      content: answer,
-    });
-  } finally {
-    clearInterval(typing);
-  }
+  await chat.receive(message);
 }
 
 let socket: WebSocket | undefined;
@@ -302,7 +174,9 @@ function connect(): void {
       resumeUrl = ready.resume_gateway_url;
       process.stdout.write("rapi-chat connected to Discord Gateway\n");
     } else if (payload.op === 0 && payload.t === "MESSAGE_CREATE") {
-      enqueue(payload.d as MessageEvent);
+      void enqueue(payload.d).catch(() =>
+        process.stderr.write("ChatOps request failed\n"),
+      );
     }
   });
   socket.on("close", (code) => {
@@ -330,7 +204,11 @@ const shutdown = (): void => {
   if (heartbeatStart) clearTimeout(heartbeatStart);
   if (reconnect) clearTimeout(reconnect);
   socket?.close(1000);
-  void store.close().finally(() => process.exit(0));
+  void chat.shutdown().finally(async () => {
+    lease.release();
+    await store.close();
+    process.exit(0);
+  });
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

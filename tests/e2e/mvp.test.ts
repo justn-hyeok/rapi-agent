@@ -12,9 +12,9 @@ import {
 } from "@rapi/agent";
 import { PostgresStore } from "@rapi/db";
 
-const databaseUrl =
-  process.env.DATABASE_URL ??
-  "postgresql://rapi:rapi-local-only@127.0.0.1:5432/rapi";
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl || new URL(databaseUrl).pathname !== "/rapi_test")
+  throw new Error("MVP E2E requires rapi_test");
 
 const rssFixture = `<?xml version="1.0"?>
 <rss version="2.0"><channel><title>Rapi Feed</title><item>
