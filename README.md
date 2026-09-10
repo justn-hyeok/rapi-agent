@@ -53,6 +53,7 @@ Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업
 - [아키텍처와 데이터 설계](docs/architecture.md)
 - [용어와 실행 계약](docs/contracts.md)
 - [운영, 권한, 보안](docs/operations.md)
+- [Supabase, 상태 감시와 관리형 웹훅](docs/operations-webhooks.md)
 - [구현 로드맵](docs/roadmap.md)
 - [결정 기록](docs/decisions.md)
 
@@ -77,15 +78,16 @@ npm run start:bot
 npm run start:chat
 npm run start:omp
 npm run start:worker
+npm run start:monitor
 ```
 
 두 명령은 저장소 루트의 `.env`를 자동으로 읽는다. 운영 서버에서는 파일 권한을
 `0600`으로 제한하고 `ops/systemd`의 unit을 설치한다. Discord interaction endpoint는
 공개 HTTPS reverse proxy의 `/interactions`로 연결한다.
 
-고정 도메인이나 인바운드 HTTPS를 사용할 수 없는 서버에서는
-`rapi-tunnel.service`가 Cloudflare Quick Tunnel을 실행하고 재시작할 때마다 Discord
-interaction endpoint를 자동 갱신한다.
+공개 Discord interaction과 수신 웹훅은 무작위 고정 hostname의 Cloudflare Named
+Tunnel을 통과한다. allowlist gateway는 세 POST 경로만 전달하며 health와 내부 상태는
+loopback에 남긴다.
 
 `start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑·승인
 명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
@@ -106,14 +108,14 @@ Discord 명령은 모두 한글이며 작업 실행에는 JSON이 필요 없다.
 /승인
 ```
 
-그 밖의 명령은 `/브리핑`, `/검색`, `/구독`, `/구독해제`, `/수집원`,
-`/발송내역`, `/취소`다. `/승인`과 `/취소`는 해당 사용자의 가장 최근 작업을
-대상으로 한다.
+공개 명령은 `/브리핑`, `/검색`, `/사용량`이다. 운영 명령은 `/상태`, `/사용정책`,
+`/서버구성`, `/웹훅`, 구독·수집·발송·작업 명령이다. `/승인`과 `/취소`는 해당
+사용자의 가장 최근 작업을 대상으로 한다.
 
-원하는 채널에서 `/대화채널`을 한 번 실행하면 ChatOps 대화를 켤 수 있다.
-이후 허용된 사용자가 `라피야!`로 시작해 질문하면 최근 대화 문맥을 반영해
-한국어로 답한다. 서버 운영, 코드 수정, 테스트, 배포 요청도 직접 수행한다.
-기본 모델은 `gpt-5.3-codex-spark`이며 요청에 모델을 적으면 그 작업에만 반영한다.
+관리 구성은 `라피-질문`과 비공개 `라피-관리`에 ChatOps를 켠다. USER의 `라피야!`
+질문은 격리된 `gpt-5.3-codex-spark`가 실시간 웹 검색으로 답하며 원문·세션을
+저장하지 않는다. 서버 운영, 코드 수정, 테스트와 배포는 소유자 ID가 `라피-관리`에서
+요청할 때만 기존 관리자 ChatOps가 수행한다.
 `/대화해제`를 실행하면 해당 채널의
 대화를 끈다.
 
@@ -133,19 +135,18 @@ MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhoo
 
 ## 자연어 실행·상태·기억
 
-Discord access uses three ordered tiers. `USER` can search, receive briefings,
-manage personal subscriptions, ask questions, and manage personal memory.
-`ADMIN` additionally enables or disables ChatOps channels. `SUPERADMIN` can also
+Discord access uses three ordered tiers. `USER` can search public material, receive public
+briefings, inspect personal usage, and ask public questions. `ADMIN` additionally uses
+operational status, subscriptions, source and delivery management. `SUPERADMIN` can also
 run and cancel natural-language code changes and create, approve, or cancel OMP
 tasks. `DISCORD_ALLOWED_USER_IDS` remains a legacy superadmin list;
 `DISCORD_SUPERADMIN_USER_IDS`, `DISCORD_ADMIN_USER_IDS`, `DISCORD_USER_IDS`,
 `DISCORD_ADMIN_ROLE_IDS`, and `DISCORD_USER_ROLE_IDS` add explicit assignments.
 User IDs take precedence over role IDs, and a Discord role never grants
 `SUPERADMIN`.
-With `DISCORD_GUILD_MEMBERS_ARE_USERS=true`, every member of an allowed guild is
-automatically treated as `USER`. Granting that member any Discord role with the
-Administrator permission raises them to `ADMIN`; the bot refreshes guild role
-permissions at most once per minute for natural-language messages.
+`역할-받기`의 버튼으로 `라피 USER`를 받은 구성원만 USER가 된다. Discord
+Administrator는 ADMIN이 되지만 역할로 SUPERADMIN이 되지는 않는다. 봇은 자연어
+메시지의 guild role permissions를 최대 1분 캐시한다.
 
 ```text
 라피야! 로그인 오류 고쳐줘
@@ -162,7 +163,7 @@ permissions at most once per minute for natural-language messages.
 
 실행·시도·증거와 기억 lifecycle은 PostgreSQL에 보존한다. 취소는 활성 Codex
 프로세스를 실제 종료하며, 재시작 때 남은 작업은 interrupted로 표시한다.
-질문은 읽기 전용이고, 명확한 수정·배포는 기본 모델
+관리 채널의 질문은 읽기 전용이고, 명확한 수정·배포는 기본 모델
 `gpt-5.3-codex-spark`로 직접 수행한다. `스파크`, `아스트라`, `솔`, `테라`,
 `루나` 별칭이나 정확한 모델 ID를 현재 요청에 지정할 수 있다. `/작업` 명령에도
 선택 항목 `모델`이 있으며 OMP가 해당 모델을 그대로 사용한다.
@@ -180,3 +181,12 @@ model when `모델` is omitted. Selection applies only to the current task revis
 Set optional `COMMAND_CODE_API_KEY` in `.env` and restart the OMP service for Command Code.
 For Cursor, run `cursor-agent login` as the OMP service user; OAuth stays in
 `~/.cursor`. See [provider operations](docs/operations.md#omp-provider-setup).
+
+## 상태와 관리형 웹훅
+
+`/상태`는 ADMIN에게 봇, DB, ChatOps, worker, OMP와 백업의 최근 상태를 보여준다.
+독립 monitor는 연속 장애와 복구만 지정 Discord 운영 채널에 알린다.
+`/웹훅`은 SUPERADMIN이 GitHub·범용 수신과 Discord 발송 연결을 등록, 조회, 시험,
+중지, 재개할 수 있게 한다. 수신 이벤트는 PostgreSQL에 원자적으로 저장한 뒤 내구성
+큐로 발송하며 서명 검증, 중복 방지, 제한 재시도를 적용한다. 설정과 Supabase 무료
+DB 전환 절차는 [운영 웹훅 문서](docs/operations-webhooks.md)에 있다.

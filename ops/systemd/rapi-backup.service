@@ -1,0 +1,17 @@
+[Unit]
+Description=Rapi PostgreSQL backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=justn
+WorkingDirectory=/home/justn/rapi-agent
+EnvironmentFile=/home/justn/rapi-agent/.env
+ExecStart=/home/justn/rapi-agent/scripts/backup.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/justn/rapi-agent/backups /var/lib/rapi

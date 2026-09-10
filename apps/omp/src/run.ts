@@ -394,18 +394,27 @@ function start(receipt: Receipt): void {
 const server = createServer(async (request, response) => {
   try {
     if (request.method === "GET" && request.url === "/health")
-      return json(response, 200, {
-        status: "ok",
-        executor: "omp",
-        providers: Object.fromEntries(
-          await Promise.all(
-            (["codex", "cursor", "commandcode"] as const).map(
-              async (provider) =>
-                [provider, await providerReadiness(provider)] as const,
-            ),
+      return json(response, 200, { status: "ok" });
+    if (request.method === "GET" && request.url === "/ready") {
+      const providers = Object.fromEntries(
+        await Promise.all(
+          (["codex", "cursor", "commandcode"] as const).map(
+            async (provider) =>
+              [provider, await providerReadiness(provider)] as const,
           ),
         ),
+      );
+      const ready = Object.values(providers).some(
+        (provider) => provider.binary && provider.configured,
+      );
+      return json(response, ready ? 200 : 503, {
+        ready,
+        checkedAt: new Date().toISOString(),
+        executor: "omp",
+        providers,
+        running: running.size,
       });
+    }
     if (request.method !== "POST" || request.url !== "/dispatch")
       return json(response, 404, { error: "not found" });
     const idempotencyKey = request.headers["idempotency-key"];

@@ -1,0 +1,17 @@
+[Unit]
+Description=Weekly Rapi backup restore verification
+After=docker.service rapi-backup.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=justn
+Group=docker
+WorkingDirectory=/home/justn/rapi-agent
+EnvironmentFile=/home/justn/rapi-agent/.env
+Environment=RESTORE_LATEST_BACKUP=true
+ExecStart=/home/justn/rapi-agent/scripts/restore-smoke.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only

@@ -37,6 +37,24 @@ describe("environment configuration", () => {
     );
   });
 
+  it("requires an encryption key for fixed managed webhook endpoints", () => {
+    assert.throws(
+      () =>
+        loadEnvironment({
+          ...validEnvironment,
+          RAPI_PUBLIC_BASE_URL: "https://rapi.example.com",
+        }),
+      /WEBHOOK_ENCRYPTION_KEY and RAPI_PUBLIC_BASE_URL/,
+    );
+    const config = loadEnvironment({
+      ...validEnvironment,
+      RAPI_PUBLIC_BASE_URL: "https://rapi.example.com",
+      WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
+    });
+    assert.equal(config.DB_POOL_MAX, 5);
+    assert.equal(config.DB_QUERY_TIMEOUT_MS, 5000);
+  });
+
   it("requires SMTP credentials when SMTP is enabled in production", () => {
     assert.throws(
       () =>
@@ -46,6 +64,32 @@ describe("environment configuration", () => {
           EMAIL_TRANSPORT: "smtp",
         }),
       /SMTP_HOST is required for SMTP/,
+    );
+  });
+
+  it("requires certificate verification for production database connections", () => {
+    assert.throws(
+      () =>
+        loadEnvironment({
+          ...validEnvironment,
+          RAPI_ENV: "production",
+          DATABASE_URL: "postgresql://rapi:rapi@example.com:5432/rapi",
+        }),
+      /sslmode=verify-full or verify-ca/,
+    );
+    assert.doesNotThrow(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        RAPI_ENV: "production",
+      }),
+    );
+    assert.doesNotThrow(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        RAPI_ENV: "production",
+        DATABASE_URL:
+          "postgresql://rapi:rapi@example.com:5432/rapi?sslmode=verify-full",
+      }),
     );
   });
 });

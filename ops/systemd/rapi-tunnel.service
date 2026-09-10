@@ -1,20 +1,21 @@
 [Unit]
 Description=Rapi public Discord interaction tunnel
-After=network-online.target rapi-bot.service
+After=network-online.target rapi-public-gateway.service
 Wants=network-online.target
-Requires=rapi-bot.service
+Requires=rapi-public-gateway.service
 
 [Service]
 Type=simple
 User=justn
 WorkingDirectory=/home/justn/rapi-agent
-ExecStart=/usr/local/bin/node --env-file=.env ops/tunnel/run.mjs
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /var/lib/rapi/cloudflared/config.yml tunnel run
 Restart=always
-RestartSec=5
+RestartSec=300
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+ReadOnlyPaths=/var/lib/rapi/cloudflared
 
 [Install]
 WantedBy=multi-user.target

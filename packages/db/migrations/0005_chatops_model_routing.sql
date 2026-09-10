@@ -7,4 +7,7 @@ ALTER TABLE chatops_runs
 ALTER TABLE chatops_runs
   ALTER COLUMN model SET DEFAULT 'gpt-5.3-codex-spark';
 
+INSERT INTO schema_migrations (name) VALUES ('0005_chatops_model_routing.sql')
+ON CONFLICT DO NOTHING;
+
 COMMIT;

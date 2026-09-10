@@ -1,0 +1,116 @@
+version: 1
+replaceExistingChannels: true
+roles:
+  - key: rapi_user
+    name: 라피 USER
+    permissions: []
+    color: 5793266
+    hoist: false
+  - key: rapi_staff
+    name: 라피 운영진
+    permissions:
+      - ADMINISTRATOR
+    color: 16705372
+    hoist: true
+categories:
+  - key: getting_started
+    name: 시작하기
+    audience: everyone
+    channels:
+      - key: announcements
+        name: 공지
+        type: text
+        readOnly: true
+      - key: rules
+        name: 규칙
+        type: text
+        readOnly: true
+      - key: roles
+        name: 역할-받기
+        type: text
+        readOnly: true
+        topic: 규칙을 확인한 뒤 인증 버튼을 눌러 입장하세요.
+  - key: community
+    name: 커뮤니티
+    audience: user
+    channels:
+      - key: general
+        name: 일반
+        type: text
+        readOnly: false
+      - key: questions
+        name: 질문
+        type: text
+        readOnly: false
+      - key: resources
+        name: 자료-공유
+        type: text
+        readOnly: false
+  - key: rapi
+    name: 라피
+    audience: user
+    channels:
+      - key: rapi_questions
+        name: 라피-질문
+        type: text
+        readOnly: false
+      - key: rapi_briefing
+        name: 라피-브리핑
+        type: text
+        readOnly: false
+      - key: rapi_help
+        name: 라피-도움말
+        type: text
+        readOnly: true
+  - key: development
+    name: 개발
+    audience: user
+    channels:
+      - key: rapi_development
+        name: 라피-개발
+        type: text
+        readOnly: false
+      - key: github_feed
+        name: github-피드
+        type: text
+        readOnly: true
+      - key: technical_rss
+        name: 기술-rss
+        type: text
+        readOnly: true
+  - key: operations
+    name: 운영
+    audience: staff
+    channels:
+      - key: rapi_admin
+        name: 라피-관리
+        type: text
+        readOnly: false
+      - key: operations_alerts
+        name: 운영-알림
+        type: text
+        readOnly: true
+      - key: webhook_admin
+        name: 웹훅-관리
+        type: text
+        readOnly: false
+      - key: audit_log
+        name: 감사-로그
+        type: text
+        readOnly: true
+  - key: voice
+    name: 음성
+    audience: user
+    channels:
+      - key: lounge
+        name: 라운지
+        type: voice
+        readOnly: false
+      - key: study_1
+        name: 공부방-1
+        type: voice
+        readOnly: false
+      - key: study_2
+        name: 공부방-2
+        type: voice
+        readOnly: false

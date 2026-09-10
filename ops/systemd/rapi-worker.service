@@ -1,13 +1,11 @@
 [Unit]
 Description=Rapi collection and delivery worker
-After=network-online.target docker.service rapi-bot.service
+After=network-online.target rapi-bot.service
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=simple
 User=justn
-Group=docker
 WorkingDirectory=/home/justn/rapi-agent
 ExecStart=/usr/local/bin/npm run start:worker
 Restart=on-failure

@@ -17,3 +17,7 @@
 추가 운영 검증으로 production dependency audit, 빈 DB의 migration 2개 자동 적용,
 PostgreSQL dump/restore smoke를 수행한다. 실제 Discord, SMTP, GitHub, OMP 호출에는
 소유자가 발급한 자격 증명이 필요하며 값은 저장소에 포함하지 않는다.
+
+운영 상태와 관리형 웹훅 확장의 기준은 `tests/manifests/operations.yaml`이다. 빈 DB에
+대한 동시 migration, 상태 전이, 비밀 암호화, GitHub 서명·중복 수신, Discord 발송
+재시도·조각 복구, 실제 custom-format 백업 복원을 검증한다.

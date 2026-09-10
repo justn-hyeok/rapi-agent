@@ -87,6 +87,18 @@ type Active = {
   done: Promise<void>;
   cancellation?: Promise<string>;
 };
+export interface PublicCommunityResponder {
+  isAdminChannel(scope: ChatScope): Promise<boolean>;
+  answer(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    requestId: string;
+    text: string;
+    tier: "user" | "staff";
+  }): Promise<string | undefined>;
+}
+
 export class ChatOrchestrator {
   private queues = new Map<string, Promise<void>>();
   private active = new Map<string, Active>();
@@ -99,6 +111,7 @@ export class ChatOrchestrator {
     readonly store: ChatOpsStore,
     readonly executor: Executor,
     readonly send: (channel: string, text: string) => Promise<unknown>,
+    readonly community?: PublicCommunityResponder,
   ) {}
   private key(scope: ChatScope): string {
     return JSON.stringify([scope.guild, scope.channel, scope.owner]);
@@ -122,6 +135,32 @@ export class ChatOrchestrator {
     const selection = parseModelDirective(rawText);
     const text = selection.task;
     const route = routeIntent(text);
+    if (this.community) {
+      const ownerExecutionChannel =
+        accessLevel === "superadmin" &&
+        (await this.community.isAdminChannel(scope));
+      if (!ownerExecutionChannel) {
+        if (route !== "answer") {
+          await this.reply(
+            scope.channel,
+            accessLevel === "superadmin"
+              ? "코드·서버 실행과 기억 관리는 비공개 `라피-관리` 채널에서만 사용할 수 있습니다."
+              : "일반 USER는 공개 검색·브리핑·질문만 사용할 수 있습니다.",
+          );
+          return;
+        }
+        const response = await this.community.answer({
+          guildId: scope.guild,
+          channelId: scope.channel,
+          userId: scope.owner,
+          requestId: message.id,
+          text: text.slice(0, 4_000),
+          tier: accessLevel === "user" ? "user" : "staff",
+        });
+        if (response) await this.reply(scope.channel, response);
+        return;
+      }
+    }
     try {
       assertDiscordLevel(accessLevel, requiredChatAccess(route));
     } catch (error) {

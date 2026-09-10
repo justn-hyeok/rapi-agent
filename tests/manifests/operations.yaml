@@ -1,0 +1,20 @@
+version: 1
+feature: operations-and-managed-webhooks
+acceptance:
+  - id: migration-lock
+    evidence: scripts/test-e2e.sh runs two migrators against one empty database
+  - id: health-transitions
+    evidence: tests/operations.test.ts
+    thresholds: { failures: 3, recoveries: 2, interval_seconds: 30 }
+  - id: webhook-security
+    evidence: tests/webhooks.test.ts
+    requirements: [hmac, aes-256-gcm, official-discord-https, no-redirects]
+  - id: webhook-atomicity
+    evidence: tests/e2e/operations.test.ts
+    requirements: [receipt, normalized-item, queue-job, duplicate-conflict]
+  - id: queue-recovery
+    evidence: tests/e2e/operations.test.ts
+    max_attempts: 5
+  - id: backup-restore
+    evidence: scripts/backup.sh and scripts/restore-smoke.sh
+excluded: [drive, web-dashboard, webhook-code-execution, newsletter-expansion]

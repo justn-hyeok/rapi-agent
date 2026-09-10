@@ -7,6 +7,12 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../packages/adapters"
+    },
+    {
+      "path": "../../packages/agent"
+    },
+    {
       "path": "../../packages/config"
     },
     {

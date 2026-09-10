@@ -81,4 +81,6 @@ DROP TRIGGER IF EXISTS chatops_memory_event ON chatops_memory;
 CREATE TRIGGER chatops_memory_event AFTER INSERT OR UPDATE ON chatops_memory FOR EACH ROW EXECUTE FUNCTION chatops_memory_event();
 DROP TRIGGER IF EXISTS chatops_memory_events_immutable ON chatops_memory_events;
 CREATE TRIGGER chatops_memory_events_immutable BEFORE UPDATE OR DELETE ON chatops_memory_events FOR EACH ROW EXECUTE FUNCTION chatops_append_only();
+INSERT INTO schema_migrations (name) VALUES ('0004_chatops_capabilities.sql')
+ON CONFLICT DO NOTHING;
 COMMIT;

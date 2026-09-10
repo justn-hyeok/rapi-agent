@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@rapi/adapters": "0.1.0",
     "@rapi/agent": "0.1.0",
     "@rapi/config": "0.1.0",
-    "@rapi/core": "0.1.0"
+    "@rapi/core": "0.1.0",
+    "@rapi/db": "0.1.0"
   }
 }

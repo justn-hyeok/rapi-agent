@@ -1,0 +1,37 @@
+[Unit]
+Description=Rapi isolated public Codex executor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rapi-public
+Group=rapi
+WorkingDirectory=/var/lib/rapi-public/empty
+Environment=HOME=/var/lib/rapi-public
+Environment=CODEX_HOME=/var/lib/rapi-public/codex
+Environment=PUBLIC_AGENT_SOCKET=/run/rapi-public-agent/agent.sock
+Environment=PUBLIC_AGENT_WORKSPACE=/var/lib/rapi-public/empty
+Environment=PUBLIC_AGENT_RUNTIME=/var/lib/rapi-public/runtime
+Environment=PUBLIC_CODEX_BINARY=/opt/rapi-public-agent/codex
+Environment=PUBLIC_AGENT_CONCURRENCY=8
+Environment=PUBLIC_AGENT_HEALTH_PORT=3500
+ExecStart=/usr/bin/node /opt/rapi-public-agent/run.js
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=rapi-public-agent
+RuntimeDirectoryMode=0770
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rapi-public /run/rapi-public-agent
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

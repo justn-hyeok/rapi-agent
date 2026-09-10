@@ -20,8 +20,15 @@ done
 table_count=$("${compose[@]}" exec -T postgres psql -U rapi -d rapi -Atc \
   "SELECT count(*) FROM pg_tables WHERE schemaname = 'public';")
 
-if [[ "$table_count" -lt 19 ]]; then
-  echo "Expected at least 19 public tables after migration, found $table_count." >&2
+if [[ "$table_count" -lt 21 ]]; then
+  echo "Expected at least 21 public tables after migration, found $table_count." >&2
+  exit 1
+fi
+
+webhook_table_count=$("${compose[@]}" exec -T postgres psql -U rapi -d rapi -Atc \
+  "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('webhook_connections','webhook_receipts');")
+if [[ "$webhook_table_count" -ne 2 ]]; then
+  echo "Expected both managed webhook tables, found $webhook_table_count." >&2
   exit 1
 fi
 

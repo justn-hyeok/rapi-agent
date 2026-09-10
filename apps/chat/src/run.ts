@@ -1,7 +1,14 @@
 import { mkdir } from "node:fs/promises";
 import WebSocket from "ws";
+import { PublicAgentClient } from "@rapi/adapters";
+import { PublicCommunityService } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
-import { assertDiscordAccess, splitDiscordMessage } from "@rapi/core";
+import {
+  assertDiscordAccess,
+  createLocalHealthServer,
+  splitDiscordMessage,
+  summarizeReadiness,
+} from "@rapi/core";
 import { discordChatMessageSchema, redactChat } from "@rapi/contracts";
 import { PostgresStore, ChatOpsStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
@@ -31,10 +38,16 @@ const discordAccess = {
     ? { channelIds: config.DISCORD_ALLOWED_CHANNEL_IDS }
     : {}),
 };
-const store = new PostgresStore(config.DATABASE_URL);
+const store = new PostgresStore(config.DATABASE_URL, {
+  max: config.DB_POOL_MAX,
+  connectionTimeoutMs: config.DB_CONNECT_TIMEOUT_MS,
+  queryTimeoutMs: config.DB_QUERY_TIMEOUT_MS,
+});
 const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
+const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
+const publicCommunity = new PublicCommunityService(store, publicAgent);
 const intents = (1 << 0) | (1 << 9) | (1 << 15);
 await mkdir(chatWorkspace, { recursive: true });
 // One Gateway owner per database. Losing this session stops execution.
@@ -51,6 +64,26 @@ const chat = new ChatOrchestrator(
   async (channel, content) => {
     for (const chunk of splitDiscordMessage(redactChat(content)))
       await sendMessage(channel, chunk);
+  },
+  {
+    isAdminChannel: async (scope) => {
+      const configured = config.RAPI_ADMIN_CHANNEL_ID;
+      const managed = await store.managedDiscordResourceId(
+        scope.guild,
+        "channel",
+        "rapi_admin",
+      );
+      return scope.channel === (configured ?? managed);
+    },
+    answer: async (input) => {
+      return publicCommunity.answer({
+        guildId: input.guildId,
+        userId: input.userId,
+        requestId: input.requestId,
+        tier: input.tier,
+        text: input.text,
+      });
+    },
   },
 );
 lease.on("error", () => {
@@ -157,6 +190,7 @@ let heartbeatStart: NodeJS.Timeout | undefined;
 let reconnect: NodeJS.Timeout | undefined;
 let stopped = false;
 let awaitingHeartbeat = false;
+let gatewayReady = false;
 
 function send(payload: unknown): void {
   if (socket?.readyState === WebSocket.OPEN)
@@ -240,6 +274,7 @@ function connect(): void {
       };
       sessionId = ready.session_id;
       resumeUrl = ready.resume_gateway_url;
+      gatewayReady = true;
       process.stdout.write("rapi-chat connected to Discord Gateway\n");
     } else if (payload.op === 0 && payload.t === "MESSAGE_CREATE") {
       void enqueue(payload.d).catch(() =>
@@ -248,6 +283,7 @@ function connect(): void {
     }
   });
   socket.on("close", (code) => {
+    gatewayReady = false;
     if (heartbeat) clearInterval(heartbeat);
     if (heartbeatStart) clearTimeout(heartbeatStart);
     heartbeat = undefined;
@@ -265,6 +301,37 @@ function connect(): void {
 }
 
 connect();
+const healthServer = createLocalHealthServer(
+  config.CHAT_HEALTH_PORT,
+  async () => {
+    const db = await store.checkHealth();
+    const publicAgentReady = await publicAgent.readiness();
+    const now = new Date();
+    return summarizeReadiness([
+      {
+        name: "database",
+        status: "ok",
+        checkedAt: now.toISOString(),
+        required: true,
+        latencyMs: db.latencyMs,
+      },
+      {
+        name: "discord_gateway",
+        status: gatewayReady ? "ok" : "failed",
+        checkedAt: now.toISOString(),
+        required: true,
+        ...(gatewayReady ? {} : { reason: "gateway disconnected" }),
+      },
+      {
+        name: "public_agent",
+        status: publicAgentReady ? "ok" : "failed",
+        checkedAt: now.toISOString(),
+        required: true,
+        ...(publicAgentReady ? {} : { reason: "public agent unavailable" }),
+      },
+    ]);
+  },
+);
 
 const shutdown = (): void => {
   stopped = true;
@@ -272,6 +339,7 @@ const shutdown = (): void => {
   if (heartbeatStart) clearTimeout(heartbeatStart);
   if (reconnect) clearTimeout(reconnect);
   socket?.close(1000);
+  healthServer.close();
   void chat.shutdown().finally(async () => {
     lease.release();
     await store.close();

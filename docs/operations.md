@@ -43,7 +43,7 @@
 
 | 주체 | 허용 권한 | 기본 금지 |
 | --- | --- | --- |
-| Discord bot | 명령 수신, DM/허용 채널 읽기·쓰기 | 사용자 계정 로그인, 전체 서버 관리자 |
+| Discord bot | 서버 구성 적용을 위한 Administrator, 명령·역할·채널·웹훅 관리 | 사용자 계정 로그인, 애플리케이션 SUPERADMIN 승격 |
 | GitHub 수집 | metadata/content read, issues/PR read | 저장소 write |
 | GitHub 실행 | 작업별 승인된 repo write/PR 범위 | 조직 관리자, 무관 저장소 접근 |
 | 이메일 | 지정 발신자 주소의 send | mailbox 전체 읽기 |
@@ -179,6 +179,9 @@ npm run restore:smoke   # 격리된 임시 DB로 실제 복구 검증
 npm run restart:smoke   # PostgreSQL 재시작 전후 핵심 count 검증
 npm run start:bot       # Discord interaction/webhook 서버
 npm run start:worker    # GitHub/RSS 수집과 배치 발송 worker
+npm run start:monitor   # 독립 health 감시와 장애·복구 알림
+npm run db:migrate      # 로컬 또는 Supabase 지정 DB migration
+npm run backup          # 원자적 custom-format dump와 최근 7개 보존
 ```
 
 서비스 프로세스는 reverse proxy 뒤에서 실행하며 `/health`를 readiness 확인에 쓴다.
@@ -190,7 +193,8 @@ Docker volume `rapi-postgres`는 애플리케이션 컨테이너 교체와 분�
 승인을 요구하지 않는다. 이는 위 승인 초안의 자연어 ChatOps 경로를 대체한다.
 `/작업`·`/승인`은 기존 동작을 유지한다. 배포 시 기존 `npm run db:migrate`가
 0004를 적용한 뒤 기존 `rapi-chat.service`를 사용한다. 이번 구현 작업에서는
-운영 migration, 서비스 변경, 배포를 수행하지 않는다.
+운영 전환은 [커뮤니티 운영 전환](operations-webhooks.md)의 drain, 백업, readiness
+rollback 절차를 따른다.
 
 `npm run test:e2e`는 `compose.test.yaml`의 임시 PostgreSQL을 임의 로컬 포트에
 기동하고 **rapi_test만** 사용한다. migration 재적용도 검사하며 EXIT trap으로

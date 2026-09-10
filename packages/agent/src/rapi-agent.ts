@@ -133,6 +133,12 @@ export class RapiAgent {
   async collectConfiguredSources(
     feed: FeedSourceAdapter,
     github: GitHubSourceAdapter,
+    onInserted?: (input: {
+      sourceId: string;
+      sourceKind: "github" | "rss" | "webhook" | "aside";
+      itemId: string;
+      item: ExternalItem;
+    }) => Promise<void>,
   ): Promise<void> {
     const sources = await this.store.collectableSources();
     await this.collectIndependently(
@@ -144,8 +150,16 @@ export class RapiAgent {
               source.locator,
               source.etag ?? undefined,
             );
-            for (const item of result.items)
-              await this.ingestExternalItem(source.id, item);
+            for (const item of result.items) {
+              const saved = await this.ingestExternalItem(source.id, item);
+              if (saved.inserted)
+                await onInserted?.({
+                  sourceId: source.id,
+                  sourceKind: source.kind,
+                  itemId: saved.itemId,
+                  item,
+                });
+            }
             await this.store.saveCursor(
               source.id,
               new Date().toISOString(),
@@ -153,6 +167,7 @@ export class RapiAgent {
             );
             return;
           }
+          if (source.kind !== "github") return;
           const [owner, repository] = source.locator.split("/");
           if (!owner || !repository)
             throw new Error("GitHub source locator must be owner/repository");
@@ -161,8 +176,16 @@ export class RapiAgent {
             repository,
             source.etag ?? undefined,
           );
-          for (const item of result.items)
-            await this.ingestExternalItem(source.id, item);
+          for (const item of result.items) {
+            const saved = await this.ingestExternalItem(source.id, item);
+            if (saved.inserted)
+              await onInserted?.({
+                sourceId: source.id,
+                sourceKind: "github",
+                itemId: saved.itemId,
+                item,
+              });
+          }
           await this.store.saveCursor(
             source.id,
             new Date().toISOString(),

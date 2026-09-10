@@ -17,6 +17,11 @@ export const slashCommands = [
   "unsubscribe",
   "sources",
   "deliveries",
+  "status",
+  "webhook",
+  "usage",
+  "usage_policy",
+  "server_config",
   "chat_enable",
   "chat_disable",
   "task",
@@ -37,8 +42,23 @@ export interface DiscordCommandResult {
 export function requiredCommandAccess(
   command: DiscordCommand["name"],
 ): DiscordAccessLevel {
-  if (["task", "approve", "cancel"].includes(command)) return "superadmin";
-  if (["chat_enable", "chat_disable"].includes(command)) return "admin";
+  if (
+    ["task", "approve", "cancel", "webhook", "server_config"].includes(command)
+  )
+    return "superadmin";
+  if (
+    [
+      "chat_enable",
+      "chat_disable",
+      "status",
+      "sources",
+      "deliveries",
+      "usage_policy",
+      "subscribe",
+      "unsubscribe",
+    ].includes(command)
+  )
+    return "admin";
   return "user";
 }
 
@@ -73,6 +93,71 @@ export class DiscordCommandService {
   constructor(
     private readonly agent: RapiAgent,
     private readonly allowlists: DiscordAllowlists,
+    private readonly operations?: {
+      status: () => Promise<string>;
+      usage?: {
+        status(
+          guildId: string,
+          userId: string,
+          tier: "user" | "staff",
+        ): Promise<string>;
+        policy(guildId: string): Promise<string>;
+        update(
+          guildId: string,
+          actorId: string,
+          input: {
+            userDailyLimit?: number;
+            userCooldownSeconds?: number;
+            globalDailyLimit?: number;
+            globalConcurrency?: number;
+          },
+        ): Promise<string>;
+      };
+      serverConfig?: {
+        preview(
+          guildId: string,
+          actorId: string,
+        ): Promise<{ summary: string; planId: string }>;
+        apply(
+          guildId: string,
+          actorId: string,
+          planId: string,
+        ): Promise<string>;
+        export(guildId: string, format: "yaml" | "json"): Promise<string>;
+      };
+      publicBrief?: (
+        guildId: string,
+        userId: string,
+        requestId: string,
+        tier: "user" | "staff",
+      ) => Promise<string>;
+      webhooks?: {
+        register(input: {
+          guildId: string;
+          name: string;
+          kind: "github_inbound" | "generic_inbound" | "discord_outbound";
+          destinationKind?: "discord_channel" | "discord_webhook";
+          destinationId?: string;
+          eventFilters?: string[];
+          secret?: string;
+        }): Promise<{ id: string; endpoint?: string; secret?: string }>;
+        list(guildId: string): Promise<
+          Array<{
+            id: string;
+            name: string;
+            kind: string;
+            state: string;
+          }>
+        >;
+        detail(guildId: string, id: string): Promise<object>;
+        test(guildId: string, id: string): Promise<void>;
+        setState(
+          guildId: string,
+          id: string,
+          state: "active" | "disabled",
+        ): Promise<boolean>;
+      };
+    },
   ) {}
 
   async execute(
@@ -130,6 +215,19 @@ export class DiscordCommandService {
         };
       }
       case "brief": {
+        if (identity.guildId && this.operations?.publicBrief) {
+          return {
+            messages: splitDiscordMessage(
+              await this.operations.publicBrief(
+                identity.guildId,
+                ownerId,
+                optionalString(command.options, "requestId") ??
+                  `brief:${identity.guildId}:${ownerId}:${Date.now()}`,
+                level === "user" ? "user" : "staff",
+              ),
+            ),
+          };
+        }
         const subscriptionId =
           optionalString(command.options, "subscriptionId") ??
           (await this.agent.store.latestActiveSubscription(ownerId));
@@ -149,7 +247,7 @@ export class DiscordCommandService {
         };
       }
       case "search": {
-        const rows = await this.agent.store.search(
+        const rows = await this.agent.store.searchPublic(
           requiredString(command.options, "query"),
         );
         return {
@@ -166,6 +264,228 @@ export class DiscordCommandService {
       case "deliveries": {
         const rows = await this.agent.store.deliveryStatus();
         return { messages: splitDiscordMessage(JSON.stringify(rows, null, 2)) };
+      }
+      case "status": {
+        if (!this.operations)
+          throw new Error("운영 상태 기능이 설정되지 않았습니다.");
+        return {
+          messages: splitDiscordMessage(await this.operations.status()),
+        };
+      }
+      case "usage": {
+        if (!identity.guildId || !this.operations?.usage)
+          throw new Error("사용량 기능이 설정되지 않았습니다.");
+        return {
+          messages: splitDiscordMessage(
+            await this.operations.usage.status(
+              identity.guildId,
+              ownerId,
+              level === "user" ? "user" : "staff",
+            ),
+          ),
+        };
+      }
+      case "usage_policy": {
+        if (!identity.guildId || !this.operations?.usage)
+          throw new Error("사용 정책 기능이 설정되지 않았습니다.");
+        const action = optionalString(command.options, "action") ?? "조회";
+        if (action === "조회")
+          return {
+            messages: splitDiscordMessage(
+              await this.operations.usage.policy(identity.guildId),
+            ),
+          };
+        assertDiscordLevel(level, "superadmin");
+        const number = (name: string): number | undefined => {
+          const value = command.options[name];
+          if (value === undefined || value === null || value === "")
+            return undefined;
+          const parsed = Number(value);
+          if (!Number.isInteger(parsed))
+            throw new Error(`${name}은 정수여야 합니다.`);
+          return parsed;
+        };
+        const userDailyLimit = number("userDailyLimit");
+        const userCooldownSeconds = number("userCooldownSeconds");
+        const globalDailyLimit = number("globalDailyLimit");
+        const globalConcurrency = number("globalConcurrency");
+        if (userDailyLimit !== undefined && userDailyLimit < 1)
+          throw new Error("사용자 일일 한도는 1 이상이어야 합니다.");
+        if (userCooldownSeconds !== undefined && userCooldownSeconds < 0)
+          throw new Error("쿨다운은 0 이상이어야 합니다.");
+        if (globalDailyLimit !== undefined && globalDailyLimit < 1)
+          throw new Error("전체 일일 한도는 1 이상이어야 합니다.");
+        if (
+          globalConcurrency !== undefined &&
+          (globalConcurrency < 1 || globalConcurrency > 8)
+        )
+          throw new Error("동시 실행 수는 1~8이어야 합니다.");
+        const update: {
+          userDailyLimit?: number;
+          userCooldownSeconds?: number;
+          globalDailyLimit?: number;
+          globalConcurrency?: number;
+        } = {};
+        if (userDailyLimit !== undefined)
+          update.userDailyLimit = userDailyLimit;
+        if (userCooldownSeconds !== undefined)
+          update.userCooldownSeconds = userCooldownSeconds;
+        if (globalDailyLimit !== undefined)
+          update.globalDailyLimit = globalDailyLimit;
+        if (globalConcurrency !== undefined)
+          update.globalConcurrency = globalConcurrency;
+        return {
+          messages: splitDiscordMessage(
+            await this.operations.usage.update(
+              identity.guildId,
+              ownerId,
+              update,
+            ),
+          ),
+        };
+      }
+      case "server_config": {
+        if (!identity.guildId || !this.operations?.serverConfig)
+          throw new Error("서버 구성 기능이 설정되지 않았습니다.");
+        const action = optionalString(command.options, "action") ?? "미리보기";
+        if (action === "미리보기") {
+          const preview = await this.operations.serverConfig.preview(
+            identity.guildId,
+            ownerId,
+          );
+          return {
+            messages: splitDiscordMessage(preview.summary),
+            data: {
+              confirmationCustomId: `server_config_apply:${preview.planId}`,
+            },
+          };
+        }
+        if (action === "적용")
+          return {
+            messages: splitDiscordMessage(
+              await this.operations.serverConfig.apply(
+                identity.guildId,
+                ownerId,
+                requiredString(command.options, "planId"),
+              ),
+            ),
+          };
+        if (action === "내보내기") {
+          const format =
+            optionalString(command.options, "format") === "json"
+              ? "json"
+              : "yaml";
+          return {
+            messages: splitDiscordMessage(
+              await this.operations.serverConfig.export(
+                identity.guildId,
+                format,
+              ),
+            ),
+          };
+        }
+        throw new Error("지원하지 않는 서버 구성 동작입니다.");
+      }
+      case "webhook": {
+        if (!this.operations?.webhooks)
+          throw new Error("웹훅 관리 기능이 설정되지 않았습니다.");
+        if (!identity.guildId) throw new Error("서버 채널에서 실행하세요.");
+        const action = requiredString(command.options, "action");
+        if (action === "등록") {
+          const rawKind = requiredString(command.options, "kind");
+          const kind =
+            rawKind === "GitHub 수신"
+              ? "github_inbound"
+              : rawKind === "범용 수신"
+                ? "generic_inbound"
+                : rawKind === "Discord 발송"
+                  ? "discord_outbound"
+                  : undefined;
+          if (!kind) throw new Error("지원하지 않는 웹훅 종류입니다.");
+          const destinationType = optionalString(
+            command.options,
+            "destinationKind",
+          );
+          const destinationKind =
+            destinationType === "채널"
+              ? "discord_channel"
+              : destinationType === "웹훅"
+                ? "discord_webhook"
+                : undefined;
+          const created = await this.operations.webhooks.register({
+            guildId: identity.guildId,
+            name: requiredString(command.options, "name"),
+            kind,
+            ...(destinationKind ? { destinationKind } : {}),
+            ...(optionalString(command.options, "destinationId")
+              ? {
+                  destinationId: optionalString(
+                    command.options,
+                    "destinationId",
+                  )!,
+                }
+              : {}),
+            eventFilters: commaSeparated(
+              optionalString(command.options, "events"),
+            ),
+            ...(optionalString(command.options, "secret")
+              ? { secret: optionalString(command.options, "secret")! }
+              : {}),
+          });
+          const credentials = created.endpoint
+            ? `\n수신 URL: ${created.endpoint}\n비밀값(지금 한 번만 표시): ${created.secret}`
+            : "";
+          return {
+            messages: [`웹훅 연결을 등록했습니다: ${created.id}${credentials}`],
+            data: { id: created.id },
+          };
+        }
+        if (action === "목록") {
+          const connections = await this.operations.webhooks.list(
+            identity.guildId,
+          );
+          return {
+            messages: splitDiscordMessage(
+              connections.length
+                ? connections
+                    .map(
+                      (item) =>
+                        `${item.id} · ${item.name} · ${item.kind} · ${item.state}`,
+                    )
+                    .join("\n")
+                : "등록된 웹훅이 없습니다.",
+            ),
+          };
+        }
+        const id = requiredString(command.options, "id");
+        if (action === "상세") {
+          const item = await this.operations.webhooks.detail(
+            identity.guildId,
+            id,
+          );
+          return {
+            messages: splitDiscordMessage(JSON.stringify(item, null, 2)),
+          };
+        }
+        if (action === "테스트") {
+          await this.operations.webhooks.test(identity.guildId, id);
+          return { messages: ["웹훅 테스트를 접수했습니다."] };
+        }
+        if (action === "중지" || action === "재개") {
+          const changed = await this.operations.webhooks.setState(
+            identity.guildId,
+            id,
+            action === "중지" ? "disabled" : "active",
+          );
+          return {
+            messages: [
+              changed
+                ? `웹훅을 ${action}했습니다.`
+                : "변경할 웹훅을 찾지 못했습니다.",
+            ],
+          };
+        }
+        throw new Error("지원하지 않는 웹훅 동작입니다.");
       }
       case "chat_enable": {
         if (!identity.guildId || !identity.channelId)

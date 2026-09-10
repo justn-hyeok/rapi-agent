@@ -23,4 +23,7 @@ CREATE TABLE chat_messages (
 CREATE INDEX chat_messages_context_idx
   ON chat_messages (channel_id, created_at DESC);
 
+INSERT INTO schema_migrations (name) VALUES ('0003_chatops.sql')
+ON CONFLICT DO NOTHING;
+
 COMMIT;

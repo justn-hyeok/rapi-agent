@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "include": ["*.ts", "*.d.mts"],
+  "references": [
+    { "path": "../packages/config" },
+    { "path": "../packages/adapters" },
+    { "path": "../packages/agent" },
+    { "path": "../packages/db" },
+    { "path": "../apps/bot" }
+  ]
+}

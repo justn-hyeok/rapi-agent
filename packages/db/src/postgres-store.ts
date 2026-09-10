@@ -8,6 +8,7 @@ import type {
   SubscriptionInput,
   Visibility,
 } from "@rapi/core";
+import { usageWindow } from "@rapi/core";
 
 interface RawEventResult {
   id: string;
@@ -20,11 +21,89 @@ interface DeliveryAttemptResult {
   attempts: number;
 }
 
+export type WebhookConnectionKind =
+  | "github_inbound"
+  | "generic_inbound"
+  | "discord_outbound";
+
+export interface WebhookConnection {
+  id: string;
+  guildId: string;
+  name: string;
+  kind: WebhookConnectionKind;
+  sourceId: string | null;
+  destinationKind: "discord_channel" | "discord_webhook" | null;
+  destinationId: string | null;
+  eventFilters: string[];
+  secretCiphertext?: string;
+  state: "active" | "disabled";
+  lastReceivedAt: Date | null;
+  lastError: string | null;
+}
+
+export interface WebhookQueueJob {
+  id: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  maxAttempts: number;
+}
+
+export interface AiUsagePolicy {
+  guildId: string;
+  userDailyLimit: number;
+  userCooldownSeconds: number;
+  globalDailyLimit: number;
+  globalConcurrency: number;
+  timezone: string;
+  resetHour: number;
+  resetMinute: number;
+}
+
+export interface AiUsageReservation {
+  accepted: boolean;
+  duplicate: boolean;
+  reason?: "cooldown" | "user_limit" | "global_limit" | "concurrency";
+  remaining: number | null;
+  resetAt: Date;
+  retryAt?: Date;
+}
+
+export interface ManagedDiscordResourceRecord {
+  guildId: string;
+  resourceType: "role" | "category" | "channel" | "message" | "webhook";
+  key: string;
+  discordId: string;
+  layoutDigest: string;
+}
+
+export interface DiscordLayoutPlanRecord {
+  id: string;
+  guildId: string;
+  createdBy: string;
+  layoutDigest: string;
+  snapshotDigest: string;
+  payload: Record<string, unknown>;
+  expiresAt: Date;
+  appliedAt: Date | null;
+}
+
 export class PostgresStore {
   readonly pool: Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString, max: 10 });
+  constructor(
+    connectionString: string,
+    options: {
+      max?: number;
+      connectionTimeoutMs?: number;
+      queryTimeoutMs?: number;
+    } = {},
+  ) {
+    this.pool = new Pool({
+      connectionString,
+      max: options.max ?? 5,
+      connectionTimeoutMillis: options.connectionTimeoutMs ?? 5000,
+      query_timeout: options.queryTimeoutMs ?? 5000,
+    });
   }
 
   close(): Promise<void> {
@@ -56,7 +135,8 @@ export class PostgresStore {
       .query(`TRUNCATE chatops_memory_events, chatops_memory, chatops_events, chatops_runs,
       chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
       task_requests, mdx_publications, delivery_attempts, delivery_batch_items, delivery_batches,
-      subscriptions, summaries, classifications, item_relations, source_items, queue_jobs,
+      discord_layout_plans, discord_managed_resources, ai_usage_events, ai_usage_policies,
+      webhook_receipts, webhook_connections, subscriptions, summaries, classifications, item_relations, source_items, queue_jobs,
       source_cursors, raw_events, sources RESTART IDENTITY CASCADE`);
   }
 
@@ -483,9 +563,48 @@ export class PostgresStore {
     return result.rows;
   }
 
+  async searchPublic(
+    query: string,
+    limit = 20,
+  ): Promise<Array<{ id: string; title: string; url: string }>> {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      url: string;
+    }>(
+      `SELECT id,title,canonical_url AS url FROM source_items
+       WHERE visibility='public'
+         AND to_tsvector('simple',title || ' ' || body) @@ plainto_tsquery('simple',$1)
+       ORDER BY collected_at DESC LIMIT $2`,
+      [query, limit],
+    );
+    return result.rows;
+  }
+
+  async recentPublicItems(
+    limit = 20,
+    since = new Date(Date.now() - 86_400_000),
+  ): Promise<Array<{ title: string; url: string; summary: string }>> {
+    const result = await this.pool.query<{
+      title: string;
+      url: string;
+      summary: string;
+    }>(
+      `SELECT si.title,si.canonical_url AS url,
+        COALESCE((SELECT s.content FROM summaries s
+          WHERE si.id=ANY(s.evidence_item_ids) AND s.purpose='item'
+          ORDER BY s.created_at DESC LIMIT 1),left(si.body,1000)) AS summary
+       FROM source_items si
+       WHERE si.visibility='public' AND si.collected_at >= $1
+       ORDER BY COALESCE(si.published_at,si.collected_at) DESC LIMIT $2`,
+      [since, limit],
+    );
+    return result.rows;
+  }
+
   async sourceStatus(): Promise<Array<Record<string, unknown>>> {
     const result = await this.pool.query(
-      `SELECT s.id,s.kind,s.locator,c.last_success_at,c.last_error,COALESCE(c.failure_count,0) AS failure_count
+      `SELECT s.id,s.kind,s.locator,s.state,c.last_success_at,c.last_error,COALESCE(c.failure_count,0) AS failure_count
        FROM sources s LEFT JOIN source_cursors c ON c.source_id=s.id ORDER BY s.created_at`,
     );
     return result.rows;
@@ -540,6 +659,906 @@ export class PostgresStore {
       "SELECT id,state,period_start,period_end FROM delivery_batches ORDER BY created_at DESC LIMIT 20",
     );
     return result.rows;
+  }
+
+  async checkHealth(): Promise<{
+    latencyMs: number;
+    databaseBytes: number;
+    clusterDatabaseBytes: number;
+  }> {
+    const started = performance.now();
+    const result = await this.pool.query<{
+      bytes: string;
+      cluster_bytes: string;
+    }>(
+      `SELECT pg_database_size(current_database())::text AS bytes,
+        (SELECT sum(pg_database_size(datname))::text FROM pg_database) AS cluster_bytes`,
+    );
+    return {
+      latencyMs: Math.round(performance.now() - started),
+      databaseBytes: Number(result.rows[0]?.bytes ?? 0),
+      clusterDatabaseBytes: Number(result.rows[0]?.cluster_bytes ?? 0),
+    };
+  }
+
+  async upsertAiUsagePolicy(
+    input: Omit<AiUsagePolicy, "guildId"> & {
+      guildId: string;
+      updatedBy?: string;
+    },
+  ): Promise<void> {
+    // Validate the timezone before persisting a policy that cannot be evaluated.
+    usageWindow(new Date(), input.timezone, input.resetHour, input.resetMinute);
+    await this.pool.query(
+      `INSERT INTO ai_usage_policies
+        (guild_id,user_daily_limit,user_cooldown_seconds,global_daily_limit,
+         global_concurrency,timezone,reset_hour,reset_minute,updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (guild_id) DO UPDATE SET
+         user_daily_limit=EXCLUDED.user_daily_limit,
+         user_cooldown_seconds=EXCLUDED.user_cooldown_seconds,
+         global_daily_limit=EXCLUDED.global_daily_limit,
+         global_concurrency=EXCLUDED.global_concurrency,
+         timezone=EXCLUDED.timezone,reset_hour=EXCLUDED.reset_hour,
+         reset_minute=EXCLUDED.reset_minute,updated_by=EXCLUDED.updated_by,
+         updated_at=now()`,
+      [
+        input.guildId,
+        input.userDailyLimit,
+        input.userCooldownSeconds,
+        input.globalDailyLimit,
+        input.globalConcurrency,
+        input.timezone,
+        input.resetHour,
+        input.resetMinute,
+        input.updatedBy ?? null,
+      ],
+    );
+  }
+
+  async aiUsagePolicy(guildId: string): Promise<AiUsagePolicy> {
+    await this.pool.query(
+      `INSERT INTO ai_usage_policies(guild_id) VALUES($1)
+       ON CONFLICT (guild_id) DO NOTHING`,
+      [guildId],
+    );
+    const result = await this.pool.query<{
+      guild_id: string;
+      user_daily_limit: number;
+      user_cooldown_seconds: number;
+      global_daily_limit: number;
+      global_concurrency: number;
+      timezone: string;
+      reset_hour: number;
+      reset_minute: number;
+    }>("SELECT * FROM ai_usage_policies WHERE guild_id=$1", [guildId]);
+    const row = result.rows[0]!;
+    return {
+      guildId: row.guild_id,
+      userDailyLimit: row.user_daily_limit,
+      userCooldownSeconds: row.user_cooldown_seconds,
+      globalDailyLimit: row.global_daily_limit,
+      globalConcurrency: row.global_concurrency,
+      timezone: row.timezone,
+      resetHour: row.reset_hour,
+      resetMinute: row.reset_minute,
+    };
+  }
+
+  async reserveAiUsage(input: {
+    guildId: string;
+    userId: string;
+    requestId: string;
+    tier: "user" | "staff";
+    requestDigest?: string;
+    model?: string;
+    now?: Date;
+  }): Promise<AiUsageReservation> {
+    const now = input.now ?? new Date();
+    return this.transaction(async (client) => {
+      await client.query(
+        `INSERT INTO ai_usage_policies(guild_id) VALUES($1)
+         ON CONFLICT (guild_id) DO NOTHING`,
+        [input.guildId],
+      );
+      const policyResult = await client.query<{
+        user_daily_limit: number;
+        user_cooldown_seconds: number;
+        global_daily_limit: number;
+        global_concurrency: number;
+        timezone: string;
+        reset_hour: number;
+        reset_minute: number;
+      }>("SELECT * FROM ai_usage_policies WHERE guild_id=$1 FOR UPDATE", [
+        input.guildId,
+      ]);
+      const policy = policyResult.rows[0]!;
+      const window = usageWindow(
+        now,
+        policy.timezone,
+        policy.reset_hour,
+        policy.reset_minute,
+      );
+      await client.query(
+        `UPDATE ai_usage_events SET
+           state=CASE WHEN state='reserved' THEN 'released' ELSE 'failed' END,
+           finished_at=$2,updated_at=$2,error_code='stale_reservation'
+         WHERE guild_id=$1 AND state IN ('reserved','started')
+           AND reserved_at < $2::timestamptz - interval '2 minutes'`,
+        [input.guildId, now],
+      );
+      const existing = await client.query<{ state: string }>(
+        `SELECT state FROM ai_usage_events WHERE guild_id=$1 AND request_id=$2`,
+        [input.guildId, input.requestId],
+      );
+      if (existing.rows[0]) {
+        const status = await this.aiUsageStatusWithClient(
+          client,
+          input.guildId,
+          input.userId,
+          now,
+          policy,
+        );
+        return {
+          accepted: existing.rows[0].state !== "released",
+          duplicate: true,
+          remaining: input.tier === "staff" ? null : status.remaining,
+          resetAt: window.endsAt,
+        };
+      }
+      const active = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM ai_usage_events
+         WHERE guild_id=$1 AND state IN ('reserved','started')`,
+        [input.guildId],
+      );
+      if (Number(active.rows[0]?.count ?? 0) >= policy.global_concurrency)
+        return {
+          accepted: false,
+          duplicate: false,
+          reason: "concurrency",
+          remaining: input.tier === "staff" ? null : 0,
+          resetAt: window.endsAt,
+        };
+      const usage = await this.aiUsageStatusWithClient(
+        client,
+        input.guildId,
+        input.userId,
+        now,
+        policy,
+      );
+      if (input.tier === "user") {
+        if (usage.lastUsedAt) {
+          const retryAt = new Date(
+            usage.lastUsedAt.getTime() + policy.user_cooldown_seconds * 1_000,
+          );
+          if (retryAt > now)
+            return {
+              accepted: false,
+              duplicate: false,
+              reason: "cooldown",
+              remaining: usage.remaining,
+              resetAt: window.endsAt,
+              retryAt,
+            };
+        }
+        if (usage.used >= policy.user_daily_limit)
+          return {
+            accepted: false,
+            duplicate: false,
+            reason: "user_limit",
+            remaining: 0,
+            resetAt: window.endsAt,
+          };
+        if (usage.globalUsed >= policy.global_daily_limit)
+          return {
+            accepted: false,
+            duplicate: false,
+            reason: "global_limit",
+            remaining: Math.max(0, policy.user_daily_limit - usage.used),
+            resetAt: window.endsAt,
+          };
+      }
+      await client.query(
+        `INSERT INTO ai_usage_events
+          (id,guild_id,user_id,request_id,tier,state,window_start,window_end,reserved_at,request_digest,model)
+         VALUES ($1,$2,$3,$4,$5,'reserved',$6,$7,$8,$9,$10)`,
+        [
+          randomUUID(),
+          input.guildId,
+          input.userId,
+          input.requestId,
+          input.tier,
+          window.startsAt,
+          window.endsAt,
+          now,
+          input.requestDigest ?? "",
+          input.model ?? "gpt-5.3-codex-spark",
+        ],
+      );
+      return {
+        accepted: true,
+        duplicate: false,
+        remaining:
+          input.tier === "staff"
+            ? null
+            : Math.max(0, policy.user_daily_limit - usage.used - 1),
+        resetAt: window.endsAt,
+      };
+    });
+  }
+
+  private async aiUsageStatusWithClient(
+    client: PoolClient,
+    guildId: string,
+    userId: string,
+    now: Date,
+    policy: {
+      user_daily_limit: number;
+      global_daily_limit: number;
+      timezone: string;
+      reset_hour: number;
+      reset_minute: number;
+    },
+  ): Promise<{
+    used: number;
+    globalUsed: number;
+    remaining: number;
+    lastUsedAt: Date | null;
+  }> {
+    const window = usageWindow(
+      now,
+      policy.timezone,
+      policy.reset_hour,
+      policy.reset_minute,
+    );
+    const result = await client.query<{
+      used: string;
+      global_used: string;
+      last_used_at: Date | null;
+    }>(
+      `SELECT
+         count(*) FILTER (WHERE user_id=$2 AND tier='user')::text AS used,
+         count(*) FILTER (WHERE tier='user')::text AS global_used,
+         max(reserved_at) FILTER (WHERE user_id=$2 AND tier='user') AS last_used_at
+       FROM ai_usage_events
+       WHERE guild_id=$1 AND window_start=$3 AND state<>'released'`,
+      [guildId, userId, window.startsAt],
+    );
+    const used = Number(result.rows[0]?.used ?? 0);
+    return {
+      used,
+      globalUsed: Number(result.rows[0]?.global_used ?? 0),
+      remaining: Math.max(0, policy.user_daily_limit - used),
+      lastUsedAt: result.rows[0]?.last_used_at ?? null,
+    };
+  }
+
+  async markAiUsageStarted(requestId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ai_usage_events SET state='started',started_at=now(),updated_at=now()
+       WHERE request_id=$1 AND state='reserved'`,
+      [requestId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async finishAiUsage(
+    requestId: string,
+    state: "succeeded" | "failed",
+    errorCode?: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ai_usage_events SET state=$2,finished_at=now(),updated_at=now(),error_code=$3
+       WHERE request_id=$1 AND state IN ('reserved','started')`,
+      [requestId, state, errorCode?.slice(0, 100) ?? null],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async releaseAiUsage(requestId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE ai_usage_events SET state='released',finished_at=now(),updated_at=now()
+       WHERE request_id=$1 AND state='reserved'`,
+      [requestId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async aiUsageStatus(
+    guildId: string,
+    userId: string,
+    now = new Date(),
+  ): Promise<{
+    used: number;
+    remaining: number;
+    globalUsed: number;
+    globalRemaining: number;
+    resetAt: Date;
+  }> {
+    const policy = await this.aiUsagePolicy(guildId);
+    const client = await this.pool.connect();
+    try {
+      const status = await this.aiUsageStatusWithClient(
+        client,
+        guildId,
+        userId,
+        now,
+        {
+          user_daily_limit: policy.userDailyLimit,
+          global_daily_limit: policy.globalDailyLimit,
+          timezone: policy.timezone,
+          reset_hour: policy.resetHour,
+          reset_minute: policy.resetMinute,
+        },
+      );
+      const window = usageWindow(
+        now,
+        policy.timezone,
+        policy.resetHour,
+        policy.resetMinute,
+      );
+      return {
+        used: status.used,
+        remaining: status.remaining,
+        globalUsed: status.globalUsed,
+        globalRemaining: Math.max(
+          0,
+          policy.globalDailyLimit - status.globalUsed,
+        ),
+        resetAt: window.endsAt,
+      };
+    } finally {
+      client.release();
+    }
+  }
+
+  async managedDiscordResourceId(
+    guildId: string,
+    resourceType: "role" | "category" | "channel" | "message" | "webhook",
+    key: string,
+  ): Promise<string | null> {
+    const result = await this.pool.query<{ discord_id: string }>(
+      `SELECT discord_id FROM discord_managed_resources
+       WHERE guild_id=$1 AND resource_type=$2 AND resource_key=$3`,
+      [guildId, resourceType, key],
+    );
+    return result.rows[0]?.discord_id ?? null;
+  }
+
+  async listManagedDiscordResources(
+    guildId: string,
+  ): Promise<ManagedDiscordResourceRecord[]> {
+    const result = await this.pool.query<{
+      guild_id: string;
+      resource_type: ManagedDiscordResourceRecord["resourceType"];
+      resource_key: string;
+      discord_id: string;
+      last_applied_digest: string;
+    }>(
+      `SELECT guild_id,resource_type,resource_key,discord_id,last_applied_digest
+       FROM discord_managed_resources WHERE guild_id=$1
+       ORDER BY resource_type,resource_key`,
+      [guildId],
+    );
+    return result.rows.map((row) => ({
+      guildId: row.guild_id,
+      resourceType: row.resource_type,
+      key: row.resource_key,
+      discordId: row.discord_id,
+      layoutDigest: row.last_applied_digest,
+    }));
+  }
+
+  async upsertManagedDiscordResource(input: {
+    guildId: string;
+    resourceType: ManagedDiscordResourceRecord["resourceType"];
+    key: string;
+    discordId: string;
+    layoutDigest: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO discord_managed_resources
+        (guild_id,resource_type,resource_key,discord_id,last_applied_digest)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (guild_id,resource_type,resource_key) DO UPDATE SET
+         discord_id=EXCLUDED.discord_id,
+         last_applied_digest=EXCLUDED.last_applied_digest,updated_at=now()`,
+      [
+        input.guildId,
+        input.resourceType,
+        input.key,
+        input.discordId,
+        input.layoutDigest,
+      ],
+    );
+  }
+
+  async removeManagedDiscordResource(
+    guildId: string,
+    resourceType: ManagedDiscordResourceRecord["resourceType"],
+    discordId: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `DELETE FROM discord_managed_resources
+       WHERE guild_id=$1 AND resource_type=$2 AND discord_id=$3`,
+      [guildId, resourceType, discordId],
+    );
+  }
+
+  async createDiscordLayoutPlan(input: {
+    guildId: string;
+    createdBy: string;
+    layoutDigest: string;
+    snapshotDigest: string;
+    payload: Record<string, unknown>;
+    expiresAt: Date;
+  }): Promise<string> {
+    const id = randomUUID();
+    await this.pool.query(
+      `INSERT INTO discord_layout_plans
+        (id,guild_id,created_by,layout_digest,snapshot_digest,actions,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)`,
+      [
+        id,
+        input.guildId,
+        input.createdBy,
+        input.layoutDigest,
+        input.snapshotDigest,
+        JSON.stringify(input.payload),
+        input.expiresAt,
+      ],
+    );
+    return id;
+  }
+
+  async discordLayoutPlan(
+    guildId: string,
+    id: string,
+  ): Promise<DiscordLayoutPlanRecord | null> {
+    const result = await this.pool.query<{
+      id: string;
+      guild_id: string;
+      created_by: string;
+      layout_digest: string;
+      snapshot_digest: string;
+      actions: Record<string, unknown>;
+      expires_at: Date;
+      applied_at: Date | null;
+    }>(
+      `SELECT id,guild_id,created_by,layout_digest,snapshot_digest,actions,
+              expires_at,applied_at
+       FROM discord_layout_plans WHERE guild_id=$1 AND id=$2`,
+      [guildId, id],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          guildId: row.guild_id,
+          createdBy: row.created_by,
+          layoutDigest: row.layout_digest,
+          snapshotDigest: row.snapshot_digest,
+          payload: row.actions,
+          expiresAt: row.expires_at,
+          appliedAt: row.applied_at,
+        }
+      : null;
+  }
+
+  async markDiscordLayoutPlanApplied(
+    guildId: string,
+    id: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE discord_layout_plans SET applied_at=now()
+       WHERE guild_id=$1 AND id=$2 AND applied_at IS NULL AND expires_at>now()`,
+      [guildId, id],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async claimDiscordLayoutPlan(guildId: string, id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE discord_layout_plans SET apply_started_at=now()
+       WHERE guild_id=$1 AND id=$2 AND applied_at IS NULL
+         AND apply_started_at IS NULL AND expires_at>now()`,
+      [guildId, id],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async releaseDiscordLayoutPlanClaim(
+    guildId: string,
+    id: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE discord_layout_plans SET apply_started_at=NULL
+       WHERE guild_id=$1 AND id=$2 AND applied_at IS NULL`,
+      [guildId, id],
+    );
+  }
+
+  async createWebhookConnection(input: {
+    guildId: string;
+    name: string;
+    kind: WebhookConnectionKind;
+    destinationKind?: "discord_channel" | "discord_webhook";
+    destinationId?: string;
+    eventFilters: string[];
+    secretCiphertext: string;
+  }): Promise<{ id: string; sourceId: string | null }> {
+    return this.transaction(async (client) => {
+      const id = randomUUID();
+      let sourceId: string | null = null;
+      if (input.kind !== "discord_outbound") {
+        sourceId = randomUUID();
+        await client.query(
+          `INSERT INTO sources (id,kind,locator,collection_policy)
+           VALUES ($1,'webhook',$2,jsonb_build_object('visibility','private'))`,
+          [sourceId, `managed://${id}`],
+        );
+      }
+      const result = await client.query<{
+        id: string;
+        source_id: string | null;
+      }>(
+        `INSERT INTO webhook_connections
+          (id,guild_id,name,kind,source_id,destination_kind,destination_id,event_filters,secret_ciphertext)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING id,source_id`,
+        [
+          id,
+          input.guildId,
+          input.name,
+          input.kind,
+          sourceId,
+          input.destinationKind ?? null,
+          input.destinationId ?? null,
+          input.eventFilters,
+          input.secretCiphertext,
+        ],
+      );
+      return {
+        id: result.rows[0]!.id,
+        sourceId: result.rows[0]!.source_id,
+      };
+    });
+  }
+
+  async listWebhookConnections(
+    guildId: string,
+    includeSecrets = false,
+  ): Promise<WebhookConnection[]> {
+    const result = await this.pool.query<{
+      id: string;
+      guild_id: string;
+      name: string;
+      kind: WebhookConnectionKind;
+      source_id: string | null;
+      destination_kind: "discord_channel" | "discord_webhook" | null;
+      destination_id: string | null;
+      event_filters: string[];
+      secret_ciphertext: string;
+      state: "active" | "disabled";
+      last_received_at: Date | null;
+      last_error: string | null;
+    }>(
+      `SELECT id,guild_id,name,kind,source_id,destination_kind,destination_id,event_filters,
+              secret_ciphertext,state,last_received_at,last_error
+       FROM webhook_connections WHERE guild_id=$1 ORDER BY created_at`,
+      [guildId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      guildId: row.guild_id,
+      name: row.name,
+      kind: row.kind,
+      sourceId: row.source_id,
+      destinationKind: row.destination_kind,
+      destinationId: row.destination_id,
+      eventFilters: row.event_filters,
+      ...(includeSecrets ? { secretCiphertext: row.secret_ciphertext } : {}),
+      state: row.state,
+      lastReceivedAt: row.last_received_at,
+      lastError: row.last_error,
+    }));
+  }
+
+  async getWebhookConnection(
+    connectionId: string,
+    includeSecret = false,
+  ): Promise<WebhookConnection | null> {
+    const result = await this.pool.query<{ guild_id: string }>(
+      "SELECT guild_id FROM webhook_connections WHERE id=$1",
+      [connectionId],
+    );
+    if (!result.rows[0]) return null;
+    const connections = await this.listWebhookConnections(
+      result.rows[0].guild_id,
+      includeSecret,
+    );
+    return (
+      connections.find((connection) => connection.id === connectionId) ?? null
+    );
+  }
+
+  async setWebhookConnectionState(
+    guildId: string,
+    id: string,
+    state: "active" | "disabled",
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE webhook_connections SET state=$3,updated_at=now()
+       WHERE id=$1 AND guild_id=$2 AND state<>$3`,
+      [id, guildId, state],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async webhookConnectionByName(
+    guildId: string,
+    name: string,
+    includeSecret = false,
+  ): Promise<WebhookConnection | null> {
+    const connections = await this.listWebhookConnections(
+      guildId,
+      includeSecret,
+    );
+    return connections.find((connection) => connection.name === name) ?? null;
+  }
+
+  async ingestManagedWebhook(input: {
+    connectionId: string;
+    deliveryId: string;
+    eventType: string;
+    payloadHash: string;
+    rawPayload: Record<string, unknown>;
+    item: NormalizedItem;
+    summary: string;
+  }): Promise<{ inserted: boolean; itemId?: string }> {
+    return this.transaction(async (client) => {
+      const connection = await client.query<{
+        source_id: string;
+        destination_kind: string;
+        destination_id: string;
+        event_filters: string[];
+        state: string;
+      }>(
+        `SELECT source_id,destination_kind,destination_id,event_filters,state
+         FROM webhook_connections WHERE id=$1 FOR UPDATE`,
+        [input.connectionId],
+      );
+      const target = connection.rows[0];
+      if (!target || target.state !== "active" || !target.source_id)
+        throw new Error("Webhook connection is not active");
+      if (
+        target.event_filters.length > 0 &&
+        !target.event_filters.includes(input.eventType)
+      )
+        throw new Error("Webhook event type is not allowed");
+      const existing = await client.query<{
+        payload_hash: string;
+        source_item_id: string | null;
+      }>(
+        `SELECT payload_hash,source_item_id FROM webhook_receipts
+         WHERE connection_id=$1 AND external_event_id=$2`,
+        [input.connectionId, input.deliveryId],
+      );
+      if (existing.rows[0]) {
+        if (existing.rows[0].payload_hash !== input.payloadHash)
+          throw new Error("Webhook delivery ID has a conflicting payload");
+        return {
+          inserted: false,
+          ...(existing.rows[0].source_item_id
+            ? { itemId: existing.rows[0].source_item_id }
+            : {}),
+        };
+      }
+      await client.query(
+        `INSERT INTO raw_events
+          (id,source_id,external_event_id,canonical_payload_hash,payload,collected_at)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6)`,
+        [
+          input.item.rawEventId,
+          target.source_id,
+          input.deliveryId,
+          input.payloadHash,
+          JSON.stringify(input.rawPayload),
+          input.item.collectedAt,
+        ],
+      );
+      await client.query(
+        `INSERT INTO source_items
+          (id,raw_event_id,normalizer_version,canonical_url,title,body,author,published_at,
+           collected_at,visibility,content_fingerprint,metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+        [
+          input.item.id,
+          input.item.rawEventId,
+          input.item.normalizerVersion,
+          input.item.canonicalUrl,
+          input.item.title,
+          input.item.body,
+          input.item.author,
+          input.item.publishedAt,
+          input.item.collectedAt,
+          input.item.visibility,
+          input.item.contentFingerprint,
+          JSON.stringify({
+            ...input.item.metadata,
+            sourceId: target.source_id,
+          }),
+        ],
+      );
+      for (const category of input.item.categories)
+        await client.query(
+          `INSERT INTO classifications
+            (id,source_item_id,taxonomy_version,label,score,evidence)
+           VALUES ($1,$2,'rules-v1',$3,1,'deterministic keyword rule')`,
+          [randomUUID(), input.item.id, category],
+        );
+      await client.query(
+        `INSERT INTO summaries
+          (id,purpose,cache_key,model_policy_version,prompt_version,content,evidence_item_ids)
+         VALUES ($1,'item',$2,'rules-v1','summary-v1',$3,$4::uuid[])`,
+        [
+          randomUUID(),
+          `${input.item.id}:item:rules-v1:summary-v1`,
+          input.summary,
+          [input.item.id],
+        ],
+      );
+      await client.query(
+        `INSERT INTO webhook_receipts
+          (id,connection_id,external_event_id,payload_hash,event_type,source_item_id)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          randomUUID(),
+          input.connectionId,
+          input.deliveryId,
+          input.payloadHash,
+          input.eventType,
+          input.item.id,
+        ],
+      );
+      await client.query(
+        `INSERT INTO queue_jobs (id,kind,payload,state,idempotency_key)
+         VALUES ($1,'webhook_delivery',$2::jsonb,'ready',$3)`,
+        [
+          randomUUID(),
+          JSON.stringify({
+            sourceConnectionId: input.connectionId,
+            destinationKind: target.destination_kind,
+            destinationId: target.destination_id,
+            itemId: input.item.id,
+            title: input.item.title,
+            summary: input.summary,
+            url: input.item.canonicalUrl,
+            sentChunks: 0,
+          }),
+          `webhook:${input.connectionId}:${input.deliveryId}`,
+        ],
+      );
+      await client.query(
+        `UPDATE webhook_connections SET last_received_at=now(),last_error=NULL,updated_at=now()
+         WHERE id=$1`,
+        [input.connectionId],
+      );
+      return { inserted: true, itemId: input.item.id };
+    });
+  }
+
+  async enqueueWebhookJob(
+    idempotencyKey: string,
+    payload: Record<string, unknown>,
+    maxAttempts = 5,
+  ): Promise<string> {
+    const id = randomUUID();
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO queue_jobs (id,kind,payload,state,max_attempts,idempotency_key)
+       VALUES ($1,'webhook_delivery',$2::jsonb,'ready',$3,$4)
+       ON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key
+       RETURNING id`,
+      [id, JSON.stringify(payload), maxAttempts, idempotencyKey],
+    );
+    return result.rows[0]!.id;
+  }
+
+  async leaseWebhookJobs(
+    limit: number,
+    leaseMs: number,
+  ): Promise<WebhookQueueJob[]> {
+    const result = await this.pool.query<{
+      id: string;
+      payload: Record<string, unknown>;
+      attempts: number;
+      max_attempts: number;
+    }>(
+      `WITH candidates AS (
+         SELECT id FROM queue_jobs
+         WHERE kind='webhook_delivery'
+           AND attempts < max_attempts
+           AND available_at <= now()
+           AND (state='ready' OR (state='leased' AND lease_expires_at <= now()))
+         ORDER BY available_at,created_at
+         FOR UPDATE SKIP LOCKED LIMIT $1
+       )
+       UPDATE queue_jobs q SET state='leased',lease_expires_at=now()+($2 * interval '1 millisecond'),updated_at=now()
+       FROM candidates WHERE q.id=candidates.id
+       RETURNING q.id,q.payload,q.attempts,q.max_attempts`,
+      [limit, leaseMs],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      payload: row.payload,
+      attempts: row.attempts,
+      maxAttempts: row.max_attempts,
+    }));
+  }
+
+  async updateWebhookJobProgress(
+    id: string,
+    sentChunks: number,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE queue_jobs SET payload=jsonb_set(payload,'{sentChunks}',to_jsonb($2::int)),updated_at=now()
+       WHERE id=$1 AND state='leased'`,
+      [id, sentChunks],
+    );
+  }
+
+  async completeWebhookJob(id: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE queue_jobs SET state='done',lease_expires_at=NULL,updated_at=now()
+       WHERE id=$1 AND state='leased'`,
+      [id],
+    );
+  }
+
+  async releaseWebhookJob(id: string, delayMs: number): Promise<void> {
+    await this.pool.query(
+      `UPDATE queue_jobs SET state='ready',available_at=now()+($2 * interval '1 millisecond'),
+       lease_expires_at=NULL,updated_at=now() WHERE id=$1 AND state='leased'`,
+      [id, delayMs],
+    );
+  }
+
+  async failWebhookJob(
+    id: string,
+    error: string,
+    delayMs: number,
+    retryable: boolean,
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE queue_jobs SET
+         attempts=attempts+1,
+         state=CASE WHEN $4 AND attempts+1 < max_attempts THEN 'ready' ELSE 'dead_letter' END,
+         available_at=CASE WHEN $4 THEN now()+($3 * interval '1 millisecond') ELSE available_at END,
+         lease_expires_at=NULL,last_error=$2,updated_at=now()
+       WHERE id=$1 AND state='leased'`,
+      [id, error.slice(0, 500), delayMs, retryable],
+    );
+  }
+
+  async webhookQueueStatus(): Promise<{
+    ready: number;
+    leased: number;
+    done: number;
+    deadLetter: number;
+  }> {
+    const result = await this.pool.query<{ state: string; count: string }>(
+      `SELECT state,count(*)::text AS count FROM queue_jobs
+       WHERE kind='webhook_delivery' GROUP BY state`,
+    );
+    const counts = Object.fromEntries(
+      result.rows.map((row) => [row.state, Number(row.count)]),
+    );
+    return {
+      ready: counts.ready ?? 0,
+      leased: counts.leased ?? 0,
+      done: counts.done ?? 0,
+      deadLetter: counts.dead_letter ?? 0,
+    };
   }
 
   async createTask(

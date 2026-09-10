@@ -60,7 +60,21 @@ describe("external input boundaries", () => {
   });
 
   it("registers simple Korean slash commands", () => {
-    assert.equal(slashCommandDefinitions.length, 11);
+    assert.equal(slashCommandDefinitions.length, 16);
+    const optionNames = slashCommandDefinitions.flatMap((command) =>
+      (command.options ?? []).flatMap((option) => [
+        option.name,
+        ...(
+          ("options" in option && Array.isArray(option.options)
+            ? option.options
+            : []) as Array<{ name: string }>
+        ).map((nested) => nested.name),
+      ]),
+    );
+    assert.equal(
+      optionNames.some((name) => /[A-Z]/.test(name)),
+      false,
+    );
     assert.deepEqual(
       slashCommandDefinitions.map((command) => command.name),
       [
@@ -70,6 +84,11 @@ describe("external input boundaries", () => {
         "구독해제",
         "수집원",
         "발송내역",
+        "상태",
+        "사용량",
+        "사용정책",
+        "서버구성",
+        "웹훅",
         "대화채널",
         "대화해제",
         "작업",
@@ -186,5 +205,7 @@ describe("external input boundaries", () => {
     assert.equal(requiredCommandAccess("chat_enable"), "admin");
     assert.equal(requiredCommandAccess("task"), "superadmin");
     assert.equal(requiredCommandAccess("approve"), "superadmin");
+    assert.equal(requiredCommandAccess("status"), "admin");
+    assert.equal(requiredCommandAccess("webhook"), "superadmin");
   });
 });

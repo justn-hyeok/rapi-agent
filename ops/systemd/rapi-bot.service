@@ -1,13 +1,11 @@
 [Unit]
 Description=Rapi Discord bot and webhook API
-After=network-online.target docker.service
+After=network-online.target rapi-public-agent.service
 Wants=network-online.target
-Requires=docker.service
 
 [Service]
 Type=simple
 User=justn
-Group=docker
 WorkingDirectory=/home/justn/rapi-agent
 ExecStart=/usr/local/bin/npm run start:bot
 Restart=on-failure
@@ -16,7 +14,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/justn/rapi-agent
+ReadWritePaths=/home/justn/rapi-agent /var/lib/rapi /run/rapi-public-agent
+SupplementaryGroups=rapi
 
 [Install]
 WantedBy=multi-user.target

@@ -1,6 +1,6 @@
 [Unit]
 Description=Rapi Discord Gateway ChatOps service
-After=network-online.target rapi-bot.service
+After=network-online.target rapi-bot.service rapi-public-agent.service
 Wants=network-online.target
 Requires=rapi-bot.service
 
@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/npm run start:chat
 Restart=on-failure
 RestartSec=5
 PrivateTmp=true
+SupplementaryGroups=rapi
 
 [Install]
 WantedBy=multi-user.target

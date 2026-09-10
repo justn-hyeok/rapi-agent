@@ -2,10 +2,14 @@ import { spawn } from "node:child_process";
 
 const botToken = process.env.DISCORD_BOT_TOKEN;
 if (!botToken) throw new Error("DISCORD_BOT_TOKEN is required");
+const tunnelToken = process.env.CLOUDFLARE_TUNNEL_TOKEN;
+const fixedOrigin = process.env.RAPI_PUBLIC_BASE_URL?.replace(/\/$/, "");
 
 const tunnel = spawn(
   "/usr/bin/cloudflared",
-  ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:3000"],
+  tunnelToken
+    ? ["tunnel", "--no-autoupdate", "run", "--token", tunnelToken]
+    : ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:3000"],
   { stdio: ["ignore", "pipe", "pipe"] },
 );
 
@@ -52,8 +56,10 @@ function consume(chunk) {
   const text = chunk.toString();
   process.stdout.write(text);
   output = (output + text).slice(-20_000);
-  const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
-  if (match) void configureDiscord(match[0]);
+  if (!fixedOrigin) {
+    const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+    if (match) void configureDiscord(match[0]);
+  }
 }
 
 tunnel.stdout.on("data", consume);
@@ -66,6 +72,8 @@ tunnel.on("exit", (code, signal) => {
   if (signal) process.stderr.write(`cloudflared stopped by ${signal}\n`);
   process.exit(code ?? 1);
 });
+
+if (fixedOrigin) setTimeout(() => void configureDiscord(fixedOrigin), 2000);
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => tunnel.kill(signal));
