@@ -1,8 +1,9 @@
 [Unit]
 Description=Rapi Discord Gateway ChatOps service
-After=network-online.target rapi-bot.service rapi-public-agent.service
+After=network-online.target
 Wants=network-online.target
-Requires=rapi-bot.service
+StartLimitIntervalSec=10min
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -10,7 +11,7 @@ User=justn
 WorkingDirectory=/home/justn/rapi-agent
 ExecStart=/usr/local/bin/npm run start:chat
 Restart=on-failure
-RestartSec=5
+RestartSec=30
 PrivateTmp=true
 SupplementaryGroups=rapi
 

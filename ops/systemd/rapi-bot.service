@@ -1,7 +1,9 @@
 [Unit]
 Description=Rapi Discord bot and webhook API
-After=network-online.target rapi-public-agent.service
+After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=10min
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -9,12 +11,12 @@ User=justn
 WorkingDirectory=/home/justn/rapi-agent
 ExecStart=/usr/local/bin/npm run start:bot
 Restart=on-failure
-RestartSec=5
+RestartSec=30
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/justn/rapi-agent /var/lib/rapi /run/rapi-public-agent
+ReadWritePaths=/home/justn/rapi-agent /var/lib/rapi
 SupplementaryGroups=rapi
 
 [Install]
