@@ -26,6 +26,8 @@
     "discord:rotate-token": "./scripts/rotate-discord-token.sh",
     "discord:register-commands": "node --env-file=.env --import tsx scripts/register-discord-commands.ts",
     "tunnel:configure": "./scripts/configure-cloudflare-tunnel.sh",
+    "web-proxy:install": "./scripts/install-web-proxy.sh",
+    "web-proxy:test": "node --test ops/web-proxy/proxy.test.mjs",
     "community:configure": "./scripts/configure-community.sh",
     "discord-layout:import": "node --import tsx scripts/import-discord-layout.ts",
     "public-agent:install": "./scripts/install-public-agent.sh",

@@ -54,6 +54,7 @@ Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업
 - [용어와 실행 계약](docs/contracts.md)
 - [운영, 권한, 보안](docs/operations.md)
 - [Supabase, 상태 감시와 관리형 웹훅](docs/operations-webhooks.md)
+- [맥용 제한 웹 프록시](docs/web-proxy.md)
 - [구현 로드맵](docs/roadmap.md)
 - [결정 기록](docs/decisions.md)
 

@@ -1,0 +1,31 @@
+[Unit]
+Description=Rapi SSH-only allowlist web proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rapi-web-proxy
+Group=rapi-web-proxy
+WorkingDirectory=/opt/rapi-web-proxy
+Environment=WEB_PROXY_PORT=3800
+Environment=WEB_PROXY_CLIENT_HOST=rapi-agent
+Environment=WEB_PROXY_CLIENT_PORT=3800
+ExecStart=/usr/local/bin/node /opt/rapi-web-proxy/run.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
