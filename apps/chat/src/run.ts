@@ -326,7 +326,7 @@ const healthServer = createLocalHealthServer(
         name: "public_agent",
         status: publicAgentReady ? "ok" : "failed",
         checkedAt: now.toISOString(),
-        required: true,
+        required: config.PUBLIC_AGENT_ENABLED,
         ...(publicAgentReady ? {} : { reason: "public agent unavailable" }),
       },
     ]);

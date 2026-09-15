@@ -254,16 +254,22 @@ async function check(): Promise<void> {
   checking = true;
   try {
     const now = new Date();
-    const endpoints = await Promise.all([
+    const checks = [
       checkEndpoint("bot", config.BOT_READY_URL),
       checkEndpoint("chat", config.CHAT_READY_URL),
       checkEndpoint("worker", config.WORKER_READY_URL),
       checkEndpoint("omp", config.OMP_READY_URL),
-      checkEndpoint("public_agent", config.PUBLIC_AGENT_READY_URL),
-      checkEndpoint("public_gateway", config.PUBLIC_GATEWAY_READY_URL),
-      checkEndpoint("cloudflare_tunnel", config.CLOUDFLARE_TUNNEL_READY_URL),
       checkBackup(),
-    ]);
+    ];
+    if (config.PUBLIC_AGENT_ENABLED)
+      checks.push(checkEndpoint("public_agent", config.PUBLIC_AGENT_READY_URL));
+    if (config.RAPI_PUBLIC_BASE_URL) {
+      checks.push(
+        checkEndpoint("public_gateway", config.PUBLIC_GATEWAY_READY_URL),
+        checkEndpoint("cloudflare_tunnel", config.CLOUDFLARE_TUNNEL_READY_URL),
+      );
+    }
+    const endpoints = await Promise.all(checks);
     const capacity = await checkDatabaseCapacity(now);
     state.components = [...endpoints, ...(capacity ? [capacity] : [])];
     for (const component of endpoints) {

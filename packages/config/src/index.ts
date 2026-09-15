@@ -79,6 +79,7 @@ export const environmentSchema = z
     PUBLIC_AGENT_SOCKET: z
       .string()
       .default("/run/rapi-public-agent/agent.sock"),
+    PUBLIC_AGENT_ENABLED: booleanString,
     PUBLIC_AGENT_READY_URL: z
       .string()
       .url()

@@ -299,7 +299,7 @@ const server = createDiscordInteractionServer(
             name: "public-agent",
             status: publicReady ? "ok" : "failed",
             checkedAt: new Date().toISOString(),
-            required: true,
+            required: config.PUBLIC_AGENT_ENABLED,
             ...(publicReady ? {} : { reason: "public executor unavailable" }),
           },
         ]);

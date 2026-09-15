@@ -12,6 +12,17 @@ const validEnvironment = {
 };
 
 describe("environment configuration", () => {
+  it("keeps the isolated public agent disabled until configured", () => {
+    assert.equal(loadEnvironment(validEnvironment).PUBLIC_AGENT_ENABLED, false);
+    assert.equal(
+      loadEnvironment({
+        ...validEnvironment,
+        PUBLIC_AGENT_ENABLED: "true",
+      }).PUBLIC_AGENT_ENABLED,
+      true,
+    );
+  });
+
   it("parses allowlists before application startup", () => {
     const config = loadEnvironment({
       ...validEnvironment,
