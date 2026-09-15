@@ -13,6 +13,7 @@ import { discordChatMessageSchema, redactChat } from "@rapi/contracts";
 import { PostgresStore, ChatOpsStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
+import { establishesGatewaySession } from "./gateway-state.js";
 
 const config = loadEnvironment();
 const discordAccess = {
@@ -267,15 +268,19 @@ function connect(): void {
         sequence = null;
       }
       socket?.terminate();
-    } else if (payload.op === 0 && payload.t === "READY") {
-      const ready = payload.d as {
-        session_id: string;
-        resume_gateway_url: string;
-      };
-      sessionId = ready.session_id;
-      resumeUrl = ready.resume_gateway_url;
+    } else if (payload.op === 0 && establishesGatewaySession(payload.t)) {
+      if (payload.t === "READY") {
+        const ready = payload.d as {
+          session_id: string;
+          resume_gateway_url: string;
+        };
+        sessionId = ready.session_id;
+        resumeUrl = ready.resume_gateway_url;
+      }
       gatewayReady = true;
-      process.stdout.write("rapi-chat connected to Discord Gateway\n");
+      process.stdout.write(
+        `rapi-chat ${payload.t === "RESUMED" ? "resumed" : "connected"} Discord Gateway session\n`,
+      );
     } else if (payload.op === 0 && payload.t === "MESSAGE_CREATE") {
       void enqueue(payload.d).catch(() =>
         process.stderr.write("ChatOps request failed\n"),
