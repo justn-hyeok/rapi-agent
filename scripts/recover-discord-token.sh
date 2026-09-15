@@ -15,7 +15,15 @@ cleanup() {
 }
 trap cleanup ERR
 
-"${root[@]}" systemctl enable --now rapi-bot.service rapi-chat.service
+"${root[@]}" systemctl enable --now \
+  rapi-bot.service \
+  rapi-chat.service \
+  rapi-omp.service \
+  rapi-public-gateway.service
+
+if [[ -f /var/lib/rapi/cloudflared/config.yml ]]; then
+  "${root[@]}" systemctl enable --now rapi-tunnel.service
+fi
 
 for attempt in {1..30}; do
   chat_log="$(journalctl -u rapi-chat.service --since "$started_at" --no-pager -o cat 2>/dev/null || true)"
