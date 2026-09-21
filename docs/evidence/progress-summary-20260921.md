@@ -1,6 +1,6 @@
 # Rapi completion progress — 2026-09-21
 
-**현재 상태:** 출시 차단 P0의 로컬 안전장치와 합성 검증이 구현됐고, 같은 날 후속으로 Docker 기반 실제 DB E2E·restart/restore smoke도 격리 환경에서 통과했다. 남은 것은 실제 전달 흐름·production 데이터·운영 승인 경계다.
+**현재 상태:** P0 격리 검증 전부 통과, CI green, 그리고 production containment·migration까지 완료했다. worker는 새 코드 배포 전까지 의도적으로 중지 상태로 둔다. 남은 것은 신규 코드 배포(R30~R32)와 실제 전달 흐름·사람 QA다.
 
 ## 이번에 구현·수정한 핵심 작업
 
@@ -21,17 +21,32 @@
   - `npm run restore:smoke` — full-migrated dump(`BACKUP_FILE`) 복원, **31 tables / 12 migration records / 105 constraints**, `verify-migration-set` exact set 일치. artifact: `tests/artifacts/restore-smoke.json`.
 - focused synthetic evidence: Discord uncertain/HTTP failure 경계, delivery readiness, migration-set verifier, fixture classifier/manifest, quarantine guards·parameterized SQL contract, restart/restore artifact 및 target safety tests.
 - 모든 새/재시도 Devin worker는 `--model swe-2 --permission-mode dangerous` argv를 확인했고, 완료·통합 후 owned pane만 닫았다. 빈 diff worker 결과는 거절했으며 worktree는 보존했다.
+- **CI run evidence:** `codex/rapi-completion-owner` @ `8ae1ceb` — CI run 35582173248 전 gate 통과(check, web-proxy, e2e, restart/restore smoke, audit, secret-scan, gate summary). 중간 실패 run들은 CI 자체 결함 3건을 드러내 수정했다(아래 참조).
+- **Production 운영 evidence(2026-09-21, 사용자 승인 하):**
+  - R00 baseline 재확인: migrations 0001~0007, batches ready=1/delivered=1/failed=598, attempts temporary_failure=897/success=2 — 실패가 지속 증가 중이던 상태.
+  - R01: `rapi-worker.service` 중지(09:16:58Z, inactive/dead). 중지 후 attempts 899에서 동결, 마지막 attempt 09:09:32 — drain 확인.
+  - R20: `rapi-20260921T030130Z.dump`를 격리 DB(`rapi-rehearsal-20260921`)에 복원 — 7 migrations/27 tables/데이터 보존 확인.
+  - R21 rehearsal: snapshot에 0008~0012 적용 성공 → 12 records/31 tables, 기존 row 보존.
+  - R07 inventory: sources 4 + subscriptions 2 = **전부 fixture, live 0, ambiguous 0**.
+  - R08 manifest: `deactivateSubscriptionIds` 2건, snapshot 리허설에서 UPDATE 2 정확히 적용.
+  - R09 production quarantine apply: 트랜잭션으로 UPDATE 2 — 두 fixture subscription `active=false`로 커밋. live row 없음.
+  - R22: drain·quarantine 직후 신규 backup(`rapi-20260921T092202Z.dump`) 생성 후 migrate로 0008~0012 적용. 사후 검증: 12 migrations, 31 tables, `uncertain` CHECK + `lease_expires_at` 존재. bot/chat/omp ready:true, monitor는 중지된 worker를 `failed`로 정확히 보고(의도된 상태).
 
 ## 검증 중 발견·수정한 실제 결함 (2026-09-21 후속)
 
 - `compose.test.yaml`의 postgres 데이터가 `tmpfs`라 컨테이너 재시작 시 초기화되어 restart smoke가 구조적으로 불통이었다. anonymous volume으로 교체해 격리(`down --volumes`)를 유지하면서 재시작 내구성을 검증 가능하게 했다.
 - `restart-smoke.sh`가 `compose restart` 직후 `pg_isready`를 한 번만 호출해 아직 기동 중인 DB에서 exit 2로 flake했다. 30회 bounded retry + 최종 단일 assert로 수정했다.
 - `0012_delivery_uncertain.sql`이 `schema_migrations` insert와 트랜잭션 래핑을 빠뜨려 migrate가 매번 재적용하고 exact-set 검증이 실패했다. 0011과 같은 `BEGIN/COMMIT + INSERT ... ON CONFLICT` 형식으로 수정했다 — restore smoke의 verifier가 실제 drift를 잡아낸 사례다.
+- `restore-smoke.sh`의 fallback이 존재하지 않는 `rapi` DB를 dump해 CI에서 항상 실패했다. 격리 컨테이너의 `rapi_test`에 migrate 후 dump하는 self-contained 경로로 수정하고, cleanup에 `down --volumes`를 추가해 잔여 컨테이너를 없앴다.
+- compose healthcheck·verify-db·restart-smoke의 `pg_isready`가 unix socket을 쳐서 docker-entrypoint의 init 임시 서버(`listen_addresses=''`)에서도 성공했다 — `db:verify`는 "system is shutting down", restart-smoke는 `57P03 starting up`으로 CI에서 flake했다. 모두 TCP(`-h 127.0.0.1 -p 5432`) probe로 바꿔 최종 리스너만 readiness로 인정하게 했다.
+- `test:e2e`가 workspace `dist` export에 의존하면서도 build하지 않아 check skip 시 `ERR_MODULE_NOT_FOUND`로 실패했다. 스크립트에 `npm run build`를 추가해 self-contained로 만들었다.
+- `buildQuarantineUpdate`가 존재하지 않는 `subscriptions.state`를 갱신하는 SQL을 생성했다(실제 컬럼은 `active boolean`). 문자열 contract 테스트가 스키마와 어긋난 채 통과 중이던 결함 — `SET active=false`로 수정하고 migrated 격리 DB에서 UPDATE 2·live row 보존을 실증했다.
 
 ## 미검증·외부 경계
 
-- test Compose E2E, migration 0011/0012 적용, restart/restore drill은 격리 Docker에서 검증됐다. fixture quarantine의 production apply transaction은 미검증이다.
-- 실제 Discord/이메일 수집→브리핑→발송, GitHub CI run, production backup/restore·migration, deployment/rollback, 사람 QA는 실행하지 않았다. 외부 자격증명·운영 권한·승인 없이는 수행하지 않는다.
+- 격리 E2E·restart/restore·production quarantine apply·production migration(0008~0012)·backup은 완료됐다.
+- 신규 코드의 production 배포(R30~R32: deploy-revision.sh 미구현), 실제 Discord/이메일 수집→브리핑→발송, deployment/rollback, 사람 QA는 미검증이다.
+- `rapi-worker.service`는 containment 유지를 위해 중지 상태로 남겨뒀다. 새 코드 배포 시점에 재시작이 필요하다.
 
 ## Worktree 정리 상태
 
@@ -41,7 +56,7 @@
 
 ## 재개 첫 작업
 
-~~Docker 인증 후 isolated E2E/restart/restore~~ — 완료(상단 후속 검증 참조). 다음은 R29 잔여인 CI run evidence 확보와, 운영 승인이 필요한 R01(worker 중지)→R09(fixture quarantine apply)→R20~R22(production restore rehearsal·migration) 경계다. owner diff review로 이번 후속 수정 3건(compose.test.yaml volume, restart-smoke retry, 0012 schema_migrations)을 승인할지 결정한다.
+~~Docker 인증 후 isolated E2E/restart/restore~~, ~~CI green~~, ~~production containment(R01/R09)·migration(R20~R22)~~ — 전부 완료. 다음은 P1 배포 체인이다: R30 `scripts/deploy-revision.sh` 작성 → R31 switch 리허설 → R32 승인 배포 + loaded revision 검증 후 worker 재시작. 배포 없이는 worker를 재시작하지 않는다(구 코드 재시작은 fixture 발송을 재개할 수 있다).
 
 ## 증거 구분
 
