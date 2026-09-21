@@ -37,6 +37,25 @@ describe("environment configuration", () => {
     assert.deepEqual(config.DISCORD_USER_ROLE_IDS, ["400", "500"]);
     assert.equal(config.DISCORD_GUILD_MEMBERS_ARE_USERS, true);
   });
+
+  it("enables delivery by default and parses DELIVERY_ENABLED strictly", () => {
+    assert.equal(loadEnvironment(validEnvironment).DELIVERY_ENABLED, true);
+    assert.equal(
+      loadEnvironment({ ...validEnvironment, DELIVERY_ENABLED: "true" })
+        .DELIVERY_ENABLED,
+      true,
+    );
+    assert.equal(
+      loadEnvironment({ ...validEnvironment, DELIVERY_ENABLED: "false" })
+        .DELIVERY_ENABLED,
+      false,
+    );
+    assert.throws(
+      () => loadEnvironment({ ...validEnvironment, DELIVERY_ENABLED: "yes" }),
+      /DELIVERY_ENABLED/,
+    );
+  });
+
   it("reports invalid fields without exposing values", () => {
     assert.throws(
       () =>

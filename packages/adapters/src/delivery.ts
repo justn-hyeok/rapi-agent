@@ -10,6 +10,10 @@ import type {
 } from "@rapi/core";
 import { splitDiscordMessage } from "@rapi/core";
 
+export class UncertainDeliveryError extends Error {
+  readonly possiblyDelivered = true;
+}
+
 export class DiscordDeliveryAdapter implements DeliveryAdapter {
   constructor(private readonly botToken: string) {}
 
@@ -44,14 +48,24 @@ export class DiscordDeliveryAdapter implements DeliveryAdapter {
     path: string,
     body: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const response = await fetch(`https://discord.com/api/v10${path}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bot ${this.botToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`https://discord.com/api/v10${path}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bot ${this.botToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (/^\/channels\/[^/]+\/messages$/.test(path))
+        throw new UncertainDeliveryError(
+          "Discord message delivery outcome is uncertain",
+          { cause: error },
+        );
+      throw error;
+    }
     if (!response.ok) throw new Error(`Discord returned ${response.status}`);
     return (await response.json()) as Record<string, unknown>;
   }

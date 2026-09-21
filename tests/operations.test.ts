@@ -81,6 +81,49 @@ describe("operational health", () => {
     assert.equal(summary.components[1]?.status, "unknown");
   });
 
+  it("keeps explicitly disabled optional components visible without blocking readiness", () => {
+    const summary = summarizeReadiness([
+      {
+        name: "delivery",
+        status: "disabled",
+        checkedAt: new Date().toISOString(),
+        required: false,
+        reason: "delivery is disabled",
+      },
+    ]);
+    assert.equal(summary.ready, true);
+    assert.equal(summary.components[0]?.status, "disabled");
+  });
+
+  it("keeps an optional unknown executions component visible without changing readiness", () => {
+    const now = new Date("2026-09-10T10:00:00Z");
+    const components: ComponentHealth[] = [
+      {
+        name: "database",
+        status: "ok",
+        checkedAt: "2026-09-10T09:59:59Z",
+        required: true,
+      },
+      {
+        name: "executions",
+        status: "unknown",
+        checkedAt: "2026-09-10T09:59:59Z",
+        required: false,
+        reason: "2 execution attempt(s) are stale",
+        details: { staleCount: 2 },
+      },
+    ];
+    const summary = summarizeReadiness(components, now, 60_000);
+    assert.equal(summary.ready, true);
+    const executions = summary.components.find(
+      (component) => component.name === "executions",
+    );
+    assert.ok(executions);
+    assert.equal(executions.status, "unknown");
+    assert.equal(executions.reason, "2 execution attempt(s) are stale");
+    assert.deepEqual(executions.details, { staleCount: 2 });
+  });
+
   it("serves liveness separately from readiness on loopback", async () => {
     const server = createLocalHealthServer(0, () =>
       Promise.resolve({

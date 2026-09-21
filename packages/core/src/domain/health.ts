@@ -1,4 +1,4 @@
-export type HealthStatus = "ok" | "failed" | "unknown";
+export type HealthStatus = "ok" | "failed" | "unknown" | "disabled";
 
 export interface ComponentHealth {
   name: string;

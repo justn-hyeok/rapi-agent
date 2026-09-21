@@ -272,6 +272,102 @@ describe("rapi-agent MVP", () => {
         /cannot be included in a public publication/,
       );
 
+      const leaseResults = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          store.beginDelivery(
+            privateBatch.id,
+            { channel: "discord_dm", recipientId: "owner-1" },
+            privateBatch.rendererVersion,
+          ),
+        ),
+      );
+      assert.equal(leaseResults.filter((attempt) => !attempt.skip).length, 1);
+      const claimedAttempt = leaseResults.find((attempt) => !attempt.skip)!;
+      assert.equal(claimedAttempt.attempts, 1);
+      await store.finishDelivery(
+        claimedAttempt.id,
+        "temporary_failure",
+        undefined,
+        "lease release check",
+      );
+      const leaseRows = await store.pool.query<{
+        status: string;
+        attempt_count: number;
+        lease_expires_at: Date | null;
+      }>(
+        "SELECT status,attempt_count,lease_expires_at FROM delivery_attempts WHERE batch_id=$1",
+        [privateBatch.id],
+      );
+      assert.equal(leaseRows.rows.length, 1);
+      assert.equal(leaseRows.rows[0]!.attempt_count, 1);
+      assert.equal(leaseRows.rows[0]!.lease_expires_at, null);
+
+      const batchesBeforeRetry = await store.pool.query<{ count: string }>(
+        "SELECT count(*) AS count FROM delivery_batches",
+      );
+      const leaseTarget = {
+        channel: "discord_dm",
+        recipientId: "owner-1",
+      } as const;
+      const secondClaim = await store.beginDelivery(
+        privateBatch.id,
+        leaseTarget,
+        privateBatch.rendererVersion,
+      );
+      assert.equal(secondClaim.skip, false);
+      assert.equal(secondClaim.id, claimedAttempt.id);
+      assert.equal(secondClaim.attempts, 2);
+      await store.finishDelivery(
+        secondClaim.id,
+        "temporary_failure",
+        undefined,
+        "lease release check",
+      );
+      const thirdClaim = await store.beginDelivery(
+        privateBatch.id,
+        leaseTarget,
+        privateBatch.rendererVersion,
+      );
+      assert.equal(thirdClaim.skip, false);
+      assert.equal(thirdClaim.id, claimedAttempt.id);
+      assert.equal(thirdClaim.attempts, 3);
+      await store.finishDelivery(
+        thirdClaim.id,
+        "permanent_failure",
+        undefined,
+        "lease release check",
+      );
+      const fourthClaim = await store.beginDelivery(
+        privateBatch.id,
+        leaseTarget,
+        privateBatch.rendererVersion,
+      );
+      assert.equal(fourthClaim.skip, true);
+      assert.equal(fourthClaim.id, claimedAttempt.id);
+      assert.equal(fourthClaim.attempts, 3);
+
+      const finalLeaseRows = await store.pool.query<{
+        id: string;
+        status: string;
+        attempt_count: number;
+        lease_expires_at: Date | null;
+      }>(
+        "SELECT id,status,attempt_count,lease_expires_at FROM delivery_attempts WHERE batch_id=$1",
+        [privateBatch.id],
+      );
+      assert.equal(finalLeaseRows.rows.length, 1);
+      assert.equal(finalLeaseRows.rows[0]!.id, claimedAttempt.id);
+      assert.equal(finalLeaseRows.rows[0]!.status, "permanent_failure");
+      assert.equal(finalLeaseRows.rows[0]!.attempt_count, 3);
+      assert.equal(finalLeaseRows.rows[0]!.lease_expires_at, null);
+      const batchesAfterRetry = await store.pool.query<{ count: string }>(
+        "SELECT count(*) AS count FROM delivery_batches",
+      );
+      assert.equal(
+        batchesAfterRetry.rows[0]!.count,
+        batchesBeforeRetry.rows[0]!.count,
+      );
+
       const taskResult = await commands.execute(
         { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
         {
@@ -479,6 +575,93 @@ describe("rapi-agent MVP", () => {
       await restartedStore.close();
     } finally {
       await rm(outputRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates concurrent freezeBatch calls for the same period", async () => {
+    const store = new PostgresStore(databaseUrl);
+    try {
+      await store.resetForTests();
+      const subscriptionId = await store.createSubscription({
+        ownerId: "owner-1",
+        name: "concurrent",
+        sourceIds: [],
+        categories: [],
+        includeKeywords: [],
+        excludeKeywords: [],
+        cadence: "daily",
+        timezone: "UTC",
+        channels: [{ channel: "discord_dm", recipientId: "owner-1" }],
+        maxItems: 20,
+      });
+      const periodStart = new Date("2026-09-08T00:00:00Z");
+      const periodEnd = new Date("2026-09-09T00:00:00Z");
+      const batches = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          store.freezeBatch(subscriptionId, periodStart, periodEnd),
+        ),
+      );
+      assert.equal(new Set(batches.map((batch) => batch.id)).size, 1);
+      const count = await store.pool.query<{ count: string }>(
+        `SELECT count(*) AS count FROM delivery_batches
+         WHERE subscription_id=$1 AND period_start=$2 AND period_end=$3`,
+        [subscriptionId, periodStart, periodEnd],
+      );
+      assert.equal(count.rows[0]?.count, "1");
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("marks an empty subscription batch delivered without attempts", async () => {
+    const store = new PostgresStore(databaseUrl);
+    const delivery = new RecordingDeliveryAdapter();
+    const agent = new RapiAgent(store, delivery, new RecordingOmpAdapter());
+
+    try {
+      await store.resetForTests();
+      const subscriptionId = await agent.createSubscription({
+        ownerId: "owner-1",
+        name: "empty",
+        sourceIds: [],
+        categories: [],
+        includeKeywords: [],
+        excludeKeywords: [],
+        cadence: "daily",
+        timezone: "UTC",
+        channels: [{ channel: "discord_dm", recipientId: "owner-1" }],
+        maxItems: 20,
+      });
+      const batch = await agent.freezeBatch(
+        subscriptionId,
+        new Date("2026-09-08T00:00:00Z"),
+        new Date("2026-09-09T00:00:00Z"),
+      );
+      assert.equal(batch.state, "ready");
+      assert.equal(batch.items.length, 0);
+
+      assert.equal(await agent.deliverBatch(batch.id), "delivered");
+      assert.equal(delivery.messages.length, 0);
+      const attempts = await store.pool.query<{ count: string }>(
+        "SELECT count(*) AS count FROM delivery_attempts WHERE batch_id=$1",
+        [batch.id],
+      );
+      assert.equal(attempts.rows[0]!.count, "0");
+      assert.equal((await store.getBatch(batch.id)).state, "delivered");
+
+      assert.equal(await agent.deliverBatch(batch.id), "delivered");
+      assert.equal(delivery.messages.length, 0);
+      assert.equal(
+        (
+          await store.pool.query<{ count: string }>(
+            "SELECT count(*) AS count FROM delivery_attempts WHERE batch_id=$1",
+            [batch.id],
+          )
+        ).rows[0]!.count,
+        "0",
+      );
+    } finally {
+      await store.close();
     }
   });
 });

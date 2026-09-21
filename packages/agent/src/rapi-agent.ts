@@ -18,6 +18,7 @@ import {
   checksumPayload,
   classify,
   contentFingerprint,
+  deliveryPeriodWindow,
   renderBriefing,
   renderMdx,
   summarize,
@@ -29,6 +30,7 @@ import {
   parseGitHubEvent,
   type ExternalItem,
   MdxPublisher,
+  UncertainDeliveryError,
 } from "@rapi/adapters";
 import { PostgresStore } from "@rapi/db";
 
@@ -199,11 +201,16 @@ export class RapiAgent {
   async runScheduledDeliveries(now = new Date()): Promise<string[]> {
     const results: string[] = [];
     for (const subscription of await this.store.activeSubscriptions()) {
-      const duration =
-        subscription.cadence === "weekly" ? 7 * 86_400_000 : 86_400_000;
-      const end = new Date(now);
-      const start = new Date(end.getTime() - duration);
-      const batch = await this.freezeBatch(subscription.id, start, end);
+      const period = deliveryPeriodWindow(
+        now,
+        subscription.cadence === "weekly" ? "weekly" : "daily",
+        subscription.timezone,
+      );
+      const batch = await this.freezeBatch(
+        subscription.id,
+        period.start,
+        period.end,
+      );
       results.push(await this.deliverBatch(batch.id));
     }
     return results;
@@ -223,6 +230,10 @@ export class RapiAgent {
 
   async deliverBatch(batchId: string): Promise<string> {
     const batch = await this.store.getBatch(batchId);
+    if (batch.items.length === 0)
+      return (await this.store.markEmptyBatchDelivered(batch.id))
+        ? "delivered"
+        : batch.state;
     const payload = renderBriefing("Rapi daily briefing", batch.items);
     for (const target of batch.targets) {
       const attempt = await this.store.beginDelivery(
@@ -244,7 +255,11 @@ export class RapiAgent {
           error instanceof Error ? error.message : "Unknown delivery failure";
         await this.store.finishDelivery(
           attempt.id,
-          attempt.attempts >= 2 ? "permanent_failure" : "temporary_failure",
+          error instanceof UncertainDeliveryError
+            ? "uncertain"
+            : attempt.attempts >= 3
+              ? "permanent_failure"
+              : "temporary_failure",
           undefined,
           message,
         );

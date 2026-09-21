@@ -14,16 +14,51 @@ jobs:
       - run: npm ci
       - run: docker compose up -d postgres
       - run: npm run db:verify
-      - run: npm run check
-      - run: npm run test:e2e
-      - run: npm run restart:smoke
-      - run: npm run restore:smoke
-      - run: npm run audit:prod
+      - id: check
+        run: npm run check
+      - run: npm run web-proxy:test
+      - id: e2e
+        if: always()
+        run: npm run test:e2e
+      - id: restart_smoke
+        if: always()
+        env:
+          RESTART_SMOKE_PROJECT: rapi-restart-${{ github.run_id }}
+          RESTART_SMOKE_DATABASE: rapi_test
+          RESTART_SMOKE_ARTIFACT: tests/artifacts/restart-smoke.json
+        run: npm run restart:smoke
+      - id: restore_smoke
+        if: always()
+        env:
+          RESTORE_SMOKE_PROJECT: rapi-restore-${{ github.run_id }}
+          RESTORE_SMOKE_DATABASE: rapi_restore_smoke_${{ github.run_id }}
+          RESTORE_SMOKE_ARTIFACT: tests/artifacts/restore-smoke.json
+        run: npm run restore:smoke
+      - id: production_audit
+        if: always()
+        run: npm run audit:prod
+      - name: CI gate summary
+        if: always()
+        env:
+          SHA: ${{ github.sha }}
+          RUNNER_OS: ${{ runner.os }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+          RESTART_OUTCOME: ${{ steps.restart_smoke.outcome }}
+          RESTORE_OUTCOME: ${{ steps.restore_smoke.outcome }}
+          AUDIT_OUTCOME: ${{ steps.production_audit.outcome }}
+        run: |
+          mkdir -p tests/artifacts
+          node -e 'const fs=require("node:fs"); const gates={check:process.env.CHECK_OUTCOME,e2e:process.env.E2E_OUTCOME,restartSmoke:process.env.RESTART_OUTCOME,restoreSmoke:process.env.RESTORE_OUTCOME,productionAudit:process.env.AUDIT_OUTCOME}; fs.writeFileSync("tests/artifacts/ci-gates.json", JSON.stringify({sha:process.env.SHA,runnerOs:process.env.RUNNER_OS,node:process.version,gates,mvpE2eArtifactPresent:fs.existsSync("tests/artifacts/mvp-e2e.json")},null,2)+"\n");'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mvp-e2e
-          path: tests/artifacts/mvp-e2e.json
+          path: |
+            tests/artifacts/mvp-e2e.json
+            tests/artifacts/ci-gates.json
+            tests/artifacts/restart-smoke.json
+            tests/artifacts/restore-smoke.json
   secret-scan:
     runs-on: ubuntu-latest
     steps:

@@ -362,17 +362,23 @@ export class PostgresStore {
       );
       const sub = subscription.rows[0];
       if (!sub) throw new Error("Active subscription not found");
-      const existing = await client.query<{ id: string }>(
-        "SELECT id FROM delivery_batches WHERE subscription_id=$1 AND period_start=$2 AND period_end=$3",
-        [subscriptionId, periodStart, periodEnd],
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO delivery_batches (id,subscription_id,period_start,period_end,renderer_version,state)
+         VALUES ($1,$2,$3,$4,$5,'ready')
+         ON CONFLICT (subscription_id, period_start, period_end) DO NOTHING
+         RETURNING id`,
+        [randomUUID(), subscriptionId, periodStart, periodEnd, rendererVersion],
       );
-      let batchId = existing.rows[0]?.id;
+      let batchId = inserted.rows[0]?.id;
       if (!batchId) {
-        batchId = randomUUID();
-        await client.query(
-          "INSERT INTO delivery_batches (id,subscription_id,period_start,period_end,renderer_version,state) VALUES ($1,$2,$3,$4,$5,'ready')",
-          [batchId, subscriptionId, periodStart, periodEnd, rendererVersion],
+        const existing = await client.query<{ id: string }>(
+          "SELECT id FROM delivery_batches WHERE subscription_id=$1 AND period_start=$2 AND period_end=$3",
+          [subscriptionId, periodStart, periodEnd],
         );
+        batchId = existing.rows[0]?.id;
+        if (!batchId)
+          throw new Error("Conflicting delivery batch could not be resolved");
+      } else {
         const rows = await client.query<{
           id: string;
           title: string;
@@ -482,30 +488,44 @@ export class PostgresStore {
        VALUES ($1,$2,$3,$4,$5,$6,'pending',0) ON CONFLICT (idempotency_key) DO NOTHING`,
       [id, batchId, target.channel, target.recipientId, rendererVersion, key],
     );
-    const result = await this.pool.query<{
+    const claimed = await this.pool.query<{
       id: string;
-      status: string;
       attempt_count: number;
     }>(
-      "SELECT id,status,attempt_count FROM delivery_attempts WHERE idempotency_key=$1",
+      `UPDATE delivery_attempts
+       SET lease_expires_at=now()+interval '5 minutes',attempt_count=attempt_count+1,updated_at=now()
+       WHERE idempotency_key=$1
+         AND status NOT IN ('success','permanent_failure','uncertain')
+         AND (lease_expires_at IS NULL OR lease_expires_at<=now())
+       RETURNING id,attempt_count`,
       [key],
     );
-    const row = result.rows[0]!;
-    return {
-      id: row.id,
-      skip: row.status === "success" || row.status === "permanent_failure",
-      attempts: row.attempt_count,
-    };
+    if (claimed.rows[0]) {
+      return {
+        id: claimed.rows[0].id,
+        skip: false,
+        attempts: claimed.rows[0].attempt_count,
+      };
+    }
+    const existing = await this.pool.query<{
+      id: string;
+      attempt_count: number;
+    }>(
+      "SELECT id,attempt_count FROM delivery_attempts WHERE idempotency_key=$1",
+      [key],
+    );
+    const row = existing.rows[0]!;
+    return { id: row.id, skip: true, attempts: row.attempt_count };
   }
 
   async finishDelivery(
     id: string,
-    status: "success" | "temporary_failure" | "permanent_failure",
+    status: "success" | "temporary_failure" | "permanent_failure" | "uncertain",
     providerId?: string,
     error?: string,
   ): Promise<void> {
     await this.pool.query(
-      `UPDATE delivery_attempts SET status=$2,provider_id=$3,error_message=$4,attempt_count=attempt_count+1,updated_at=now() WHERE id=$1`,
+      `UPDATE delivery_attempts SET status=$2,provider_id=$3,error_message=$4,lease_expires_at=NULL,updated_at=now() WHERE id=$1`,
       [id, status, providerId ?? null, error?.slice(0, 500) ?? null],
     );
   }
@@ -532,6 +552,16 @@ export class PostgresStore {
       [batchId, state],
     );
     return state;
+  }
+
+  async markEmptyBatchDelivered(batchId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE delivery_batches SET state='delivered',updated_at=now()
+       WHERE id=$1 AND state='ready'
+         AND NOT EXISTS (SELECT 1 FROM delivery_batch_items WHERE batch_id=$1)`,
+      [batchId],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async recordPublication(
@@ -679,6 +709,25 @@ export class PostgresStore {
       databaseBytes: Number(result.rows[0]?.bytes ?? 0),
       clusterDatabaseBytes: Number(result.rows[0]?.cluster_bytes ?? 0),
     };
+  }
+
+  async appliedMigrationNames(): Promise<string[]> {
+    const result = await this.pool.query<{ name: string }>(
+      "SELECT name FROM schema_migrations ORDER BY name",
+    );
+    return result.rows.map((row) => row.name);
+  }
+
+  async staleExecutionAttemptCount(
+    maxAgeMs: number,
+    now = new Date(),
+  ): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM execution_attempts
+       WHERE state IN ('dispatched','running','blocked') AND updated_at < $1`,
+      [new Date(now.getTime() - maxAgeMs)],
+    );
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   async upsertAiUsagePolicy(

@@ -20,7 +20,11 @@ import {
 import { PublicAgentClient } from "@rapi/adapters";
 import { summarizeReadiness } from "@rapi/core";
 import { loadEnvironment } from "@rapi/config";
-import { PostgresStore } from "@rapi/db";
+import {
+  compareMigrationNames,
+  expectedMigrationNames,
+  PostgresStore,
+} from "@rapi/db";
 import {
   createDiscordInteractionServer,
   registerSlashCommands,
@@ -277,10 +281,23 @@ const server = createDiscordInteractionServer(
     },
     readiness: async () => {
       try {
-        const [result, publicReady] = await Promise.all([
+        const [
+          result,
+          publicReady,
+          expectedMigrations,
+          appliedMigrations,
+          staleCount,
+        ] = await Promise.all([
           store.checkHealth(),
           publicAgent.readiness(),
+          expectedMigrationNames(),
+          store.appliedMigrationNames(),
+          store.staleExecutionAttemptCount(30 * 60_000),
         ]);
+        const migrations = compareMigrationNames(
+          expectedMigrations,
+          appliedMigrations,
+        );
         return summarizeReadiness([
           {
             name: "database",
@@ -301,6 +318,35 @@ const server = createDiscordInteractionServer(
             checkedAt: new Date().toISOString(),
             required: config.PUBLIC_AGENT_ENABLED,
             ...(publicReady ? {} : { reason: "public executor unavailable" }),
+          },
+          {
+            name: "migrations",
+            status: migrations.ok ? "ok" : "failed",
+            checkedAt: new Date().toISOString(),
+            required: true,
+            details: {
+              expected: expectedMigrations.length,
+              applied: appliedMigrations.length,
+              missing: migrations.missing,
+              unexpected: migrations.unexpected,
+            },
+            ...(migrations.ok
+              ? {}
+              : {
+                  reason: "database migration set does not match this revision",
+                }),
+          },
+          {
+            name: "executions",
+            status: staleCount > 0 ? "unknown" : "ok",
+            checkedAt: new Date().toISOString(),
+            required: false,
+            ...(staleCount > 0
+              ? {
+                  reason: `${staleCount} execution attempt(s) are stale`,
+                  details: { staleCount },
+                }
+              : {}),
           },
         ]);
       } catch {

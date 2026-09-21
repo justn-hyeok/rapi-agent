@@ -1,6 +1,7 @@
 export * from "./domain/state-machine.js";
 export * from "./domain/models.js";
 export * from "./domain/content.js";
+export * from "./domain/delivery-period.js";
 export * from "./domain/access.js";
 export * from "./domain/health.js";
 export * from "./domain/usage.js";

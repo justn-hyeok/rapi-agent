@@ -18,6 +18,10 @@ import {
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import { PostgresStore } from "@rapi/db";
+import { requireHealthyDeliveryResults } from "./delivery-loop.js";
+import { deliveryReadiness } from "./delivery-readiness.js";
+import { shouldRunDelivery } from "./delivery-schedule.js";
+import { assessSourceHealth } from "./source-health.js";
 
 class DisabledAdapter implements DeliveryAdapter {
   send(): Promise<DeliveryResult> {
@@ -76,6 +80,7 @@ type LoopState = {
   lastStartedAt?: string;
   lastSuccessAt?: string;
   lastError?: string;
+  deliveryOutcome?: "delivered" | "idle";
 };
 const loops: Record<"collection" | "delivery" | "webhook", LoopState> = {
   collection: {},
@@ -92,7 +97,9 @@ async function runLoop(
   state.running = true;
   state.lastStartedAt = new Date().toISOString();
   try {
-    await work();
+    const result = await work();
+    if (name === "delivery")
+      state.deliveryOutcome = result === "idle" ? "idle" : "delivered";
     state.lastSuccessAt = new Date().toISOString();
     delete state.lastError;
   } catch (error) {
@@ -130,8 +137,11 @@ async function collect(): Promise<void> {
   });
 }
 
-async function deliver(): Promise<void> {
-  await agent.runScheduledDeliveries();
+async function deliver(): Promise<"delivered" | "idle"> {
+  const assessment = requireHealthyDeliveryResults(
+    await agent.runScheduledDeliveries(),
+  );
+  return assessment.status === "idle" ? "idle" : "delivered";
 }
 
 function report(error: unknown): void {
@@ -141,15 +151,18 @@ function report(error: unknown): void {
 }
 
 await runLoop("collection", collect);
-await runLoop("delivery", deliver);
+if (shouldRunDelivery(config.DELIVERY_ENABLED))
+  await runLoop("delivery", deliver);
 const collectionTimer = setInterval(
   () => void runLoop("collection", collect),
   config.POLL_INTERVAL_SECONDS * 1000,
 );
-const deliveryTimer = setInterval(
-  () => void runLoop("delivery", deliver),
-  config.DELIVERY_INTERVAL_SECONDS * 1000,
-);
+const deliveryTimer = shouldRunDelivery(config.DELIVERY_ENABLED)
+  ? setInterval(
+      () => void runLoop("delivery", deliver),
+      config.DELIVERY_INTERVAL_SECONDS * 1000,
+    )
+  : undefined;
 const webhookTimer = setInterval(
   () =>
     void runLoop(
@@ -163,11 +176,13 @@ const healthServer = createLocalHealthServer(
   async () => {
     const db = await store.checkHealth();
     const sources = await store.sourceStatus();
-    const failedSources = sources.filter(
-      (source) =>
-        source.state === "active" && Number(source.failure_count ?? 0) > 0,
+    const sourceHealth = assessSourceHealth(
+      sources.map((source) => ({
+        kind: String(source.kind),
+        active: source.state === "active",
+        failureCount: Number(source.failure_count ?? 0),
+      })),
     );
-    const activeSources = sources.filter((source) => source.state === "active");
     const webhookQueue = await store.webhookQueueStatus();
     const now = new Date();
     return summarizeReadiness(
@@ -185,16 +200,15 @@ const healthServer = createLocalHealthServer(
         },
         {
           name: "sources",
-          status: failedSources.length > 0 ? "failed" : "ok",
+          status: sourceHealth.status,
           checkedAt: now.toISOString(),
           required: true,
           details: {
-            configured: activeSources.length,
-            failing: failedSources.length,
+            configured: sourceHealth.configured,
+            failing: sourceHealth.failing,
+            unsupported: sourceHealth.unsupported,
           },
-          ...(failedSources.length > 0
-            ? { reason: `${failedSources.length} source(s) failing` }
-            : {}),
+          ...(sourceHealth.reason ? { reason: sourceHealth.reason } : {}),
         },
         {
           name: "webhook_queue",
@@ -206,16 +220,32 @@ const healthServer = createLocalHealthServer(
             ? { reason: `${webhookQueue.deadLetter} dead-letter job(s)` }
             : {}),
         },
-        ...Object.entries(loops).map(([name, state]) => ({
-          name,
-          status: state.lastError ? ("failed" as const) : ("ok" as const),
-          checkedAt: state.lastStartedAt ?? now.toISOString(),
-          required: name !== "webhook" || !!webhookWorker,
-          ...(state.lastSuccessAt
-            ? { lastSuccessAt: state.lastSuccessAt }
-            : {}),
-          ...(state.lastError ? { reason: state.lastError } : {}),
-        })),
+        ...Object.entries(loops).map(([name, state]) => {
+          const readiness =
+            name === "delivery"
+              ? deliveryReadiness(
+                  config.DELIVERY_ENABLED,
+                  state.lastError,
+                  state.deliveryOutcome,
+                )
+              : undefined;
+          const disabled = readiness?.status === "disabled";
+          return {
+            name,
+            status: readiness?.status ?? (state.lastError ? "failed" : "ok"),
+            checkedAt: state.lastStartedAt ?? now.toISOString(),
+            required: !disabled && (name !== "webhook" || !!webhookWorker),
+            ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
+            ...(state.lastSuccessAt
+              ? { lastSuccessAt: state.lastSuccessAt }
+              : {}),
+            ...(readiness?.reason
+              ? { reason: readiness.reason }
+              : state.lastError
+                ? { reason: state.lastError }
+                : {}),
+          };
+        }),
       ],
       now,
       Math.max(config.POLL_INTERVAL_SECONDS, config.DELIVERY_INTERVAL_SECONDS) *
@@ -226,7 +256,7 @@ const healthServer = createLocalHealthServer(
 
 const shutdown = (): void => {
   clearInterval(collectionTimer);
-  clearInterval(deliveryTimer);
+  if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();
   void store.close().finally(() => process.exit(0));

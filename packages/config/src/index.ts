@@ -120,6 +120,7 @@ export const environmentSchema = z
     GITHUB_READ_TOKEN: z.string().min(1).optional(),
     POLL_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(300),
     DELIVERY_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(3600),
+    DELIVERY_ENABLED: booleanString.default("true"),
     COMMUNITY_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     TECHNICAL_RSS_WEBHOOK_NAME: z.string().default("technical-rss-output"),
   })
