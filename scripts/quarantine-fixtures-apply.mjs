@@ -10,8 +10,8 @@ export function buildQuarantineUpdate(ids) {
     throw new Error("Quarantine update must not repeat subscription ids");
   return {
     text: `UPDATE subscriptions
-           SET state='inactive', updated_at=now()
-           WHERE id = ANY($1::uuid[]) AND state = 'active'
+           SET active=false, updated_at=now()
+           WHERE id = ANY($1::uuid[]) AND active = true
            RETURNING id`,
     values: [ids],
   };
