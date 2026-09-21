@@ -8,14 +8,14 @@ if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
   compose=(sudo docker compose)
 fi
 
-for _ in $(seq 1 30); do
-  if "${compose[@]}" exec -T postgres pg_isready -U rapi -d rapi >/dev/null 2>&1; then
+for _ in $(seq 1 60); do
+  if "${compose[@]}" exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U rapi -d rapi >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
 
-"${compose[@]}" exec -T postgres pg_isready -U rapi -d rapi >/dev/null
+"${compose[@]}" exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U rapi -d rapi >/dev/null
 
 table_count=$("${compose[@]}" exec -T postgres psql -U rapi -d rapi -Atc \
   "SELECT count(*) FROM pg_tables WHERE schemaname = 'public';")

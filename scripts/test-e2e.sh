@@ -3,6 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# e2e imports workspace packages through their dist exports; build first so the
+# suite also runs when an upstream check step was skipped or never built.
+npm run build >/dev/null
+
 compose=(docker compose)
 if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
   compose=(sudo docker compose)
