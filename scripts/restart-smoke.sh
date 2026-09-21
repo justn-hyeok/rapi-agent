@@ -41,10 +41,10 @@ before=$("${compose[@]}" exec -T postgres psql -U rapi -d "$restart_database" -A
 
 "${compose[@]}" restart postgres >/dev/null
 for _ in $(seq 1 30); do
-  "${compose[@]}" exec -T postgres pg_isready -U rapi -d "$restart_database" >/dev/null && break
+  "${compose[@]}" exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U rapi -d "$restart_database" >/dev/null && break
   sleep 1
 done
-"${compose[@]}" exec -T postgres pg_isready -U rapi -d "$restart_database" >/dev/null
+"${compose[@]}" exec -T postgres pg_isready -h 127.0.0.1 -p 5432 -U rapi -d "$restart_database" >/dev/null
 
 after=$("${compose[@]}" exec -T postgres psql -U rapi -d "$restart_database" -Atc \
   "SELECT (SELECT count(*) FROM raw_events) || ':' || (SELECT count(*) FROM delivery_attempts) || ':' || (SELECT count(*) FROM restart_smoke_probe);")
