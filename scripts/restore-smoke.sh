@@ -26,7 +26,7 @@ fi
 snapshot=$(mktemp /tmp/rapi-restore-smoke.XXXXXX.dump)
 applied_migrations=$(mktemp /tmp/rapi-restore-migrations.XXXXXX.json)
 cleanup() {
-  "${compose[@]}" exec -T postgres dropdb -U rapi --if-exists "$restore_database" >/dev/null 2>&1 || true
+  "${compose[@]}" down --volumes >/dev/null 2>&1 || true
   rm -f "$snapshot"
   rm -f "$applied_migrations"
 }
@@ -45,7 +45,12 @@ elif [[ "${RESTORE_LATEST_BACKUP:-false}" == "true" ]]; then
 elif [[ -n "${DATABASE_URL:-}" ]]; then
   pg_dump --format=custom --no-owner --no-privileges --file="$snapshot" "$DATABASE_URL"
 else
-  "${compose[@]}" exec -T postgres pg_dump --format=custom -U rapi --no-owner --no-privileges rapi > "$snapshot"
+  endpoint=$("${compose[@]}" port postgres 5432)
+  source_port=${endpoint##*:}
+  [[ "$source_port" =~ ^[0-9]+$ ]]
+  DATABASE_URL="postgresql://rapi:rapi-local-only@127.0.0.1:$source_port/rapi_test" \
+    node scripts/migrate.mjs >/dev/null
+  "${compose[@]}" exec -T postgres pg_dump --format=custom -U rapi --no-owner --no-privileges rapi_test > "$snapshot"
 fi
 "${compose[@]}" exec -T postgres dropdb -U rapi --if-exists "$restore_database"
 "${compose[@]}" exec -T postgres createdb -U rapi "$restore_database"
