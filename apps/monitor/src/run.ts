@@ -5,6 +5,8 @@ import { loadEnvironment } from "@rapi/config";
 import {
   assessBackupStatus,
   createLocalHealthServer,
+  decideHealthAlert,
+  type HealthAlertState,
   HealthTransitionTracker,
   summarizeReadiness,
   type ComponentHealth,
@@ -20,6 +22,7 @@ interface MonitorState {
   tracker: ReturnType<HealthTransitionTracker["snapshot"]>;
   components: ComponentHealth[];
   pendingAlerts: PendingAlert[];
+  alerts: Record<string, HealthAlertState>;
   capacityLevel: 0 | 80 | 90;
   lastCapacityCheckAt?: string;
   updatedAt: string;
@@ -31,7 +34,12 @@ const store = new PostgresStore(config.DATABASE_URL, {
   connectionTimeoutMs: 3000,
   queryTimeoutMs: 3000,
 });
-const tracker = new HealthTransitionTracker(3, 2);
+const chatFailureThreshold =
+  Math.ceil((5 * 60) / config.MONITOR_INTERVAL_SECONDS) + 1;
+const tracker = new HealthTransitionTracker(3, 2, {
+  chat: { failureThreshold: chatFailureThreshold },
+  omp: { failureThreshold: 1 },
+});
 const state = await loadState(config.MONITOR_STATE_FILE);
 tracker.restore(state.tracker);
 let checking = false;
@@ -47,6 +55,7 @@ async function loadState(file: string): Promise<MonitorState> {
       tracker: parsed.tracker ?? {},
       components: parsed.components ?? [],
       pendingAlerts: parsed.pendingAlerts ?? [],
+      alerts: parsed.alerts ?? {},
       capacityLevel: parsed.capacityLevel ?? 0,
       ...(parsed.lastCapacityCheckAt
         ? { lastCapacityCheckAt: parsed.lastCapacityCheckAt }
@@ -58,6 +67,7 @@ async function loadState(file: string): Promise<MonitorState> {
       tracker: {},
       components: [],
       pendingAlerts: [],
+      alerts: {},
       capacityLevel: 0,
       updatedAt: new Date(0).toISOString(),
     };
@@ -117,6 +127,14 @@ async function checkEndpoint(
         : {}),
     };
   }
+}
+
+function healthUrl(readyUrl: string): string {
+  const url = new URL(readyUrl);
+  url.pathname = "/health";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 async function checkBackup(): Promise<ComponentHealth> {
@@ -258,7 +276,7 @@ async function check(): Promise<void> {
       checkEndpoint("bot", config.BOT_READY_URL),
       checkEndpoint("chat", config.CHAT_READY_URL),
       checkEndpoint("worker", config.WORKER_READY_URL),
-      checkEndpoint("omp", config.OMP_READY_URL),
+      checkEndpoint("omp", healthUrl(config.OMP_READY_URL)),
       checkBackup(),
     ];
     if (config.PUBLIC_AGENT_ENABLED)
@@ -277,7 +295,14 @@ async function check(): Promise<void> {
         component.name,
         component.status === "ok",
       );
-      if (transition)
+      if (transition) {
+        const decision = decideHealthAlert(
+          transition,
+          state.alerts[component.name],
+          now,
+        );
+        state.alerts[component.name] = decision.state;
+        if (!decision.notify) continue;
         state.pendingAlerts.push({
           id: `${component.name}:${transition}:${now.toISOString()}`,
           content:
@@ -285,6 +310,7 @@ async function check(): Promise<void> {
               ? `[라피 장애] ${component.name}: ${component.reason ?? "응답 없음"}`
               : `[라피 복구] ${component.name} 상태가 정상으로 돌아왔습니다.`,
         });
+      }
     }
     await saveState();
     await flushAlerts().catch(() => undefined);
