@@ -1,6 +1,8 @@
 # Public community application — 2026-09-28
 
-Latest chat deployment is `9e20fa0`; the natural wake-phrase fix and the recovered
+Latest deployment is `798a3a2`; connected collection, mail, blog, development,
+permissions and recovery evidence is in `full-runtime-20260928.md`. The natural
+wake-phrase fix at `9e20fa0` and the recovered
 real Discord reply are recorded in `chat-invocation-fix-20260928.md`. The detailed
 release snapshot below records the preceding `948b40d` deployment.
 
