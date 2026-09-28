@@ -36,6 +36,37 @@ const githubFixture = {
 };
 
 describe("rapi-agent MVP", () => {
+  it("retains original malformed source payloads before normalization fails", async () => {
+    const store = new PostgresStore(databaseUrl);
+    const agent = new RapiAgent(
+      store,
+      new RecordingDeliveryAdapter(),
+      new RecordingOmpAdapter(),
+    );
+    try {
+      await store.resetForTests();
+      const source = await agent.createSource(
+        "rss",
+        "https://example.invalid/feed",
+        "private",
+      );
+      await assert.rejects(
+        agent.ingestFeed(source, "not a feed"),
+        /Unsupported/,
+      );
+      const raw = await store.pool.query<{ body: string }>(
+        "SELECT payload->>'body' AS body FROM raw_events WHERE source_id=$1",
+        [source],
+      );
+      assert.equal(raw.rows[0]?.body, "not a feed");
+      const items = await store.pool.query<{ count: string }>(
+        "SELECT count(*) FROM source_items",
+      );
+      assert.equal(items.rows[0]?.count, "0");
+    } finally {
+      await store.close();
+    }
+  });
   it("passes all eight product completion scenarios", async () => {
     const store = new PostgresStore(databaseUrl);
     const delivery = new RecordingDeliveryAdapter();
@@ -134,7 +165,14 @@ describe("rapi-agent MVP", () => {
       const counts = await store.pool.query<{ raw: string; items: string }>(
         "SELECT (SELECT count(*) FROM raw_events) AS raw,(SELECT count(*) FROM source_items) AS items",
       );
-      assert.deepEqual(counts.rows[0], { raw: "2", items: "2" });
+      assert.deepEqual(counts.rows[0], { raw: "4", items: "2" });
+      const originals = await store.pool.query<{ body: string }>(
+        "SELECT payload->>'body' AS body FROM raw_events WHERE payload ? 'contentType'",
+      );
+      assert.deepEqual(
+        new Set(originals.rows.map((row) => row.body)),
+        new Set([rssFixture, JSON.stringify([githubFixture])]),
+      );
 
       let successfulIndependentCollection = false;
       await agent.collectIndependently([

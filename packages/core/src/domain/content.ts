@@ -150,12 +150,27 @@ export function renderMdx(
     "",
   ];
   const body = items.flatMap((item) => [
-    `## [${item.title.replace(/[[\]]/g, "")}](${item.canonicalUrl})`,
+    `## [${escapeMdx(item.title)}](${mdxUrl(item.canonicalUrl)})`,
     "",
-    item.summary,
+    escapeMdx(item.summary),
     "",
-    `Source: ${item.canonicalUrl}`,
+    `Source: [${escapeMdx(item.canonicalUrl)}](${mdxUrl(item.canonicalUrl)})`,
     "",
   ]);
-  return [...frontmatter, `# ${title}`, "", ...body].join("\n");
+  return [...frontmatter, `# ${escapeMdx(title)}`, "", ...body].join("\n");
+}
+
+function escapeMdx(value: string): string {
+  // Treat source text as text, including JSX, expressions and Markdown syntax.
+  return value.replace(
+    /[&<>[\]{}\\`*_#!|]/g,
+    (character) => `&#${character.charCodeAt(0)};`,
+  );
+}
+
+function mdxUrl(value: string): string {
+  return canonicalizeUrl(value).replace(
+    /[()<>"'{}\\]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }

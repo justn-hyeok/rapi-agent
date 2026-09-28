@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { connect as tlsConnect, type TLSSocket } from "node:tls";
+import {
+  connect as tlsConnect,
+  type ConnectionOptions,
+  type TLSSocket,
+} from "node:tls";
+import { parseDocument } from "yaml";
 import type {
   DeliveryAdapter,
   DeliveryPayload,
@@ -12,6 +17,14 @@ import { splitDiscordMessage } from "@rapi/core";
 
 export class UncertainDeliveryError extends Error {
   readonly possiblyDelivered = true;
+}
+
+export class PermanentDeliveryError extends Error {}
+
+class SmtpResponseError extends Error {
+  constructor(readonly code: number) {
+    super(`SMTP returned ${code}`);
+  }
 }
 
 export class DiscordDeliveryAdapter implements DeliveryAdapter {
@@ -36,10 +49,20 @@ export class DiscordDeliveryAdapter implements DeliveryAdapter {
     }
     let providerId = "";
     for (const content of splitDiscordMessage(payload.text)) {
-      const message = await this.request(`/channels/${channelId}/messages`, {
-        content,
-      });
-      providerId = String(message.id);
+      try {
+        const message = await this.request(`/channels/${channelId}/messages`, {
+          content,
+          allowed_mentions: { parse: [] },
+        });
+        providerId = String(message.id);
+      } catch (error) {
+        if (providerId && !(error instanceof UncertainDeliveryError))
+          throw new UncertainDeliveryError(
+            "Discord delivery was partially accepted",
+            { cause: error },
+          );
+        throw error;
+      }
     }
     return { providerId };
   }
@@ -57,6 +80,7 @@ export class DiscordDeliveryAdapter implements DeliveryAdapter {
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
       });
     } catch (error) {
       if (/^\/channels\/[^/]+\/messages$/.test(path))
@@ -67,7 +91,19 @@ export class DiscordDeliveryAdapter implements DeliveryAdapter {
       throw error;
     }
     if (!response.ok) throw new Error(`Discord returned ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    try {
+      const message = (await response.json()) as Record<string, unknown>;
+      if (typeof message.id !== "string" || !message.id)
+        throw new Error("Discord response has no message identity");
+      return message;
+    } catch (error) {
+      if (/^\/channels\/[^/]+\/messages$/.test(path))
+        throw new UncertainDeliveryError(
+          "Discord delivery acknowledgement is uncertain",
+          { cause: error },
+        );
+      throw error;
+    }
   }
 }
 
@@ -78,6 +114,7 @@ export interface SmtpOptions {
   password: string;
   from: string;
   servername?: string;
+  timeoutMs?: number;
 }
 
 function safeHeader(value: string): string {
@@ -85,32 +122,69 @@ function safeHeader(value: string): string {
   return value;
 }
 
-function createResponseReader(socket: TLSSocket): () => Promise<string> {
+function createResponseReader(
+  socket: TLSSocket,
+  timeoutMs: number,
+): () => Promise<string> {
   let buffer = "";
-  const waiting: Array<(value: string) => void> = [];
+  let terminalError: Error | undefined;
+  const waiting: Array<{
+    resolve: (value: string) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
   const responses: string[] = [];
+  const fail = (error: Error): void => {
+    terminalError ??= error;
+    for (const waiter of waiting.splice(0)) {
+      clearTimeout(waiter.timer);
+      waiter.reject(terminalError);
+    }
+  };
+  socket.on("error", fail);
+  socket.on("end", () => fail(new Error("SMTP connection ended")));
+  socket.on("close", () => fail(new Error("SMTP connection closed")));
   socket.setEncoding("utf8");
   socket.on("data", (chunk: string) => {
     buffer += chunk;
+    if (buffer.length > 65_536 || responses.length > 100) {
+      fail(new Error("SMTP response exceeds the limit"));
+      socket.destroy();
+      return;
+    }
     const lines = buffer.split("\r\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
       if (!/^\d{3} /.test(line)) continue;
       const waiter = waiting.shift();
-      if (waiter) waiter(line);
-      else responses.push(line);
+      if (waiter) {
+        clearTimeout(waiter.timer);
+        waiter.resolve(line);
+      } else responses.push(line);
     }
   });
   return () => {
+    if (terminalError) return Promise.reject(terminalError);
     const ready = responses.shift();
     return ready
       ? Promise.resolve(ready)
-      : new Promise((resolve) => waiting.push(resolve));
+      : new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            fail(new Error("SMTP response timed out"));
+            socket.destroy();
+          }, timeoutMs);
+          waiting.push({ resolve, reject, timer });
+        });
   };
 }
 
 export class SmtpDeliveryAdapter implements DeliveryAdapter {
-  constructor(private readonly options: SmtpOptions) {}
+  constructor(
+    private readonly options: SmtpOptions,
+    private readonly connect: (
+      options: ConnectionOptions,
+    ) => TLSSocket = tlsConnect,
+  ) {}
 
   async send(
     target: DeliveryTarget,
@@ -119,28 +193,59 @@ export class SmtpDeliveryAdapter implements DeliveryAdapter {
   ): Promise<DeliveryResult> {
     if (target.channel !== "email")
       throw new Error("SMTP adapter received a non-email target");
-    const socket = await new Promise<TLSSocket>((resolve, reject) => {
-      const connection = tlsConnect(
-        {
-          host: this.options.host,
-          port: this.options.port,
-          servername: this.options.servername ?? this.options.host,
-        },
-        () => resolve(connection),
-      );
-      connection.once("error", reject);
+    const timeoutMs = this.options.timeoutMs ?? 15_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
+      throw new Error("SMTP timeout must be a positive integer");
+    // Validate every header before connecting or entering the DATA phase.
+    for (const value of [
+      this.options.from,
+      target.recipientId,
+      payload.subject,
+      idempotencyKey,
+      this.options.servername ?? "rapi-agent",
+    ])
+      safeHeader(value);
+    const socket = this.connect({
+      host: this.options.host,
+      port: this.options.port,
+      servername: this.options.servername ?? this.options.host,
     });
-    const readResponse = createResponseReader(socket);
+    const readResponse = createResponseReader(socket, timeoutMs);
     const command = async (value: string, expected: number): Promise<void> => {
       socket.write(`${value}\r\n`);
       const response = await readResponse();
-      if (!response.startsWith(String(expected)))
-        throw new Error(`SMTP command failed: ${response}`);
+      const code = Number(response.slice(0, 3));
+      if (code !== expected) throw new SmtpResponseError(code);
     };
+    let dataSubmitted = false;
     try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("SMTP TLS connection timed out"));
+        }, timeoutMs);
+        const cleanup = (): void => {
+          clearTimeout(timer);
+          socket.off("secureConnect", connected);
+          socket.off("error", failed);
+          socket.off("close", closed);
+        };
+        const connected = (): void => {
+          cleanup();
+          resolve();
+        };
+        const failed = (error: Error): void => {
+          cleanup();
+          reject(error);
+        };
+        const closed = (): void => failed(new Error("SMTP connection closed"));
+        socket.once("secureConnect", connected);
+        socket.once("error", failed);
+        socket.once("close", closed);
+      });
       const greeting = await readResponse();
       if (!greeting.startsWith("220"))
-        throw new Error(`SMTP greeting failed: ${greeting}`);
+        throw new SmtpResponseError(Number(greeting.slice(0, 3)));
       await command(
         `EHLO ${safeHeader(this.options.servername ?? "rapi-agent")}`,
         250,
@@ -152,7 +257,7 @@ export class SmtpDeliveryAdapter implements DeliveryAdapter {
       await command(`RCPT TO:<${safeHeader(target.recipientId)}>`, 250);
       await command("DATA", 354);
       const boundary = `rapi-${randomUUID()}`;
-      const messageId = `<${idempotencyKey}@rapi-agent.local>`;
+      const messageId = `<${safeHeader(idempotencyKey)}@rapi-agent.local>`;
       const message = [
         `From: ${safeHeader(this.options.from)}`,
         `To: ${safeHeader(target.recipientId)}`,
@@ -174,9 +279,22 @@ export class SmtpDeliveryAdapter implements DeliveryAdapter {
       ]
         .join("\r\n")
         .replace(/^\./gm, "..");
+      dataSubmitted = true;
       await command(`${message}\r\n.`, 250);
-      await command("QUIT", 221);
+      // DATA's 250 is the receipt. Losing QUIT cannot turn acceptance into a retry.
+      socket.end("QUIT\r\n");
       return { providerId: messageId };
+    } catch (error) {
+      if (error instanceof SmtpResponseError) {
+        if (error.code >= 500 && error.code <= 599)
+          throw new PermanentDeliveryError(error.message, { cause: error });
+        throw error;
+      }
+      if (dataSubmitted)
+        throw new UncertainDeliveryError("SMTP delivery outcome is uncertain", {
+          cause: error,
+        });
+      throw error;
     } finally {
       socket.destroy();
     }
@@ -232,7 +350,13 @@ export class MdxPublisher {
       if (!name.endsWith(".mdx")) continue;
       const source = join(this.contentDirectory, name);
       const content = await readFile(source, "utf8");
-      if (!/^visibility: public$/m.test(content)) continue;
+      const frontmatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(
+        content,
+      );
+      if (!frontmatter) continue;
+      const document = parseDocument(frontmatter[1]!, { uniqueKeys: true });
+      if (document.errors.length || document.get("visibility") !== "public")
+        continue;
       const target = join(this.publicDirectory, basename(name));
       await writeFile(target, content, "utf8");
       published.push(target);

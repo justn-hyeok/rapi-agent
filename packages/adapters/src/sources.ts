@@ -1,5 +1,70 @@
 import { XMLParser } from "fast-xml-parser";
 
+export interface SourceHttpOptions {
+  timeoutMs?: number;
+  maxBodyBytes?: number;
+}
+
+export interface SourcePayload {
+  contentType: string;
+  body: string;
+}
+
+async function readSource(
+  url: string,
+  headers: Record<string, string>,
+  options: SourceHttpOptions,
+  onPayload?: (payload: SourcePayload) => Promise<void>,
+): Promise<{ response: Response; body: string }> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const maxBodyBytes = options.maxBodyBytes ?? 2_000_000;
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs <= 0 ||
+    !Number.isSafeInteger(maxBodyBytes) ||
+    maxBodyBytes <= 0
+  )
+    throw new Error("Source HTTP limits must be positive integers");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { headers, signal: controller.signal });
+    if (response.status === 304) return { response, body: "" };
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`Source returned ${response.status}`);
+    }
+    const reader = response.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          size += chunk.value.byteLength;
+          if (size > maxBodyBytes) {
+            await reader.cancel();
+            throw new Error("Source body exceeds the byte limit");
+          }
+          chunks.push(chunk.value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    const body = Buffer.concat(chunks).toString("utf8");
+    // Persist the exact response before JSON/XML parsing can fail.
+    await onPayload?.({
+      contentType: response.headers.get("content-type") ?? "",
+      body,
+    });
+    return { response, body };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface ExternalItem {
   externalId: string;
   url: string;
@@ -162,28 +227,32 @@ export function parseGitHubEvent(
 }
 
 export class GitHubSourceAdapter {
-  constructor(private readonly token?: string) {}
+  constructor(
+    private readonly token?: string,
+    private readonly options: SourceHttpOptions = {},
+  ) {}
 
   async fetchRepositoryEvents(
     owner: string,
     repository: string,
     etag?: string,
+    onPayload?: (payload: SourcePayload) => Promise<void>,
   ): Promise<{ items: ExternalItem[]; etag?: string }> {
-    const response = await fetch(
+    const { response, body } = await readSource(
       `https://api.github.com/repos/${owner}/${repository}/events`,
       {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "rapi-agent",
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
-          ...(etag ? { "If-None-Match": etag } : {}),
-        },
+        Accept: "application/vnd.github+json",
+        "User-Agent": "rapi-agent",
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+        ...(etag ? { "If-None-Match": etag } : {}),
       },
+      this.options,
+      onPayload,
     );
     if (response.status === 304)
       return { items: [], ...(etag ? { etag } : {}) };
     if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-    const payload = (await response.json()) as Record<string, unknown>[];
+    const payload = JSON.parse(body) as Record<string, unknown>[];
     const responseEtag = response.headers.get("etag") ?? undefined;
     return {
       items: payload.map(parseGitHubEvent),
@@ -193,19 +262,25 @@ export class GitHubSourceAdapter {
 }
 
 export class FeedSourceAdapter {
+  constructor(private readonly options: SourceHttpOptions = {}) {}
+
   async fetch(
     url: string,
     etag?: string,
+    onPayload?: (payload: SourcePayload) => Promise<void>,
   ): Promise<{ items: ExternalItem[]; etag?: string }> {
-    const response = await fetch(url, {
-      headers: etag ? { "If-None-Match": etag } : {},
-    });
+    const { response, body } = await readSource(
+      url,
+      etag ? { "If-None-Match": etag } : {},
+      this.options,
+      onPayload,
+    );
     if (response.status === 304)
       return { items: [], ...(etag ? { etag } : {}) };
     if (!response.ok) throw new Error(`Feed returned ${response.status}`);
     const responseEtag = response.headers.get("etag") ?? undefined;
     return {
-      items: parseFeed(await response.text()),
+      items: parseFeed(body),
       ...(responseEtag ? { etag: responseEtag } : {}),
     };
   }

@@ -31,6 +31,8 @@ import {
   type ExternalItem,
   MdxPublisher,
   UncertainDeliveryError,
+  PermanentDeliveryError,
+  type SourcePayload,
 } from "@rapi/adapters";
 import { PostgresStore } from "@rapi/db";
 
@@ -88,6 +90,11 @@ export class RapiAgent {
     xml: string,
     collectedAt = new Date(),
   ): Promise<number> {
+    await this.persistSourcePayload(
+      sourceId,
+      { contentType: "application/xml", body: xml },
+      collectedAt,
+    );
     let inserted = 0;
     for (const item of parseFeed(xml)) {
       const result = await this.ingestExternalItem(sourceId, item, collectedAt);
@@ -102,6 +109,11 @@ export class RapiAgent {
     payloads: Record<string, unknown>[],
     collectedAt = new Date(),
   ): Promise<number> {
+    await this.persistSourcePayload(
+      sourceId,
+      { contentType: "application/json", body: JSON.stringify(payloads) },
+      collectedAt,
+    );
     let inserted = 0;
     for (const payload of payloads) {
       const result = await this.ingestExternalItem(
@@ -151,6 +163,7 @@ export class RapiAgent {
             const result = await feed.fetch(
               source.locator,
               source.etag ?? undefined,
+              (payload) => this.persistSourcePayload(source.id, payload),
             );
             for (const item of result.items) {
               const saved = await this.ingestExternalItem(source.id, item);
@@ -177,6 +190,7 @@ export class RapiAgent {
             owner,
             repository,
             source.etag ?? undefined,
+            (payload) => this.persistSourcePayload(source.id, payload),
           );
           for (const item of result.items) {
             const saved = await this.ingestExternalItem(source.id, item);
@@ -195,6 +209,20 @@ export class RapiAgent {
           );
         },
       })),
+    );
+  }
+
+  private async persistSourcePayload(
+    sourceId: string,
+    payload: SourcePayload,
+    collectedAt = new Date(),
+  ): Promise<void> {
+    await this.store.insertRawEvent(
+      sourceId,
+      null,
+      checksumPayload(payload),
+      payload,
+      collectedAt,
     );
   }
 
@@ -257,7 +285,7 @@ export class RapiAgent {
           attempt.id,
           error instanceof UncertainDeliveryError
             ? "uncertain"
-            : attempt.attempts >= 3
+            : error instanceof PermanentDeliveryError || attempt.attempts >= 3
               ? "permanent_failure"
               : "temporary_failure",
           undefined,
