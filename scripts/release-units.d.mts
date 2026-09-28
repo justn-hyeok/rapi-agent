@@ -11,5 +11,6 @@ export function installReleaseUnits(
     unitRoot: string;
     receiptPath: string;
     reload: () => Promise<unknown>;
+    attemptId?: string;
   },
 ): Promise<void>;

@@ -14,6 +14,8 @@ import { configuredHealthPorts, systemdDriver } from "./switch-release.mjs";
 import { execFile } from "node:child_process";
 import { parseEnv, promisify } from "node:util";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
+import pg from "pg";
 
 // First deployment only. A legacy checkout has no sealed predecessor, so its
 // observed process/unit state is explicitly separate from normal sealed switches.
@@ -23,11 +25,22 @@ export async function adoptRelease({
   expectedSha,
   receiptPath,
   driver,
+  wiringReceiptPath,
 }) {
   currentPath = resolve(currentPath);
   candidatePath = resolve(candidatePath);
   if (!/^[a-f0-9]{40}$/.test(expectedSha))
     throw new Error("Full candidate SHA required");
+  wiringReceiptPath = resolve(wiringReceiptPath);
+  receiptPath = resolve(receiptPath);
+  if (wiringReceiptPath === receiptPath)
+    throw new Error("Distinct adoption and unit receipt paths required");
+  try {
+    await lstat(wiringReceiptPath);
+    throw new Error("Fresh unit receipt path required");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   if ((await realpath(dirname(currentPath))) !== dirname(currentPath))
     throw new Error("Canonical release pointer directory required");
   try {
@@ -42,12 +55,14 @@ export async function adoptRelease({
   let legacy;
   let touched = false;
   let pointed = false;
+  const attemptId = randomUUID();
   const receipt = {
     candidate: candidate.sha,
     status: "preparing",
     rollback: null,
     predecessorEvidence:
       "legacy process/unit observation; no sealed revision claim",
+    attemptId,
   };
   try {
     legacy = await driver.snapshot();
@@ -60,6 +75,14 @@ export async function adoptRelease({
       )
     )
       throw new Error("Invalid legacy service set");
+    if (
+      !Array.isArray(legacy.appliedMigrations) ||
+      JSON.stringify([...legacy.appliedMigrations].sort()) !==
+        JSON.stringify(candidate.migrations)
+    )
+      throw new Error(
+        "Production schema differs from candidate; adoption cannot migrate or prove rollback compatibility",
+      );
     await driver.legacyReady(legacy.active);
     await writeFile(
       receiptPath,
@@ -70,7 +93,7 @@ export async function adoptRelease({
     await driver.stop(legacy.active);
     await symlink(candidatePath, currentPath);
     pointed = true;
-    await driver.wire();
+    await driver.wire(attemptId);
     await driver.start(legacy.active);
     await driver.ready(legacy.active, candidate.sha);
     receipt.status = "adopted";
@@ -80,7 +103,7 @@ export async function adoptRelease({
     if (touched) {
       try {
         await driver.stop(legacy.active);
-        await driver.restore();
+        await driver.restore(attemptId);
         if (pointed) await unlink(currentPath);
         await driver.start(legacy.active);
         await driver.legacyReady(legacy.active);
@@ -143,9 +166,8 @@ if (
       "Explicit candidate, pointer, legacy root, environment and recovery receipts required",
     );
   const run = promisify(execFile);
-  const ports = configuredHealthPorts(
-    parseEnv(await readFile(environmentPath, "utf8")),
-  );
+  const serviceEnvironment = parseEnv(await readFile(environmentPath, "utf8"));
+  const ports = configuredHealthPorts(serviceEnvironment);
   const serviceDriver = systemdDriver(ports);
   const reload = () => run("systemctl", ["daemon-reload"], { timeout: 30_000 });
   const units = Object.keys(ports);
@@ -185,7 +207,28 @@ if (
         ["-C", legacyAppRoot, "rev-parse", "HEAD"],
         { timeout: 5000 },
       );
-      return { active, services, legacyAppRoot, checkoutSha: sha.trim() };
+      const client = new pg.Client({
+        connectionString: serviceEnvironment.DATABASE_URL,
+        connectionTimeoutMillis: 5000,
+        query_timeout: 5000,
+      });
+      await client.connect();
+      let appliedMigrations;
+      try {
+        const result = await client.query(
+          "SELECT name FROM schema_migrations ORDER BY name",
+        );
+        appliedMigrations = result.rows.map((row) => row.name);
+      } finally {
+        await client.end();
+      }
+      return {
+        active,
+        services,
+        legacyAppRoot,
+        checkoutSha: sha.trim(),
+        appliedMigrations,
+      };
     },
     async legacyReady(services) {
       for (let attempt = 0; attempt < 30; attempt++) {
@@ -211,7 +254,7 @@ if (
       }
       throw new Error("Legacy runtime readiness failed");
     },
-    async wire() {
+    async wire(attemptId) {
       await installReleaseUnits({
         currentPath,
         environmentPath,
@@ -219,9 +262,10 @@ if (
         unitRoot: "/etc/systemd/system",
         receiptPath: unitReceipt,
         reload,
+        attemptId,
       });
     },
-    async restore() {
+    async restore(attemptId) {
       let receipt;
       try {
         receipt = JSON.parse(await readFile(unitReceipt, "utf8"));
@@ -229,6 +273,7 @@ if (
         if (error.code === "ENOENT") return;
         throw error;
       }
+      if (receipt.attemptId !== attemptId) return;
       for (const [unit, content] of Object.entries(receipt.before)) {
         if (!units.some((name) => unit === `rapi-${name}.service`))
           throw new Error("Unexpected rollback unit");
@@ -251,6 +296,7 @@ if (
     expectedSha,
     receiptPath,
     driver,
+    wiringReceiptPath: unitReceipt,
   });
   process.stdout.write("Initial release adoption verified\n");
 }

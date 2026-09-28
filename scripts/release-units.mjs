@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 
 const paths = {
   bot: "apps/bot/src/run.ts",
@@ -61,6 +62,7 @@ export async function installReleaseUnits({
   unitRoot,
   receiptPath,
   reload,
+  attemptId = randomUUID(),
 }) {
   const contents = releaseUnitContents({
     currentPath,
@@ -97,7 +99,7 @@ export async function installReleaseUnits({
   }
   await writeFile(
     receiptPath,
-    `${JSON.stringify({ currentPath, environmentPath, targets, before, applied: false }, null, 2)}\n`,
+    `${JSON.stringify({ attemptId, currentPath, environmentPath, targets, before, applied: false }, null, 2)}\n`,
     { flag: "wx", mode: 0o600 },
   );
   const changed = [];
@@ -118,7 +120,7 @@ export async function installReleaseUnits({
     await reload();
     await writeFile(
       receiptPath,
-      `${JSON.stringify({ currentPath, environmentPath, targets, before, applied: true }, null, 2)}\n`,
+      `${JSON.stringify({ attemptId, currentPath, environmentPath, targets, before, applied: true }, null, 2)}\n`,
       { mode: 0o600 },
     );
   } catch (error) {

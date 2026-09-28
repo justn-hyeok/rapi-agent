@@ -47,13 +47,19 @@ test("first deployment restores observed legacy runtime on failure and never sta
     const current = join(root, "current");
     let fail = true;
     let legacy = true;
+    let appliedMigrations = ["0001_test.sql"];
+    let stops = 0;
     const starts: string[][] = [];
     const driver: LegacyDriver = {
       async active() {
         return ["bot"];
       },
       async snapshot() {
-        return { active: ["bot"], checkoutSha: "legacy-unsealed" };
+        return {
+          active: ["bot"],
+          checkoutSha: "legacy-unsealed",
+          appliedMigrations,
+        };
       },
       async legacyReady() {
         assert.equal(legacy, true);
@@ -64,7 +70,9 @@ test("first deployment restores observed legacy runtime on failure and never sta
       async restore() {
         legacy = true;
       },
-      async stop() {},
+      async stop() {
+        stops++;
+      },
       async start(names) {
         starts.push(names);
       },
@@ -78,8 +86,36 @@ test("first deployment restores observed legacy runtime on failure and never sta
       candidatePath: stage,
       expectedSha: sha,
       driver,
+      wiringReceiptPath: join(root, "units.json"),
     };
     const failed = join(root, "failed.json");
+    appliedMigrations = [];
+    await assert.rejects(
+      adoptRelease({
+        ...options,
+        receiptPath: join(root, "schema-failure.json"),
+      }),
+      /schema differs/,
+    );
+    assert.equal(stops, 0);
+    appliedMigrations = ["0001_test.sql"];
+    await writeFile(options.wiringReceiptPath, "existing recovery receipt");
+    await assert.rejects(
+      adoptRelease({ ...options, receiptPath: failed }),
+      /Fresh unit receipt/,
+    );
+    assert.equal(stops, 0);
+    const { unlink } = await import("node:fs/promises");
+    await unlink(options.wiringReceiptPath);
+    await assert.rejects(
+      adoptRelease({
+        ...options,
+        wiringReceiptPath: failed,
+        receiptPath: failed,
+      }),
+      /Distinct/,
+    );
+    assert.equal(stops, 0);
     await assert.rejects(
       adoptRelease({ ...options, receiptPath: failed }),
       /legacy runtime restored/,
