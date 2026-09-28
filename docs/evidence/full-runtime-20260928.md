@@ -35,6 +35,10 @@ endpoint verification, and all 16 commands are registered.
 | Development           | The command service prepared and approved a bounded real Codex task. OMP created an isolated clone, wrote a proof file, and applied signed callbacks to the DB with owner notifications. Independent file/revision readback passed. A second actual provider child was cancelled; its exact PID disappeared and DB state agreed.                                                                                       |
 | Recovery              | Each candidate passed restart/restore drills. Fresh production dumps were restored to disposable PostgreSQL: 31 tables, exact 12 migrations, 105 constraints. Production was not overwritten. Previous sealed artifacts and rollback receipts remain available.                                                                                                                                                        |
 
+The same deployed revision also booted against the restored production data,
+became ready and returned 20 public search matches. The isolated application used
+fixture transport configuration and made no actual external sends.
+
 SMTP credentials remain only in the private mode-0600 server environment and the
 account's SMTP alias configuration. Temporary credential-transfer files were
 removed. The corrected mail was a separate setup verification, not an outbox retry
@@ -64,7 +68,7 @@ Private, credential-free receipts live under
 `live-permissions.json`, `fixture-items-quarantine-proof.json`,
 `publication/newsletter-proof.json`, `email-live-proof.json`,
 `email-corrected-proof.json`, `gmail-inbox-proof.json`, `omp-live-proof.json`,
-`final-production-restore.json`. Environment backups and dumps are private and
+`final-production-restore.json`, `restored-app-proof.json`. Environment backups and dumps are private and
 excluded from Git.
 
 References: [Discord permissions](https://docs.discord.com/developers/topics/permissions),
