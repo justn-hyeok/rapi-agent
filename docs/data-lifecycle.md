@@ -50,6 +50,11 @@
 운영 사본은 `RAPI_BACKUP_CATALOG_ROOTS` 아래에서 `register-backups.mjs`로 등록한다.
 등록 파일의 시각·크기가 달라지면 자동 삭제하지 않고 확인을 요구한다.
 백업 catalog와 삭제 ledger는 `/var/lib/rapi/`의 mode 0600 파일로 DB 밖에 보관한다.
+백업과 DB 삭제는 같은 PostgreSQL advisory lock을 사용하므로 삭제가 진행 중인
+백업을 추적 목록에서 놓치지 않는다. 나중에 등록된 복구 사본도 추적 목록에 넣는다.
+ledger 쓰기는 잠금으로 직렬화한다. 프로세스 강제 종료로 `.lock`이 남으면 worker와
+maintenance를 정지하고 잠금의 PID가 종료됐는지 확인한 후 해당 잠금만 제거한다.
+이를 확인하지 않고 다른 프로세스의 잠금을 자동 제거하지 않는다.
 
 삭제 후 상태는 `waiting_backups`다. 예상 시각이 지났더라도 등록된 이전 백업
 파일이 남아 있으면 완료하지 않는다. 실제 파일이 사라진 뒤 `completed`가 된다.

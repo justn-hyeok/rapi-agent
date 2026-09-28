@@ -76,6 +76,14 @@ it("defers metadata of an item that still has an active webhook lease", async ()
       (await sweepMetadata(s.client, { key, apply: true })).rawMetadata,
       0,
     );
+    await s.client.query(
+      "UPDATE queue_jobs SET state='ready',lease_expires_at=NULL WHERE id=$1",
+      [job],
+    );
+    assert.equal(
+      (await sweepMetadata(s.client, { key, apply: true })).rawMetadata,
+      0,
+    );
     assert.equal(
       (await s.client.query("SELECT id FROM queue_jobs WHERE id=$1", [job]))
         .rowCount,
@@ -446,6 +454,36 @@ it("removes expired metadata and terminal audits, keeps live work, and suppresse
     } finally {
       await withoutKey.close();
     }
+    const connection = randomUUID();
+    await s.client.query(
+      "INSERT INTO webhook_connections(id,guild_id,name,kind,source_id,destination_kind,destination_id,secret_ciphertext) VALUES($1,$2,'erasure-test','generic_inbound',$3,'discord_channel','channel','test-encrypted')",
+      [connection, guild, old.source],
+    );
+    const replay = await s.store.ingestManagedWebhook({
+      connectionId: connection,
+      deliveryId: "event-1",
+      eventType: "test",
+      payloadHash: "checksum",
+      rawPayload: { body: "resurrected" },
+      item: {
+        id: randomUUID(),
+        rawEventId: randomUUID(),
+        sourceId: old.source,
+        normalizerVersion: "test-v1",
+        canonicalUrl: "https://privacy.example/erased",
+        title: "erased",
+        body: "erased",
+        author: null,
+        publishedAt: null,
+        collectedAt: new Date(),
+        visibility: "private",
+        contentFingerprint: randomUUID(),
+        metadata: {},
+        categories: [],
+      },
+      summary: "erased",
+    });
+    assert.equal(replay.inserted, false);
     assert.equal(
       (
         await s.client.query("SELECT id FROM raw_events WHERE source_id=$1", [

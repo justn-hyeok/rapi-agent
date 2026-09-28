@@ -669,7 +669,7 @@ export async function sweepMetadata(
     );
     const raw = (
       await client.query(
-        "SELECT re.* FROM raw_events re JOIN sources s ON s.id=re.source_id WHERE re.payload->>'retentionExpired'='true' AND re.collected_at<$1::timestamptz-CASE WHEN COALESCE(re.payload->>'metadataRetentionDays',CASE WHEN s.collection_policy->>'visibility'='public' THEN '365' ELSE '90' END)='365' THEN interval '1 year' ELSE interval '90 days' END AND NOT EXISTS(SELECT 1 FROM source_items si JOIN delivery_batch_items bi ON bi.source_item_id=si.id JOIN delivery_batches b ON b.id=bi.batch_id WHERE si.raw_event_id=re.id AND b.state NOT IN('delivered','failed','dead_letter')) AND NOT EXISTS(SELECT 1 FROM source_items si JOIN queue_jobs q ON (q.payload->>'itemId'=si.id::text OR q.idempotency_key LIKE 'rss:'||si.id::text||':%') WHERE si.raw_event_id=re.id AND q.state='leased' AND q.lease_expires_at>$1)",
+        "SELECT re.* FROM raw_events re JOIN sources s ON s.id=re.source_id WHERE re.payload->>'retentionExpired'='true' AND re.collected_at<$1::timestamptz-CASE WHEN COALESCE(re.payload->>'metadataRetentionDays',CASE WHEN s.collection_policy->>'visibility'='public' THEN '365' ELSE '90' END)='365' THEN interval '1 year' ELSE interval '90 days' END AND NOT EXISTS(SELECT 1 FROM source_items si JOIN delivery_batch_items bi ON bi.source_item_id=si.id JOIN delivery_batches b ON b.id=bi.batch_id WHERE si.raw_event_id=re.id AND b.state NOT IN('delivered','failed','dead_letter')) AND NOT EXISTS(SELECT 1 FROM source_items si JOIN queue_jobs q ON (q.payload->>'itemId'=si.id::text OR q.idempotency_key LIKE 'rss:'||si.id::text||':%') WHERE si.raw_event_id=re.id AND q.state IN('ready','leased'))",
         [now],
       )
     ).rows;

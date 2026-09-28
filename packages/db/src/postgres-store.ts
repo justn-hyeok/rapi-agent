@@ -169,6 +169,43 @@ export class PostgresStore {
     return result.rows[0].visibility;
   }
 
+  private async retiredEvent(
+    client: PoolClient,
+    sourceId: string,
+    externalId: string | null,
+    checksum: string,
+  ): Promise<string | null> {
+    if (!this.privacyKey) {
+      const exists = await client.query<{ table_name: string | null }>(
+        "SELECT to_regclass('privacy_event_tombstones')::text AS table_name",
+      );
+      if (
+        exists.rows[0]?.table_name &&
+        (
+          await client.query(
+            "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 LIMIT 1",
+            [sourceId],
+          )
+        ).rowCount
+      )
+        throw new Error("Privacy key is required for retired source ingestion");
+      return null;
+    }
+    const ref =
+      "hmac:v1:" +
+      createHmac("sha256", Buffer.from(this.privacyKey, "hex"))
+        .update(
+          "event\0" +
+            (externalId === null ? "hash:" + checksum : "id:" + externalId),
+        )
+        .digest("hex");
+    const found = await client.query<{ raw_id: string }>(
+      "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 AND event_ref=$2",
+      [sourceId, ref],
+    );
+    return found.rows[0]?.raw_id ?? null;
+  }
+
   async insertRawEvent(
     sourceId: string,
     externalId: string | null,
@@ -184,37 +221,13 @@ export class PostgresStore {
       if (!source.rows[0] || source.rows[0].state !== "active")
         throw new Error("Source is unavailable");
       const id = randomUUID();
-      if (!this.privacyKey) {
-        const exists = await client.query<{ table_name: string | null }>(
-          "SELECT to_regclass('privacy_event_tombstones')::text AS table_name",
-        );
-        if (exists.rows[0]?.table_name) {
-          const blocked = await client.query(
-            "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 LIMIT 1",
-            [sourceId],
-          );
-          if (blocked.rowCount)
-            throw new Error(
-              "Privacy key is required for retired source ingestion",
-            );
-        }
-      }
-      if (this.privacyKey) {
-        const ref = `hmac:v1:${createHmac(
-          "sha256",
-          Buffer.from(this.privacyKey, "hex"),
-        )
-          .update(
-            `event\0${externalId === null ? `hash:${checksum}` : `id:${externalId}`}`,
-          )
-          .digest("hex")}`;
-        const retired = await client.query<{ raw_id: string }>(
-          "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 AND event_ref=$2",
-          [sourceId, ref],
-        );
-        if (retired.rows[0])
-          return { id: retired.rows[0].raw_id, inserted: false, retired: true };
-      }
+      const retired = await this.retiredEvent(
+        client,
+        sourceId,
+        externalId,
+        checksum,
+      );
+      if (retired) return { id: retired, inserted: false, retired: true };
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO raw_events (id, source_id, external_event_id, canonical_payload_hash, payload, collected_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
@@ -1476,6 +1489,23 @@ export class PostgresStore {
         [input.connectionId],
       );
       const target = connection.rows[0];
+      if (target?.source_id) {
+        const source = await client.query<{ state: string }>(
+          "SELECT state FROM sources WHERE id=$1 FOR UPDATE",
+          [target.source_id],
+        );
+        if (source.rows[0]?.state !== "active")
+          throw new Error("Source is unavailable");
+        if (
+          await this.retiredEvent(
+            client,
+            target.source_id,
+            input.deliveryId,
+            input.payloadHash,
+          )
+        )
+          return { inserted: false };
+      }
       if (!target || target.state !== "active" || !target.source_id)
         throw new Error("Webhook connection is not active");
       if (
