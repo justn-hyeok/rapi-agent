@@ -3,9 +3,26 @@ import { describe, it } from "node:test";
 import {
   deliveryPeriodKey,
   deliveryPeriodWindow,
+  completedDeliveryPeriodWindow,
 } from "../packages/core/src/domain/delivery-period.js";
 
 describe("deliveryPeriodKey", () => {
+  it("uses the completed calendar window across DST and week boundaries", () => {
+    const day = completedDeliveryPeriodWindow(
+      new Date("2026-03-09T12:00:00Z"),
+      "daily",
+      "America/New_York",
+    );
+    assert.equal(day.start.toISOString(), "2026-03-08T05:00:00.000Z");
+    assert.equal(day.end.toISOString(), "2026-03-09T04:00:00.000Z");
+    const week = completedDeliveryPeriodWindow(
+      new Date("2026-09-28T03:00:00Z"),
+      "weekly",
+      "Asia/Seoul",
+    );
+    assert.equal(week.start.toISOString(), "2026-09-20T15:00:00.000Z");
+    assert.equal(week.end.toISOString(), "2026-09-27T15:00:00.000Z");
+  });
   it("returns the local date at the UTC/Seoul day boundary", () => {
     const now = new Date("2026-09-21T16:00:00Z");
     assert.equal(deliveryPeriodKey(now, "daily", "UTC"), "2026-09-21");

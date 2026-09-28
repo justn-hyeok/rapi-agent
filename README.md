@@ -172,7 +172,7 @@ Administrator는 ADMIN이 되지만 역할로 SUPERADMIN이 되지는 않는다.
 실행·시도·증거와 기억 lifecycle은 PostgreSQL에 보존한다. 취소는 활성 Codex
 프로세스를 실제 종료하며, 재시작 때 남은 작업은 interrupted로 표시한다.
 관리 채널의 질문은 읽기 전용이고, 명확한 수정·배포는 기본 모델
-`gpt-5.3-codex-spark`로 직접 수행한다. `스파크`, `아스트라`, `솔`, `테라`,
+`gpt-5.6-sol`로 직접 수행한다. `스파크`, `아스트라`, `솔`, `테라`,
 `루나` 별칭이나 정확한 모델 ID를 현재 요청에 지정할 수 있다. `/작업` 명령에도
 선택 항목 `모델`이 있으며 OMP가 해당 모델을 그대로 사용한다.
 완료 보고를 검증 성공으로 간주하지 않는다. 전체 UX, 자원 한도와 운영 한계는
@@ -184,7 +184,7 @@ E2E는 자동으로 폐기되는 별도 PostgreSQL의 `rapi_test`만 사용한�
 OMP supports `/작업 내용:커서로 오류 고쳐줘`, `/작업 내용:고트로 오류 고쳐줘`,
 and `/작업 내용:오류 고쳐줘 공급자:commandcode 모델:vendor/model`.
 The optional `공급자` option overrides a leading provider directive. Omitted provider
-means Codex with `gpt-5.3-codex-spark`; Cursor and Command Code use their own default
+means Codex with `gpt-5.6-sol`; Cursor and Command Code use their own default
 model when `모델` is omitted. Selection applies only to the current task revision.
 Set optional `COMMAND_CODE_API_KEY` in `.env` and restart the OMP service for Command Code.
 For Cursor, run `cursor-agent login` as the OMP service user; OAuth stays in

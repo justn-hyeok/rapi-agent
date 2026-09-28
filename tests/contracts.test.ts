@@ -27,7 +27,7 @@ describe("OMP schemas", () => {
       required_evidence: ["test-results"],
     });
     assert.equal(result.success, true);
-    assert.equal(result.data.model, "gpt-5.3-codex-spark");
+    assert.equal(result.data.model, "gpt-5.6-sol");
   });
   it("rejects callbacks without a signature", () => {
     const result = executionCallbackSchema.safeParse({

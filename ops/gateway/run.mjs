@@ -1,4 +1,6 @@
 import { createServer, request as httpRequest } from "node:http";
+import { readFile } from "node:fs/promises";
+import { URL } from "node:url";
 
 const port = Number(process.env.RAPI_GATEWAY_PORT ?? "3600");
 const healthPort = Number(process.env.RAPI_GATEWAY_HEALTH_PORT ?? "3601");
@@ -17,8 +19,53 @@ function respond(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-const server = createServer((incoming, outgoing) => {
+const server = createServer(async (incoming, outgoing) => {
   const path = incoming.url?.split("?")[0] ?? "";
+  if (
+    ["GET", "HEAD"].includes(incoming.method) &&
+    /^\/blog(?:\/(?:[a-z0-9]+(?:-[a-z0-9]+)*\.html|feed\.xml)?)?$/.test(path)
+  ) {
+    incoming.resume();
+    const name =
+      path === "/blog" || path === "/blog/"
+        ? "index.html"
+        : path.slice("/blog/".length);
+    try {
+      let body = await readFile(
+        new URL(`../../apps/blog/dist/${name}`, import.meta.url),
+      );
+      if (name === "feed.xml" && process.env.RAPI_PUBLIC_BASE_URL) {
+        const metadata = JSON.parse(
+          await readFile(
+            new URL("../../apps/blog/dist/blog-build.json", import.meta.url),
+            "utf8",
+          ),
+        );
+        const configured = new URL(process.env.RAPI_PUBLIC_BASE_URL);
+        if (!["http:", "https:"].includes(configured.protocol))
+          throw new Error("Invalid blog origin");
+        const effective = new URL("/blog/", configured.origin).href;
+        if (typeof metadata.baseUrl !== "string" || !metadata.baseUrl)
+          throw new Error("Blog build origin is missing");
+        body = Buffer.from(
+          body.toString("utf8").replaceAll(metadata.baseUrl, effective),
+        );
+      }
+      outgoing.writeHead(200, {
+        "content-type": name.endsWith(".xml")
+          ? "application/rss+xml; charset=utf-8"
+          : "text/html; charset=utf-8",
+        "cache-control": "public, max-age=60",
+        "content-security-policy":
+          "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; frame-ancestors 'none'",
+        "x-content-type-options": "nosniff",
+      });
+      outgoing.end(incoming.method === "HEAD" ? undefined : body);
+    } catch {
+      respond(outgoing, 404, { error: "not_found" });
+    }
+    return;
+  }
   if (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path))) {
     incoming.resume();
     respond(outgoing, 404, { error: "not_found" });
@@ -52,7 +99,9 @@ const server = createServer((incoming, outgoing) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  process.stdout.write(`rapi public gateway listening on 127.0.0.1:${port}\n`);
+  process.stdout.write(
+    `rapi public gateway listening on 127.0.0.1:${server.address().port}\n`,
+  );
 });
 
 const healthServer = createServer((request, response) => {

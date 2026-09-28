@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const DEFAULT_CODEX_MODEL = "gpt-5.3-codex-spark";
+export const DEFAULT_CODEX_MODEL = "gpt-5.6-sol";
+const sparkModel = "gpt-5.3-codex-spark";
 
 export const codexModelSchema = z
   .string()
@@ -9,13 +10,13 @@ export const codexModelSchema = z
   .regex(/^[a-z0-9][a-z0-9._-]+$/);
 
 const aliases: Record<string, string> = {
-  spark: DEFAULT_CODEX_MODEL,
-  "codex spark": DEFAULT_CODEX_MODEL,
-  "codex-spark": DEFAULT_CODEX_MODEL,
-  "codex 5.3 spark": DEFAULT_CODEX_MODEL,
-  "codex-5.3-spark": DEFAULT_CODEX_MODEL,
-  "5.3 codex spark": DEFAULT_CODEX_MODEL,
-  스파크: DEFAULT_CODEX_MODEL,
+  spark: sparkModel,
+  "codex spark": sparkModel,
+  "codex-spark": sparkModel,
+  "codex 5.3 spark": sparkModel,
+  "codex-5.3-spark": sparkModel,
+  "5.3 codex spark": sparkModel,
+  스파크: sparkModel,
   astra: "gpt-6-astra",
   아스트라: "gpt-6-astra",
   sol: "gpt-5.6-sol",

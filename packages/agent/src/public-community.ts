@@ -44,7 +44,7 @@ export class PublicCommunityService {
       if (reservation.reason === "cooldown")
         return `쿨다운 중입니다. ${reservation.retryAt?.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul" }) ?? "잠시 후"} 다시 시도해주세요.`;
       if (reservation.reason === "concurrency")
-        return "현재 라피 질문 두 건을 처리 중입니다. 잠시 후 다시 시도해주세요.";
+        return "현재 라피 질문 처리량이 가득 찼습니다. 잠시 후 다시 시도해주세요.";
       return `오늘의 AI 사용 한도에 도달했습니다. ${reservation.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}에 초기화됩니다.`;
     }
     try {
@@ -76,6 +76,11 @@ export class PublicCommunityService {
       const result = await this.transport.answer(prompt, async () => {
         await this.store.markAiUsageStarted(input.requestId);
       });
+      if (!result.started && !result.ok) {
+        const released = await this.store.releaseAiUsage(input.requestId);
+        if (released)
+          return "공개 질문 실행기를 사용할 수 없습니다. 잠시 후 다시 시도해주세요. 사용량은 차감되지 않았습니다.";
+      }
       await this.store.finishAiUsage(
         input.requestId,
         result.ok ? "succeeded" : "failed",

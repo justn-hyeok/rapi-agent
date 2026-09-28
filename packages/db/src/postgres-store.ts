@@ -669,6 +669,22 @@ export class PostgresStore {
     return result.rows;
   }
 
+  async latestDeliveryPeriodEnd(subscriptionId: string): Promise<Date | null> {
+    const result = await this.pool.query<{ end: Date | null }>(
+      "SELECT max(period_end) AS end FROM delivery_batches WHERE subscription_id=$1",
+      [subscriptionId],
+    );
+    return result.rows[0]?.end ?? null;
+  }
+
+  async pendingDeliveryBatchIds(subscriptionId: string): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      "SELECT id FROM delivery_batches WHERE subscription_id=$1 AND state NOT IN ('delivered','dead_letter','draft') ORDER BY period_start LIMIT 100",
+      [subscriptionId],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
   async activeSourceIds(): Promise<string[]> {
     const result = await this.pool.query<{ id: string }>(
       "SELECT id FROM sources WHERE state='active' ORDER BY created_at",
@@ -1992,12 +2008,44 @@ export class PostgresStore {
     return result.rows;
   }
 
-  async cancelTask(taskId: string): Promise<void> {
-    const result = await this.pool.query(
-      "UPDATE task_requests SET state='cancelled',updated_at=now() WHERE id=$1 AND state NOT IN ('completed','failed','rejected','expired','cancelled')",
+  async latestTaskExecution(
+    taskId: string,
+  ): Promise<
+    { id: string; receiptId: string | null; state: string } | undefined
+  > {
+    const result = await this.pool.query<{
+      id: string;
+      receipt_id: string | null;
+      state: string;
+    }>(
+      `SELECT e.id,e.receipt_id,e.state FROM execution_attempts e
+       JOIN task_requests t ON t.id=e.task_id AND t.current_revision=e.task_revision
+       WHERE e.task_id=$1 ORDER BY e.created_at DESC LIMIT 1`,
       [taskId],
     );
-    if ((result.rowCount ?? 0) === 0)
-      throw new Error("Task cannot be cancelled");
+    const row = result.rows[0];
+    return row
+      ? { id: row.id, receiptId: row.receipt_id, state: row.state }
+      : undefined;
+  }
+
+  async cancelTask(taskId: string): Promise<void> {
+    await this.transaction(async (client) => {
+      await client.query(
+        "SELECT id FROM task_requests WHERE id=$1 FOR UPDATE",
+        [taskId],
+      );
+      const result = await client.query(
+        `UPDATE task_requests SET state='cancelled',updated_at=now()
+       WHERE id=$1 AND state NOT IN ('completed','failed','rejected','expired','cancelled')
+       AND NOT EXISTS (SELECT 1 FROM execution_attempts e WHERE e.task_id=$1
+         AND e.task_revision=task_requests.current_revision AND e.state IN ('dispatched','running','blocked'))`,
+        [taskId],
+      );
+      if ((result.rowCount ?? 0) === 0)
+        throw new Error(
+          "Task cannot be cancelled before process termination is confirmed",
+        );
+    });
   }
 }

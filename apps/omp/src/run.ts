@@ -1,6 +1,6 @@
 import { specificationSchema, type Specification } from "./specification.js";
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { runChild } from "./process.js";
 import { createServer, type ServerResponse } from "node:http";
 import {
   access,
@@ -26,8 +26,9 @@ type Receipt = {
   idempotencyKey: string;
   receiptId: string;
   specification: Specification;
-  state: "accepted" | "running" | "completed" | "failed";
+  state: "accepted" | "running" | "completed" | "failed" | "cancelled";
   reason?: string;
+  cancelCallbackDelivered?: boolean;
 };
 
 const port = Number(process.env.OMP_PORT ?? "3200");
@@ -42,6 +43,11 @@ const allowedRoots = (process.env.OMP_ALLOWED_REPOSITORY_ROOTS ?? "/home/justn")
   .split(",")
   .map((entry) => path.resolve(entry.trim()));
 const receiptRoot = path.join(workspaceRoot, "receipts");
+const receipts = new Map<string, Receipt>();
+const running = new Map<
+  string,
+  { controller: AbortController; done: Promise<void> }
+>();
 
 if (!callbackSecret)
   throw new Error("OMP_CALLBACK_SECRET is required to run OMP");
@@ -76,6 +82,7 @@ async function saveReceipt(receipt: Receipt): Promise<void> {
   const temporary = `${target}.${process.pid}.tmp`;
   await writeFile(temporary, JSON.stringify(receipt, null, 2), { mode: 0o600 });
   await rename(temporary, target);
+  receipts.set(receipt.receiptId, receipt);
 }
 
 async function loadReceipt(idempotencyKey: string): Promise<Receipt | null> {
@@ -97,34 +104,12 @@ async function run(
     input?: string;
     timeoutMs?: number;
     env?: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
   } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env ?? providerEnvironment(),
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      resolve({
-        code: code ?? 1,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8"),
-      });
-    });
-    const timer = options.timeoutMs
-      ? setTimeout(() => child.kill("SIGTERM"), options.timeoutMs)
-      : undefined;
-    timer?.unref();
-    child.once("close", () => {
-      if (timer) clearTimeout(timer);
-    });
-    child.stdin.end(options.input);
+  return runChild(command, args, {
+    ...options,
+    env: options.env ?? providerEnvironment(),
   });
 }
 
@@ -157,7 +142,7 @@ async function resolveRepository(
 async function sendCallback(
   receipt: Receipt,
   stateVersion: number,
-  state: "running" | "completed" | "failed",
+  state: "running" | "completed" | "failed" | "cancelled",
   details: {
     reason?: string;
     resultReportRef?: string;
@@ -197,7 +182,13 @@ async function sendCallback(
       });
       lastStatus = response.status;
       await response.arrayBuffer();
-      if (response.ok) return;
+      if (response.ok) {
+        if (state === "cancelled") {
+          receipt.cancelCallbackDelivered = true;
+          await saveReceipt(receipt);
+        }
+        return;
+      }
     } catch {
       // The bot may be restarting; retry the signed callback.
     }
@@ -219,15 +210,16 @@ function promptFor(specification: Specification): string {
   ].join("\n\n");
 }
 
-async function execute(receipt: Receipt): Promise<void> {
+async function execute(receipt: Receipt, signal: AbortSignal): Promise<void> {
   receipt.state = "running";
-  await saveReceipt(receipt);
-  await sendCallback(receipt, 1, "running");
   const specification = specificationSchema.parse(receipt.specification);
   let workspace = "";
   let reportPath = "";
   try {
+    await saveReceipt(receipt);
+    await sendCallback(receipt, 1, "running");
     await assertProviderReady(specification.provider);
+    signal.throwIfAborted();
     const repository = await resolveRepository(specification);
     workspace = path.join(
       workspaceRoot,
@@ -239,22 +231,25 @@ async function execute(receipt: Receipt): Promise<void> {
     } catch {
       await mkdir(workspaceRoot, { recursive: true });
       const branch = `omp/${specification.execution_attempt_id}`;
-      const clone = await run("git", [
-        "clone",
-        "--no-checkout",
-        repository,
-        workspace,
-      ]);
+      const clone = await run(
+        "git",
+        ["clone", "--no-checkout", repository, workspace],
+        { signal },
+      );
       if (clone.code !== 0)
         throw new Error(clone.stderr.trim() || "Could not clone repository");
-      const checkout = await run("git", [
-        "-C",
-        workspace,
-        "checkout",
-        "-b",
-        branch,
-        specification.base_revision,
-      ]);
+      const checkout = await run(
+        "git",
+        [
+          "-C",
+          workspace,
+          "checkout",
+          "-b",
+          branch,
+          specification.base_revision,
+        ],
+        { signal },
+      );
       if (checkout.code !== 0)
         throw new Error(checkout.stderr.trim() || "Could not create branch");
       const remote = await run("git", [
@@ -295,6 +290,7 @@ async function execute(receipt: Receipt): Promise<void> {
       ...(command.input === undefined ? {} : { input: command.input }),
       timeoutMs: specification.timeout_seconds * 1000,
       env: providerEnvironment(specification.provider),
+      signal,
     });
     const logPath = path.join(workspace, "omp-execution.log");
     await writeFile(logPath, redactChat(`${result.stdout}\n${result.stderr}`), {
@@ -313,6 +309,7 @@ async function execute(receipt: Receipt): Promise<void> {
         if (result.code === 0) throw error;
       }
     }
+    signal.throwIfAborted();
     if (result.code !== 0)
       throw new Error(providerFailure(specification.provider, result.code));
 
@@ -366,12 +363,12 @@ async function execute(receipt: Receipt): Promise<void> {
     const reason = redactChat(
       error instanceof Error ? error.message : "OMP execution failed",
     );
-    receipt.state = "failed";
-    receipt.reason = reason;
+    receipt.state = signal.aborted ? "cancelled" : "failed";
+    receipt.reason = signal.aborted ? "Process termination confirmed" : reason;
     await saveReceipt(receipt);
     try {
-      await sendCallback(receipt, 2, "failed", {
-        reason,
+      await sendCallback(receipt, 2, receipt.state, {
+        reason: receipt.reason,
         ...(reportPath ? { resultReportRef: reportPath } : {}),
         evidenceRefs: workspace ? [`workspace:${workspace}`] : [],
       });
@@ -384,12 +381,14 @@ async function execute(receipt: Receipt): Promise<void> {
 }
 
 await mkdir(receiptRoot, { recursive: true });
-const running = new Set<string>();
-
 function start(receipt: Receipt): void {
-  if (running.has(receipt.receiptId)) return;
-  running.add(receipt.receiptId);
-  void execute(receipt).finally(() => running.delete(receipt.receiptId));
+  if (running.has(receipt.receiptId) || receipt.state === "cancelled") return;
+  const active = { controller: new AbortController(), done: Promise.resolve() };
+  running.set(receipt.receiptId, active);
+  active.done = execute(receipt, active.controller.signal).finally(() =>
+    running.delete(receipt.receiptId),
+  );
+  void active.done.catch(() => undefined);
 }
 
 const server = createServer(async (request, response) => {
@@ -417,6 +416,37 @@ const server = createServer(async (request, response) => {
         running: running.size,
       });
     }
+    if (request.method === "POST" && request.url === "/cancel") {
+      const input = JSON.parse((await readBody(request)).toString("utf8")) as {
+        receipt_id?: string;
+        execution_attempt_id?: string;
+      };
+      const receipt = input.receipt_id
+        ? receipts.get(input.receipt_id)
+        : undefined;
+      if (
+        !receipt ||
+        receipt.specification.execution_attempt_id !==
+          input.execution_attempt_id
+      )
+        return json(response, 404, { reason: "Execution receipt not found" });
+      const active = running.get(receipt.receiptId);
+      if (active) {
+        active.controller.abort();
+        await active.done;
+      } else if (receipt.state === "accepted") {
+        receipt.state = "cancelled";
+        await saveReceipt(receipt);
+      }
+      if (receipt.state === "cancelled" && !receipt.cancelCallbackDelivered)
+        await sendCallback(receipt, 2, "cancelled", {
+          reason: receipt.reason ?? "Process termination confirmed",
+        });
+      return json(response, 200, {
+        cancelled: receipt.state === "cancelled",
+        state: receipt.state,
+      });
+    }
     if (request.method !== "POST" || request.url !== "/dispatch")
       return json(response, 404, { error: "not found" });
     const idempotencyKey = request.headers["idempotency-key"];
@@ -426,7 +456,10 @@ const server = createServer(async (request, response) => {
     if (existing)
       return json(response, 200, {
         receipt_id: existing.receiptId,
-        accepted: existing.state !== "failed",
+        accepted: !["failed", "cancelled"].includes(existing.state),
+        ...(existing.state === "cancelled"
+          ? { reason: "Execution was cancelled" }
+          : {}),
       });
     const parsed = specificationSchema.safeParse(
       JSON.parse((await readBody(request)).toString("utf8")),
@@ -466,8 +499,15 @@ for (const file of await readdir(receiptRoot)) {
     const receipt = JSON.parse(
       await readFile(path.join(receiptRoot, file), "utf8"),
     ) as Receipt;
+    receipts.set(receipt.receiptId, receipt);
     if (receipt.state === "accepted" || receipt.state === "running")
       start(receipt);
+    else if (receipt.state === "cancelled" && !receipt.cancelCallbackDelivered)
+      void sendCallback(receipt, 2, "cancelled", {
+        reason: receipt.reason ?? "Cancelled before execution",
+      }).catch(() =>
+        process.stderr.write("Could not reconcile cancelled execution\n"),
+      );
   } catch (error) {
     process.stderr.write(
       `Could not resume ${file}: ${redactChat(error instanceof Error ? error.message : "invalid receipt")}\n`,
@@ -480,7 +520,12 @@ server.listen(port, "127.0.0.1", () => {
 });
 
 const shutdown = (): void => {
-  server.close(() => process.exit(0));
+  for (const active of running.values()) active.controller.abort();
+  server.close(() => {
+    void Promise.allSettled(
+      [...running.values()].map((active) => active.done),
+    ).then(() => process.exit(0));
+  });
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

@@ -146,3 +146,16 @@ export function deliveryPeriodWindow(
     end: zonedMidnight(endDate.year, endDate.month, endDate.day, timeZone),
   };
 }
+
+export function completedDeliveryPeriodWindow(
+  now: Date,
+  cadence: DeliveryPeriodCadence,
+  timeZone: string,
+): { key: string; start: Date; end: Date } {
+  const current = deliveryPeriodWindow(now, cadence, timeZone);
+  return deliveryPeriodWindow(
+    new Date(current.start.getTime() - 1),
+    cadence,
+    timeZone,
+  );
+}

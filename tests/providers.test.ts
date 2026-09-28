@@ -61,6 +61,10 @@ test("provider directives are anchored, unquoted and current-request only", () =
   );
   assert.equal(parseTaskSelection("커서로 오류 수정").model, undefined);
   assert.equal(parseTaskSelection("오류 수정").model, DEFAULT_CODEX_MODEL);
+  assert.equal(
+    parseTaskSelection("스파크로 오류 수정").model,
+    "gpt-5.3-codex-spark",
+  );
   assert.equal(parseTaskSelection("아스트라로 오류 수정").model, "gpt-6-astra");
   assert.equal(
     parseTaskSelection("고트로 오류 수정", undefined, "vendor/Model:1").model,

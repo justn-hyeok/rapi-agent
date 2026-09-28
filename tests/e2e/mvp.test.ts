@@ -509,10 +509,7 @@ describe("rapi-agent MVP", () => {
         omp.dispatches.at(-1)?.specification.goal,
         "한글로 간단한 작업을 수행한다",
       );
-      assert.equal(
-        omp.dispatches.at(-1)?.specification.model,
-        "gpt-5.3-codex-spark",
-      );
+      assert.equal(omp.dispatches.at(-1)?.specification.model, "gpt-5.6-sol");
 
       assert.equal(omp.dispatches.at(-1)?.specification.provider, "codex");
       for (const options of [

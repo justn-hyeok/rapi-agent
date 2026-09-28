@@ -584,8 +584,8 @@ export class DiscordCommandService {
           optionalString(command.options, "taskId") ??
           (await this.agent.store.latestCancellableTask(ownerId));
         if (!taskId) throw new Error("취소할 작업이 없습니다.");
-        await this.agent.store.cancelTask(taskId);
-        return { messages: ["작업을 취소했습니다."] };
+        await this.agent.cancelTask(taskId);
+        return { messages: ["작업 중단과 취소 상태를 확인했습니다."] };
       }
     }
   }

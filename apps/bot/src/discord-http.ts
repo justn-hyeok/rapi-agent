@@ -13,6 +13,7 @@ import {
 } from "@rapi/agent";
 import { verifyWebhookSignature, type ExternalItem } from "@rapi/adapters";
 import { runtimeRevision } from "@rapi/core";
+import { redactChat } from "@rapi/contracts";
 
 const ed25519SpkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
 
@@ -103,12 +104,12 @@ export const slashCommandDefinitions = [
   { name: "상태", description: "라피 운영 상태를 확인합니다", type: 1 },
   {
     name: "사용량",
-    description: "내 Spark 사용량과 초기화 시각을 봅니다",
+    description: "내 AI 사용량과 초기화 시각을 봅니다",
     type: 1,
   },
   {
     name: "사용정책",
-    description: "Spark 사용 정책을 조회하거나 변경합니다",
+    description: "AI 사용 정책을 조회하거나 변경합니다",
     type: 1,
     options: [
       { type: 1, name: "조회", description: "현재 사용 정책을 봅니다" },
@@ -308,6 +309,7 @@ export function createDiscordInteractionServer(
   },
 ) {
   return createServer(async (request, response) => {
+    let verifiedInteraction = false;
     try {
       if (request.method === "GET" && request.url === "/health")
         return json(response, 200, { status: "ok" });
@@ -401,6 +403,7 @@ export function createDiscordInteractionServer(
           options?: Array<{ name: string; value: unknown }>;
         };
       };
+      verifiedInteraction = true;
       if (interaction.type === 1) return json(response, 200, { type: 1 });
       const userId = interaction.member?.user?.id ?? interaction.user?.id;
       if (!userId) return json(response, 400, { error: "invalid interaction" });
@@ -535,6 +538,8 @@ export function createDiscordInteractionServer(
       if (
         ((commandName === "webhook" && options.action === "테스트") ||
           commandName === "brief" ||
+          commandName === "approve" ||
+          commandName === "cancel" ||
           (commandName === "server_config" && options.action === "적용")) &&
         interaction.application_id &&
         interaction.token
@@ -556,6 +561,23 @@ export function createDiscordInteractionServer(
               },
             );
             await update.arrayBuffer();
+            if (!update.ok) throw new Error("Discord deferred reply failed");
+            for (const content of result.messages.slice(1)) {
+              const followup = await fetch(
+                `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`,
+                {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content,
+                    ...(isPublic ? {} : { flags: 64 }),
+                    allowed_mentions: { parse: [] },
+                  }),
+                },
+              );
+              await followup.arrayBuffer();
+              if (!followup.ok) throw new Error("Discord follow-up failed");
+            }
           })
           .catch(async (error: unknown) => {
             const update = await fetch(
@@ -571,7 +593,12 @@ export function createDiscordInteractionServer(
               },
             );
             await update.arrayBuffer();
-          });
+          })
+          .catch(() =>
+            process.stderr.write(
+              "Discord deferred response could not be delivered\n",
+            ),
+          );
         return;
       }
       const result = await service.execute(identity, command);
@@ -627,6 +654,17 @@ export function createDiscordInteractionServer(
       }
       return;
     } catch (error) {
+      if (verifiedInteraction && !response.headersSent)
+        return json(response, 200, {
+          type: 4,
+          data: {
+            content: redactChat(
+              error instanceof Error ? error.message : "요청 처리 실패",
+            ).slice(0, 2_000),
+            flags: 64,
+            allowed_mentions: { parse: [] },
+          },
+        });
       const managedWebhookRequest = request.url?.startsWith("/webhooks/v1/");
       const status =
         error instanceof WebhookAuthenticationError

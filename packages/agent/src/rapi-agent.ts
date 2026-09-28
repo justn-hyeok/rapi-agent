@@ -18,7 +18,7 @@ import {
   checksumPayload,
   classify,
   contentFingerprint,
-  deliveryPeriodWindow,
+  completedDeliveryPeriodWindow,
   renderBriefing,
   renderMdx,
   summarize,
@@ -229,17 +229,37 @@ export class RapiAgent {
   async runScheduledDeliveries(now = new Date()): Promise<string[]> {
     const results: string[] = [];
     for (const subscription of await this.store.activeSubscriptions()) {
-      const period = deliveryPeriodWindow(
-        now,
-        subscription.cadence === "weekly" ? "weekly" : "daily",
-        subscription.timezone,
-      );
+      const attempted = new Set<string>();
+      for (const id of await this.store.pendingDeliveryBatchIds(
+        subscription.id,
+      )) {
+        results.push(await this.deliverBatch(id));
+        attempted.add(id);
+      }
+      let period: { start: Date; end: Date };
+      if (subscription.cadence === "immediate") {
+        const end = new Date(Math.floor(now.getTime() / 60_000) * 60_000);
+        const previous = await this.store.latestDeliveryPeriodEnd(
+          subscription.id,
+        );
+        if (previous && previous >= end) continue;
+        period = { start: previous ?? new Date(end.getTime() - 60_000), end };
+      } else {
+        // Freeze completed periods, so a midnight tick cannot permanently
+        // exclude items collected later in that same day or week.
+        period = completedDeliveryPeriodWindow(
+          now,
+          subscription.cadence === "weekly" ? "weekly" : "daily",
+          subscription.timezone,
+        );
+      }
       const batch = await this.freezeBatch(
         subscription.id,
         period.start,
         period.end,
       );
-      results.push(await this.deliverBatch(batch.id));
+      if (!attempted.has(batch.id))
+        results.push(await this.deliverBatch(batch.id));
     }
     return results;
   }
@@ -392,6 +412,30 @@ export class RapiAgent {
       receiptId: result.receiptId,
       ...selection,
     };
+  }
+
+  async cancelTask(taskId: string): Promise<void> {
+    const attempt = await this.store.latestTaskExecution(taskId);
+    if (
+      attempt &&
+      ["dispatched", "running", "blocked"].includes(attempt.state)
+    ) {
+      if (!attempt.receiptId || !this.omp.cancel)
+        throw new Error(
+          "실행기 접수 또는 취소 기능을 확인할 수 없습니다. 취소 상태는 미확정입니다.",
+        );
+      if (!(await this.omp.cancel(attempt.receiptId, attempt.id)))
+        throw new Error(
+          "프로세스가 이미 종료됐거나 중단을 확인하지 못했습니다.",
+        );
+      if ((await this.store.taskState(taskId)) !== "cancelled")
+        throw new Error(
+          "실행기 중단은 확인했지만 DB 상태 반영은 미확정입니다.",
+        );
+      return;
+    }
+    if ((await this.store.taskState(taskId)) !== "cancelled")
+      await this.store.cancelTask(taskId);
   }
 
   async receiveOmpCallback(

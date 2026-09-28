@@ -94,6 +94,7 @@ export interface OmpDispatchResult {
 }
 
 export interface OmpAdapter {
+  cancel?(receiptId: string, attemptId: string): Promise<boolean>;
   dispatch(
     specification: Record<string, unknown>,
     idempotencyKey: string,

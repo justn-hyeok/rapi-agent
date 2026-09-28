@@ -291,7 +291,7 @@ rollback 절차를 따른다.
 상태 조회, 실제 취소, interrupted 복구와 알려진 한계는
 [운영 상세](chatops-capabilities.md)를 참고한다.
 
-기본 실행 모델은 `gpt-5.3-codex-spark`다. ChatOps 요청의 `아스트라로 …`,
+기본 실행 모델은 `gpt-5.6-sol`이다. 명시적인 `스파크로 …`는 Spark를 그대로 선택하므로 계정 지원 여부를 확인해야 한다. ChatOps 요청의 `아스트라로 …`,
 `…, 모델: gpt-6-astra` 또는 `/작업`의 선택 항목 `모델`로 실행별 모델을 지정한다.
 선택 결과는 ChatOps 실행 행 또는 OMP 작업 명세에 저장한다.
 
