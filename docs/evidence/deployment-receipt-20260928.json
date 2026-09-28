@@ -1,39 +1,32 @@
 {
-  "checkedAt": "2026-09-28T01:45:04.777Z",
-  "sha": "6a5e22b451666928f915f025a2fb11bf09b41e94",
-  "tree": "e75a889f5b1da7e014a5f9185004ff3c431309b2",
+  "checkedAt": "2026-09-28T02:06:23.731Z",
+  "sha": "948b40d113e59edc22c6fdb5cbf831d967e68bd5",
+  "tree": "8998822ecdd641f35c2d40b7e1f6e75cb912b950",
   "origin": "https://rapi-07ab7899e00f.justn.me",
   "states": {
     "bot": {
       "status": 200,
       "ready": true,
-      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+      "revision": "948b40d113e59edc22c6fdb5cbf831d967e68bd5"
     },
     "chat": {
       "status": 200,
       "ready": true,
-      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+      "revision": "948b40d113e59edc22c6fdb5cbf831d967e68bd5"
     },
     "omp": {
       "status": 200,
       "ready": true,
-      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+      "revision": "948b40d113e59edc22c6fdb5cbf831d967e68bd5"
     },
     "monitor": {
       "status": 200,
       "ready": true,
-      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94",
+      "revision": "948b40d113e59edc22c6fdb5cbf831d967e68bd5",
       "probe": "health",
       "dependencyReadiness": {
         "status": 503,
-        "ready": false,
-        "failedRequired": [
-          {
-            "name": "worker",
-            "status": "failed",
-            "reason": "endpoint unavailable"
-          }
-        ]
+        "ready": false
       }
     },
     "publicAgent": {
@@ -44,13 +37,13 @@
     "gateway": {
       "status": 200,
       "ready": true,
-      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+      "revision": "948b40d113e59edc22c6fdb5cbf831d967e68bd5"
     },
     "tunnel": {
       "status": 200,
       "ready": true,
       "revision": null,
-      "connections": 4
+      "connections": 2
     }
   },
   "existingGuildResourcesPreserved": true,
@@ -59,5 +52,17 @@
   "workerIntentionallyInactive": true,
   "githubPushed": false,
   "humanQaVerified": false,
-  "commandCount": 16
+  "commandCount": 16,
+  "webSearchVerifiedUnderServiceRestrictions": true,
+  "uiVerification": {
+    "mode": "non-isolated existing account",
+    "roleRegistrationButtonSucceeded": true,
+    "humanQa": false
+  },
+  "installedFiles": {
+    "run.js": "425282e3c84dafef92cf6b06edb6c5259533dd60d9a54e0e7f28a853d5f9f59c",
+    "executor.js": "cb945141c241571281ba6cf724e716ce592d6b18389974b535f5b6d0f1cb0bc9",
+    "codex": "56ef98ab4032d317ab26e9b5e5a175650717351edb16ed9cde0cb6d1734d62da",
+    "codex-code-mode-host": "3e85d67471825f73d02ff5f7e047ca1f6ca8caa3f59e4c6e8d9ca6ca7302cb45"
+  }
 }

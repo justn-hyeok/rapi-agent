@@ -7,9 +7,9 @@ historical snapshot.
 
 ## Applied
 
-- Deployed code: `6a5e22b451666928f915f025a2fb11bf09b41e94`, tree
-  `e75a889f5b1da7e014a5f9185004ff3c431309b2`.
-- Current artifact: `/home/justn/rapi-releases/rapi-6a5e22b45166-37naVd`.
+- Deployed code: `948b40d113e59edc22c6fdb5cbf831d967e68bd5`, tree
+  `8998822ecdd641f35c2d40b7e1f6e75cb912b950`.
+- Current artifact: `/home/justn/rapi-releases/rapi-948b40d113e5-eHXFuP`.
   Main bot, ChatOps and OMP readiness return this boot-captured revision.
   The sealed file digests still match after startup.
 - Guild: `1545832299671847013`, invite `https://discord.gg/DVbb9uwu8V`.
@@ -19,6 +19,8 @@ historical snapshot.
   ADMIN using Discord REST. The isolated public account completed device login.
 - Fixed the installer to copy the native Codex executable instead of its npm
   wrapper; corrected the public unit from Node 18 to Node 22.13.1.
+  A real search exposed its missing `codex-code-mode-host`; the installer now
+  copies that bundled helper too, and public readiness rejects its absence.
 - Public questions use `gpt-5.6-luna`. A real Spark request returned a 400
   unsupported-model error for this ChatGPT account. Luna appeared in the account's
   model catalog, then passed a real request; the public runtime and usage ledger
@@ -29,7 +31,7 @@ historical snapshot.
 - Discord accepted the new interaction endpoint after its signed verification.
   Registered all 16 commands in the designated guild. Public GETs to `/health`,
   `/ready`, `/omp/callback` and `/v1/answer` return 404; unsigned POST to
-  `/interactions` returns 401. Four tunnel connections were ready at final check.
+  `/interactions` returns 401. Two tunnel connections were ready at final check.
 
 ## Evidence
 
@@ -44,6 +46,12 @@ historical snapshot.
 - The installed systemd public executor returned `2` for an approved arithmetic
   request. The same request through `PublicCommunityService`, real quota
   reservation and completion recording also returned `2` successfully.
+- A real web-search request called the search tool and returned the official
+  KMA site. A second invocation under a transient unit with the public service's
+  user/group and security restrictions also performed web search successfully.
+  This verifies the bundled helper under those restrictions without weakening
+  shell/app/plugin/other disabled-feature boundaries. Installed file digests
+  for both executables and the public JS files are recorded in the receipt.
 - A narrow **non-isolated**, existing-account Aside UI flow clicked the role
   registration button once. Discord returned the ephemeral success message
   confirming the current account received `라피 USER`. The question and admin
