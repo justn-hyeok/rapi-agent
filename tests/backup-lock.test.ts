@@ -9,13 +9,7 @@ test("records backup failure when the lock wrapper cannot connect before invokin
   const root = await mkdtemp(join(tmpdir(), "rapi-backup-lock-"));
   const status = join(root, "status.json");
   try {
-    await writeFile(
-      status,
-      JSON.stringify({
-        state: "success",
-        lastSuccessAt: new Date().toISOString(),
-      }),
-    );
+    await writeFile(status, "malformed prior status");
     await assert.rejects(
       promisify(execFile)(process.execPath, ["scripts/backup-with-lock.mjs"], {
         env: {
