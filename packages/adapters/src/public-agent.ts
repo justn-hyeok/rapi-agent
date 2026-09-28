@@ -16,6 +16,7 @@ export class PublicAgentClient {
   answer(
     prompt: string,
     onStarted: () => Promise<void> | void,
+    signal?: AbortSignal,
   ): Promise<PublicAgentResult> {
     return new Promise((resolve, reject) => {
       const payload = JSON.stringify({ prompt });
@@ -23,6 +24,8 @@ export class PublicAgentClient {
       const complete = (work: () => void): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(deadline);
+        signal?.removeEventListener("abort", abort);
         work();
       };
       const req = request(
@@ -44,6 +47,13 @@ export class PublicAgentClient {
           response.setEncoding("utf8");
           response.on("data", (chunk: string) => {
             buffered += chunk;
+            if (buffered.length > 64_000) {
+              complete(() =>
+                reject(new Error("Public agent response exceeds the limit")),
+              );
+              req.destroy();
+              return;
+            }
             const lines = buffered.split("\n");
             buffered = lines.pop() ?? "";
             for (const line of lines) {
@@ -61,7 +71,17 @@ export class PublicAgentClient {
               }
               if (event.type === "started" && !started) {
                 started = true;
-                startWork = Promise.resolve(onStarted());
+                startWork = Promise.resolve().then(onStarted);
+                void startWork.catch((error: unknown) => {
+                  complete(() =>
+                    reject(
+                      error instanceof Error
+                        ? error
+                        : new Error("Public agent start callback failed"),
+                    ),
+                  );
+                  req.destroy();
+                });
               } else if (event.type === "result") {
                 resultReceived = true;
                 void startWork.then(
@@ -78,6 +98,10 @@ export class PublicAgentClient {
               }
             }
           });
+          response.once("error", (error) => complete(() => reject(error)));
+          response.once("aborted", () =>
+            complete(() => reject(new Error("Public agent response aborted"))),
+          );
           response.on("end", () => {
             if (resultReceived) return;
             if (response.statusCode !== 200)
@@ -95,8 +119,20 @@ export class PublicAgentClient {
           });
         },
       );
+      const abort = (): void => {
+        req.destroy(new Error("Public agent request cancelled"));
+      };
+      const deadline = setTimeout(
+        () => req.destroy(new Error("Public agent deadline exceeded")),
+        this.timeoutMs,
+      );
+      signal?.addEventListener("abort", abort, { once: true });
       req.once("timeout", () => req.destroy(new Error("Public agent timeout")));
       req.once("error", (error) => complete(() => reject(error)));
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
       req.end(payload);
     });
   }

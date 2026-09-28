@@ -56,8 +56,26 @@ server.listen(port, "127.0.0.1", () => {
 });
 
 const healthServer = createServer((request, response) => {
-  if (request.method === "GET" && ["/health", "/ready"].includes(request.url)) {
+  if (request.method === "GET" && request.url === "/health") {
     respond(response, 200, { ready: true });
+    return;
+  }
+  if (request.method === "GET" && request.url === "/ready") {
+    // An allowlist listener alone does not prove a functioning interaction path.
+    void fetch(`http://127.0.0.1:${targetPort}/ready`, {
+      signal: AbortSignal.timeout(3000),
+    })
+      .then(async (upstream) => {
+        const body = await upstream.json();
+        const ready = upstream.ok && body.ready === true;
+        respond(response, ready ? 200 : 503, {
+          ready,
+          revision: body.revision ?? null,
+        });
+      })
+      .catch(() =>
+        respond(response, 503, { ready: false, error: "upstream_unavailable" }),
+      );
     return;
   }
   respond(response, 404, { error: "not_found" });

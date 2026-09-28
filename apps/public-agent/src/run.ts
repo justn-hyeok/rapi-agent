@@ -14,9 +14,20 @@ const codexBinary =
 const codexHome = process.env.CODEX_HOME ?? "/var/lib/rapi-public/codex";
 const concurrency = Number(process.env.PUBLIC_AGENT_CONCURRENCY ?? "2");
 const healthPort = Number(process.env.PUBLIC_AGENT_HEALTH_PORT ?? "3500");
+const uploadTimeoutMs = Number(
+  process.env.PUBLIC_AGENT_UPLOAD_TIMEOUT_MS ?? "10000",
+);
 
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8)
   throw new Error("PUBLIC_AGENT_CONCURRENCY must be between 1 and 8");
+if (
+  !Number.isInteger(uploadTimeoutMs) ||
+  uploadTimeoutMs < 100 ||
+  uploadTimeoutMs > 30000
+)
+  throw new Error(
+    "PUBLIC_AGENT_UPLOAD_TIMEOUT_MS must be between 100 and 30000",
+  );
 
 await mkdir(dirname(socketPath), { recursive: true });
 await mkdir(workspace, { recursive: true, mode: 0o700 });
@@ -31,13 +42,21 @@ async function body(
 ): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const chunk of request) {
-    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += value.length;
-    if (bytes > 64_000) throw new Error("request_too_large");
-    chunks.push(value);
+  const timer = setTimeout(
+    () => request.destroy(new Error("request_timed_out")),
+    uploadTimeoutMs,
+  );
+  try {
+    for await (const chunk of request) {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += value.length;
+      if (bytes > 64_000) throw new Error("request_too_large");
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } finally {
+    clearTimeout(timer);
   }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 function json(
@@ -81,18 +100,21 @@ const server = createServer(async (request, response) => {
     json(response, 429, { error: "capacity" });
     return;
   }
+  // Reserve synchronously, before awaiting an upload; otherwise simultaneous
+  // requests all pass the capacity check and start too many paid executions.
+  active += 1;
   let prompt: string;
   try {
     const parsed = JSON.parse(await body(request)) as { prompt?: unknown };
     if (typeof parsed.prompt !== "string") throw new Error("invalid_prompt");
     prompt = parsed.prompt;
   } catch (error) {
+    active -= 1;
     json(response, 400, {
       error: error instanceof Error ? error.message : "invalid_request",
     });
     return;
   }
-  active += 1;
   const controller = new AbortController();
   response.once("close", () => {
     if (!response.writableEnded) controller.abort();

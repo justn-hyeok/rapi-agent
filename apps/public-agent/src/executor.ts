@@ -101,6 +101,7 @@ export async function runPublicCodex(
       let started = false;
       let settled = false;
       let reason: PublicCodexResult["reason"] = "exit";
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
       const child = spawn(command.command, command.args, {
         cwd: workspace,
         env: publicCodexEnvironment(options.env),
@@ -109,8 +110,16 @@ export async function runPublicCodex(
       });
       const finish = async (code: number | null): Promise<void> => {
         if (settled) return;
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
+            /* Process group already exited. */
+          }
+        }
         settled = true;
         clearTimeout(timeout);
+        clearTimeout(killTimer);
         options.signal?.removeEventListener("abort", abort);
         let output = "";
         try {
@@ -133,6 +142,16 @@ export async function runPublicCodex(
         } catch {
           // Already exited.
         }
+        killTimer ??= setTimeout(() => {
+          if (child.pid && !settled) {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+            } catch {
+              /* Already exited. */
+            }
+          }
+        }, 1_000);
+        killTimer.unref();
       };
       const abort = (): void => {
         reason = "cancel";
@@ -150,18 +169,10 @@ export async function runPublicCodex(
       child.stdin.on("error", () => undefined);
       child.stdin.end(prompt);
       options.signal?.addEventListener("abort", abort, { once: true });
+      if (options.signal?.aborted) abort();
       const timeout = setTimeout(() => {
         reason = "timeout";
         kill();
-        setTimeout(() => {
-          if (child.pid) {
-            try {
-              process.kill(-child.pid, "SIGKILL");
-            } catch {
-              // Already exited.
-            }
-          }
-        }, 1_000).unref();
       }, options.timeoutMs ?? PUBLIC_TIMEOUT_MS);
     });
   } finally {

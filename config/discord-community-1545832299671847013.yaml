@@ -1,0 +1,51 @@
+version: 1
+replaceExistingChannels: false
+roles:
+  - key: rapi_user
+    name: 라피 USER
+    permissions: []
+    color: 5793266
+    hoist: false
+  - key: rapi_staff
+    name: ADMIN
+    permissions: [ADMINISTRATOR]
+    color: 16705372
+    hoist: true
+categories:
+  - key: getting_started
+    name: 라피-시작하기
+    audience: everyone
+    channels:
+      - key: roles
+        name: 역할-받기
+        type: text
+        readOnly: true
+        topic: 버튼을 눌러 라피 USER 역할을 받으세요.
+  - key: rapi
+    name: 라피
+    audience: user
+    channels:
+      - key: rapi_questions
+        name: 라피-질문
+        type: text
+        readOnly: false
+      - key: rapi_briefing
+        name: 라피-브리핑
+        type: text
+        readOnly: false
+      - key: rapi_help
+        name: 라피-도움말
+        type: text
+        readOnly: true
+  - key: operations
+    name: 라피-운영
+    audience: staff
+    channels:
+      - key: rapi_admin
+        name: 라피-관리
+        type: text
+        readOnly: false
+      - key: operations_alerts
+        name: 라피-운영-알림
+        type: text
+        readOnly: true

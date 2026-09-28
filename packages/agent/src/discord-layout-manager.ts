@@ -179,7 +179,7 @@ export class DiscordLayoutManager {
       this.snapshot(guildId),
       this.managed(guildId),
     ]);
-    await this.assertBotAdministrator(guildId, snapshot.roles);
+    await this.assertBotAdministrator(guildId, snapshot.roles, layout);
     const plan = planDiscordLayout(layout, snapshot, managed);
     const planId = await this.store.createDiscordLayoutPlan({
       guildId,
@@ -209,9 +209,11 @@ export class DiscordLayoutManager {
   private async assertBotAdministrator(
     guildId: string,
     roles: DiscordRole[],
+    layout: DiscordLayout,
   ): Promise<void> {
+    const bot = await this.rest.request<{ id: string }>("/users/@me");
     const member = await this.rest.request<{ roles: string[] }>(
-      `/guilds/${guildId}/members/@me`,
+      `/guilds/${guildId}/members/${bot.id}`,
     );
     let value = BigInt(
       roles.find((role) => role.id === guildId)?.permissions ?? "0",
@@ -228,11 +230,13 @@ export class DiscordLayoutManager {
         (id) => roles.find((role) => role.id === id)?.position ?? 0,
       ),
     );
-    const staff = roles.find((role) => role.name === "라피 운영진");
-    if (staff && !member.roles.includes(staff.id) && staff.position >= botTop)
-      throw new Error(
-        "라피 봇 역할을 `라피 운영진` 역할보다 위에 배치해야 합니다.",
-      );
+    for (const desired of layout.roles) {
+      const role = roles.find((entry) => entry.name === desired.name);
+      if (role && !member.roles.includes(role.id) && role.position >= botTop)
+        throw new Error(
+          `라피 봇 역할을 \`${role.name}\` 역할보다 위에 배치해야 합니다.`,
+        );
+    }
   }
 
   private permissionOverwrites(
@@ -295,7 +299,7 @@ export class DiscordLayoutManager {
         this.snapshot(guildId),
         this.managed(guildId),
       ]);
-      await this.assertBotAdministrator(guildId, snapshot.roles);
+      await this.assertBotAdministrator(guildId, snapshot.roles, layout);
       const fresh = planDiscordLayout(layout, snapshot, managed);
       if (
         fresh.layoutDigest !== saved.layoutDigest ||

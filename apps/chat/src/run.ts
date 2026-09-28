@@ -48,7 +48,11 @@ const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
-const publicCommunity = new PublicCommunityService(store, publicAgent);
+const publicCommunity = new PublicCommunityService(
+  store,
+  publicAgent,
+  config.PUBLIC_AGENT_ENABLED,
+);
 const intents = (1 << 0) | (1 << 9) | (1 << 15);
 await mkdir(chatWorkspace, { recursive: true });
 // One Gateway owner per database. Losing this session stops execution.

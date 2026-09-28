@@ -18,6 +18,7 @@ export class PublicCommunityService {
   constructor(
     readonly store: PostgresStore,
     readonly transport: PublicAnswerTransport,
+    readonly enabled = true,
   ) {}
 
   async answer(input: {
@@ -28,6 +29,8 @@ export class PublicCommunityService {
     text: string;
     mode?: "question" | "brief";
   }): Promise<string | undefined> {
+    if (!this.enabled)
+      return "라피 공개 질문 기능을 준비 중입니다. 잠시 후 다시 이용해주세요.";
     const reservation = await this.store.reserveAiUsage({
       guildId: input.guildId,
       userId: input.userId,

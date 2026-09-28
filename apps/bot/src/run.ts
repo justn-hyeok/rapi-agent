@@ -57,7 +57,11 @@ const store = new PostgresStore(config.DATABASE_URL, {
 });
 const discord = new DiscordDeliveryAdapter(config.DISCORD_BOT_TOKEN);
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
-const publicCommunity = new PublicCommunityService(store, publicAgent);
+const publicCommunity = new PublicCommunityService(
+  store,
+  publicAgent,
+  config.PUBLIC_AGENT_ENABLED,
+);
 const layout = new DiscordLayoutManager(store, {
   botToken: config.DISCORD_BOT_TOKEN,
   layoutFile: config.DISCORD_LAYOUT_FILE,
