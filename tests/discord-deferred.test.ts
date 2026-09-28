@@ -39,13 +39,15 @@ test("cancellation acknowledges before work ends and delivers every reply chunk"
           "https://discord.com/api/v10/webhooks/fixture-application/fixture-token",
         )
       ) {
-        const body = JSON.parse(String(init?.body)) as {
+        if (typeof init?.body !== "string")
+          throw new Error("Expected JSON request body");
+        const body = JSON.parse(init.body) as {
           content: string;
           allowed_mentions: { parse: string[] };
         };
         assert.deepEqual(body.allowed_mentions.parse, []);
         delivered.push({
-          method: init?.method ?? "GET",
+          method: init.method ?? "GET",
           content: body.content,
         });
         if (delivered.length === 2) completed();
