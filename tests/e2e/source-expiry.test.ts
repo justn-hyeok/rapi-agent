@@ -7,6 +7,8 @@ import { readWithdrawals } from "../../scripts/blog-withdrawals.mjs";
 import { it } from "node:test";
 import pg from "pg";
 import { expireSourceContent } from "../../scripts/expire-source-content.mjs";
+import { PostgresStore } from "@rapi/db";
+import type { NormalizedItem } from "@rapi/core";
 
 it("expires private/public bodies at their own ages, preserves fresh data, and is repeatable", async () => {
   const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -20,6 +22,9 @@ it("expires private/public bodies at their own ages, preserves fresh data, and i
   const now = new Date("2030-01-01T00:00:00Z");
   const directory = await mkdtemp(join(tmpdir(), "rapi-expiry-e2e-"));
   const withdrawalsFile = join(directory, "withdrawals.json");
+  const database = new URL(process.env.DATABASE_URL!);
+  database.searchParams.set("options", `-csearch_path=${schema}`);
+  const store = new PostgresStore(database.toString());
   try {
     for (const name of ["0001_phase_zero.sql", "0002_mvp.sql"])
       await client.query(
@@ -168,7 +173,65 @@ it("expires private/public bodies at their own ages, preserves fresh data, and i
       ).expiredItems,
       0,
     );
+    const normalized: NormalizedItem = {
+      id: randomUUID(),
+      rawEventId: rawIds[0]!,
+      sourceId,
+      normalizerVersion: "expiry-v1",
+      canonicalUrl: "https://expiry.example/old",
+      title: "old duplicate",
+      body: "old source body",
+      author: null,
+      publishedAt: null,
+      collectedAt: now,
+      visibility: "public",
+      contentFingerprint: "old-duplicate",
+      metadata: {},
+      categories: [],
+    };
+    assert.deepEqual(
+      await store.saveItem(normalized, "expired duplicate summary"),
+      { id: ids[0], inserted: false },
+    );
+    await assert.rejects(
+      store.saveItem(
+        { ...normalized, normalizerVersion: "new-version" },
+        "new summary",
+      ),
+      /expired/,
+    );
+    const newRawId = randomUUID();
+    await client.query(
+      "INSERT INTO raw_events(id,source_id,canonical_payload_hash,payload,collected_at) VALUES($1::uuid,$2,$1::text,'{}',$3)",
+      [newRawId, sourceId, now],
+    );
+    const fresh = await store.saveItem(
+      {
+        ...normalized,
+        id: randomUUID(),
+        rawEventId: newRawId,
+        title: "fresh item",
+        body: "fresh source body",
+        contentFingerprint: "fresh-item",
+      },
+      "fresh summary",
+    );
+    assert.equal(fresh.inserted, true);
+    const expiredBatch = await client.query<{ batch_id: string }>(
+      "SELECT batch_id FROM delivery_batch_items WHERE source_item_id=$1",
+      [ids[4]],
+    );
+    await assert.rejects(
+      store.recordPublication(
+        expiredBatch.rows[0]!.batch_id,
+        "public",
+        "republication.mdx",
+        "new-hash",
+      ),
+      /expired/,
+    );
   } finally {
+    await store.close();
     await client.query(`DROP SCHEMA "${schema}" CASCADE`);
     await client.end();
     await rm(directory, { recursive: true, force: true });

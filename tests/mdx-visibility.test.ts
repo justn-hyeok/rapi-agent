@@ -1,10 +1,32 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, writeFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { MdxPublisher } from "@rapi/adapters";
 import { renderMdx } from "@rapi/core";
+
+test("failed publication cleanup preserves replacements and files outside its directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rapi-mdx-cleanup-"));
+  const content = join(root, "content");
+  const publisher = new MdxPublisher(content, join(root, "public"));
+  const hash = createHash("sha256").update("generated content").digest("hex");
+  try {
+    const file = await publisher.publish("owned", "generated content");
+    await writeFile(file, "newer replacement");
+    assert.equal(await publisher.removeIfUnchanged(file, hash), false);
+    const outside = join(root, "outside.mdx");
+    await writeFile(outside, "generated content");
+    await assert.rejects(publisher.removeIfUnchanged(outside, hash), /outside/);
+    await publisher.publish("owned", "generated content");
+    assert.equal(await publisher.removeIfUnchanged(file, hash), true);
+    assert.deepEqual(await readdir(content), []);
+    assert((await readdir(root)).includes("outside.mdx"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("generated MDX treats source JSX, expressions and link punctuation as text", () => {
   const mdx = renderMdx(

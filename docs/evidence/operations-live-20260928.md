@@ -1,6 +1,6 @@
 # GitHub and operations evidence — 2026-09-28
 
-## Applied release
+## Initial operations release
 
 - Source/runtime SHA: `d036205f0292d44fb1c8fe79f9ddc5974772f1c5`.
 - [v0.1.0](https://github.com/justn-hyeok/rapi-agent/releases/tag/v0.1.0) is published
@@ -55,7 +55,7 @@ This proves the off-VM workflow and real notification path, not a VM power-cut
 drill. Scheduled Actions can be delayed and can be disabled after 60 days of
 inactivity in a public repository; see [GitHub's schedule contract](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 
-## Source-expiry follow-up
+## Source-expiry follow-up: v0.1.1
 
 The live read-only inventory reported zero candidates for raw bodies, item
 bodies, summaries, classifications, recipient identifiers, delivery audit,
@@ -73,7 +73,19 @@ underlying source expires. A persistent gateway deny list removes the post,
 index entry and RSS item before the database expiry commits. A release lacking
 withdrawal support cannot start the gateway under its persistent systemd guard.
 The expiry service requires a recent successful backup and reports its own
-failure or overdue status through the existing monitor. Production activation
-and exact-SHA acceptance are recorded after the follow-up's deployment checks.
+failure or overdue status through the existing monitor. Its dedicated
+PostgreSQL test passed in the sealed candidate (23 E2E tests total). The
+real gateway browser regression passed on desktop/mobile and verified that
+withdrawn posts disappear from direct URLs, index and RSS, including fail-closed
+behavior with an invalid manifest. Live activation binds to the merge commit
+of [PR 2](https://github.com/justn-hyeok/rapi-agent/pull/2); the exact source SHA,
+apply counts and readiness are retained in the private switch/maintenance
+receipts and the public v0.1.1 release.
+
+An independent review found that expired duplicates could block polling; the
+fix retains same-version duplicates as no-ops while rejecting new normalization
+of retired raw content. A PostgreSQL regression checks that a fresh item after
+the retired duplicate still inserts. Publication registration rechecks expiry
+and failed registration removes only its own unchanged generated file.
 Metadata/audit expiry and deletion-request tracking are inventory scope; this
 is not a claim of full policy execution.

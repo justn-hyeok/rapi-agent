@@ -252,10 +252,17 @@ export class PostgresStore {
         "SELECT COALESCE(payload->>'retentionExpired'='true',false) AS expired FROM raw_events WHERE id=$1 FOR UPDATE",
         [item.rawEventId],
       );
-      if (raw.rows[0]?.expired)
+      if (raw.rows[0]?.expired) {
+        const existing = await client.query<{ id: string }>(
+          "SELECT id FROM source_items WHERE raw_event_id=$1 AND normalizer_version=$2",
+          [item.rawEventId, item.normalizerVersion],
+        );
+        if (existing.rows[0])
+          return { id: existing.rows[0].id, inserted: false };
         throw new Error(
           "Source content has expired; normalization is forbidden",
         );
+      }
       const result = await client.query<{ id: string }>(
         `INSERT INTO source_items
           (id, raw_event_id, normalizer_version, canonical_url, title, body, author, published_at,
@@ -579,10 +586,16 @@ export class PostgresStore {
     filePath: string,
     contentHash: string,
   ): Promise<void> {
-    await this.pool.query(
-      "INSERT INTO mdx_publications (id,batch_id,visibility,file_path,content_hash) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (file_path) DO UPDATE SET content_hash=EXCLUDED.content_hash",
+    const result = await this.pool.query(
+      `INSERT INTO mdx_publications (id,batch_id,visibility,file_path,content_hash)
+       SELECT $1,$2,$3,$4,$5 WHERE NOT EXISTS (
+         SELECT 1 FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
+         WHERE bi.batch_id=$2 AND si.metadata->>'retentionExpired'='true'
+       ) ON CONFLICT (file_path) DO UPDATE SET content_hash=EXCLUDED.content_hash RETURNING id`,
       [randomUUID(), batchId, visibility, filePath, contentHash],
     );
+    if (!result.rowCount)
+      throw new Error("Publication contains expired source items");
   }
 
   async search(

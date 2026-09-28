@@ -6,8 +6,9 @@ automated checks, without claiming independent participant observations.
 
 ## Current deployment
 
-Release `v0.1.0`, code `d036205f0292d44fb1c8fe79f9ddc5974772f1c5`, runs from sealed artifact
-`/home/justn/rapi-releases/rapi-d036205f0292-rVUb6a`. Bot, chat, worker, OMP,
+Release `v0.1.1` uses the sealed artifact resolved by
+`/home/justn/rapi-releases/current`. Its exact source SHA is recorded in the
+artifact manifest, release tag and switch receipt. Bot, chat, worker, OMP,
 monitor, public agent, gateway and named tunnel are active and enabled for boot.
 Monitor readiness is true including worker, backup and tunnel. No whole-VM power
 cycle was performed.
