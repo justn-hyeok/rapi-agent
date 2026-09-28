@@ -17,6 +17,57 @@ import {
 import { registerBackup } from "../../scripts/privacy-files.mjs";
 import { prune } from "../../scripts/prune-backups.mjs";
 const key = Buffer.alloc(32, 7).toString("hex");
+it("rolls back the new schema before it has processed data and reapplies it without touching application records", async () => {
+  const s = await setup();
+  try {
+    await s.client.query(
+      await readFile("scripts/rollback-data-lifecycle.sql", "utf8"),
+    );
+    assert.equal(
+      (
+        await s.client.query(
+          "SELECT name FROM schema_migrations WHERE name='0013_data_lifecycle.sql'",
+        )
+      ).rowCount,
+      0,
+    );
+    assert.equal(
+      (
+        await s.client.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='delivery_attempts' AND column_name='anonymized_at'",
+        )
+      ).rowCount,
+      0,
+    );
+    await s.client.query(
+      await readFile("packages/db/migrations/0013_data_lifecycle.sql", "utf8"),
+    );
+    assert.equal(
+      (
+        await s.client.query(
+          "SELECT name FROM schema_migrations WHERE name='0013_data_lifecycle.sql'",
+        )
+      ).rowCount,
+      1,
+    );
+  } finally {
+    await s.client.query("ROLLBACK");
+    if (
+      !(
+        await s.client.query(
+          "SELECT name FROM schema_migrations WHERE name='0013_data_lifecycle.sql'",
+        )
+      ).rowCount
+    )
+      await s.client.query(
+        await readFile(
+          "packages/db/migrations/0013_data_lifecycle.sql",
+          "utf8",
+        ),
+      );
+    await s.close();
+  }
+});
 const owner = "10000000000000001";
 const guild = "20000000000000001";
 async function setup() {
@@ -99,7 +150,7 @@ async function batch(
   const sub = randomUUID();
   const id = randomUUID();
   await s.client.query(
-    "INSERT INTO subscriptions(id,owner_id,name,cadence,channels) VALUES($1,$2,$1::text,'weekly','[]')",
+    "INSERT INTO subscriptions(id,owner_id,name,cadence,channels) VALUES($1::uuid,$2,$1::text,'weekly','[]')",
     [sub, owner],
   );
   await s.client.query(
@@ -417,7 +468,7 @@ it("erases only a confirmed user scope while retaining other users and enforcing
   try {
     const run = randomUUID();
     await s.client.query(
-      "INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1,$2,'channel',$3,$1::text,'execute','gpt-5.6-sol',$4)",
+      "INSERT INTO chatops_runs(id,guild_id,channel_id,owner_id,message_id,route,model,task_digest) VALUES($1::uuid,$2,'channel',$3,$1::text,'execute','gpt-5.6-sol',$4)",
       [run, guild, owner, "a".repeat(64)],
     );
     for (const phase of ["accepted", "running", "failed"])
@@ -435,7 +486,7 @@ it("erases only a confirmed user scope while retaining other users and enforcing
     );
     const memory = randomUUID();
     await s.client.query(
-      "INSERT INTO chatops_memory(id,guild_id,channel_id,owner_id,message_id,content,digest,state) VALUES($1,$2,'channel',$3,$1::text,'remembered personal detail',$4,'candidate')",
+      "INSERT INTO chatops_memory(id,guild_id,channel_id,owner_id,message_id,content,digest,state) VALUES($1::uuid,$2,'channel',$3,$1::text,'remembered personal detail',$4,'candidate')",
       [memory, guild, owner, "b".repeat(64)],
     );
     await s.client.query(
