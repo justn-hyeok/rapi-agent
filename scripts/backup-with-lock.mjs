@@ -1,0 +1,19 @@
+import pg from "pg";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+const client = new pg.Client({
+  connectionString: process.env.DATABASE_URL,
+  connectionTimeoutMillis: 10000,
+});
+try {
+  await client.connect();
+  await client.query("SELECT pg_advisory_lock(731552024)");
+  const child = spawn("/bin/bash", ["scripts/backup.sh"], {
+    env: { ...process.env, RAPI_BACKUP_LOCK_HELD: "1" },
+    stdio: "inherit",
+  });
+  const [code] = await once(child, "exit");
+  if (code !== 0) process.exitCode = code ?? 1;
+} finally {
+  await client.end();
+}

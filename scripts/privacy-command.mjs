@@ -26,6 +26,16 @@ export async function executePrivacyCommand(
     };
     if (!common.guildId) throw new Error("guild_required");
     if (options.action === "요청") {
+      const countNames = {
+        items: "수집 항목",
+        subscriptions: "구독",
+        batches: "연결 브리핑·발송 기록",
+        tasks: "작업",
+        runs: "실행 기록",
+        memories: "기억",
+        chats: "대화",
+        files: "등록 게시 파일",
+      };
       const kind = options.kind ?? "user";
       const result = await requestDeletion(client, {
         ...common,
@@ -38,7 +48,7 @@ export async function executePrivacyCommand(
           `삭제 미리보기 ${result.id}\n대상: ${kind === "user" ? "내 대화·기억·구독·작업·사용 기록" : kind === "item" ? "수집 항목과 연결된 브리핑" : "수집원과 연결된 항목·브리핑"}\n대상 건수: ${Object.entries(
             result.counts,
           )
-            .map(([name, n]) => `${name} ${n}`)
+            .map(([name, n]) => `${countNames[name] ?? name} ${n}건`)
             .join(
               ", ",
             )}\n확정 전에는 삭제하지 않습니다. 24시간 안에 /데이터삭제 확정 요청ID:${result.id} 로 실행하세요. 기존 백업은 만료될 때까지 추적합니다.${result.ambiguous ? "\n이전 답변의 소유 관계가 불명확해 확인이 필요합니다." : ""}`,
@@ -61,6 +71,7 @@ export async function executePrivacyCommand(
       preview: "확정 대기",
       confirmed: "처리 대기",
       blocked: "진행 중 작업·파일 확인 대기",
+      files_pending: "DB 처리 완료, 등록 파일 삭제 대기",
       waiting_backups: "DB·파일 처리 완료, 기존 백업 만료 대기",
       completed: "삭제 및 백업 만료 확인 완료",
     };

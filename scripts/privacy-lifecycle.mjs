@@ -363,7 +363,6 @@ export async function processDeletion(client, id, config) {
   const {
     key,
     withdrawalsFile,
-    publicationRoots,
     backupDirectory,
     backupCatalogFile,
     ledgerFile,
@@ -371,6 +370,7 @@ export async function processDeletion(client, id, config) {
   } = config;
   await begin(client);
   let row;
+  let committed = false;
   try {
     row = (
       await client.query(
@@ -408,8 +408,6 @@ export async function processDeletion(client, id, config) {
       return name.slice(0, -4);
     });
     await recordWithdrawals(withdrawalsFile, slugs);
-    for (const action of p.files)
-      await removePublication(action, publicationRoots);
     const backups = await backupInventory(
       backupDirectory,
       backupCatalogFile,
@@ -480,10 +478,18 @@ export async function processDeletion(client, id, config) {
         )
       : now;
     await client.query(
-      "UPDATE privacy_requests SET state='waiting_backups',target_id=NULL,plan=$2,file_actions='[]',backup_snapshot=$3,processed_at=$4,backup_deadline=$5,error_code=NULL WHERE id=$1",
-      [id, planCounts(p), backups, now, deadline],
+      "UPDATE privacy_requests SET state='files_pending',target_id=NULL,plan=$2,file_actions=$6,backup_snapshot=$3,processed_at=$4,backup_deadline=$5,error_code=NULL WHERE id=$1",
+      [
+        id,
+        planCounts(p),
+        JSON.stringify(backups),
+        now,
+        deadline,
+        JSON.stringify(p.files),
+      ],
     );
     await client.query("COMMIT");
+    committed = true;
     await updateLedger(ledgerFile, {
       id,
       requesterRef: row.requester_ref,
@@ -493,8 +499,9 @@ export async function processDeletion(client, id, config) {
       plan: p,
       backups,
       processedAt: now.toISOString(),
-      state: "waiting_backups",
+      state: "files_pending",
     });
+    await finishDeletionFiles(client, id, config);
     return {
       id,
       state: "waiting_backups",
@@ -502,10 +509,12 @@ export async function processDeletion(client, id, config) {
       counts: planCounts(p),
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (!committed) await client.query("ROLLBACK");
     if (row)
       await client.query(
-        "UPDATE privacy_requests SET state='blocked',error_code=$2 WHERE id=$1",
+        committed
+          ? "UPDATE privacy_requests SET error_code=$2 WHERE id=$1"
+          : "UPDATE privacy_requests SET state='blocked',error_code=$2 WHERE id=$1",
         [
           id,
           ["unowned_file", "changed_file", "unsafe_file"].includes(
@@ -518,6 +527,31 @@ export async function processDeletion(client, id, config) {
     throw error;
   }
 }
+export async function finishDeletionFiles(client, id, config) {
+  const row = (
+    await client.query(
+      "SELECT * FROM privacy_requests WHERE id=$1 AND state='files_pending'",
+      [id],
+    )
+  ).rows[0];
+  if (!row) return;
+  for (const action of row.file_actions)
+    await removePublication(action, config.publicationRoots);
+  await client.query(
+    "UPDATE privacy_requests SET state='waiting_backups',file_actions='[]',error_code=NULL WHERE id=$1 AND state='files_pending'",
+    [id],
+  );
+  await updateLedger(config.ledgerFile, {
+    id,
+    requesterRef: row.requester_ref,
+    guildId: row.guild_id,
+    targetKind: row.target_kind,
+    targetRef: row.target_ref,
+    backups: row.backup_snapshot,
+    processedAt: row.processed_at,
+    state: "waiting_backups",
+  });
+}
 export async function finishDeletionBackups(client, config) {
   const {
     ledgerFile,
@@ -525,14 +559,37 @@ export async function finishDeletionBackups(client, config) {
     backupCatalogFile,
     now = new Date(),
   } = config;
-  await backupInventory(backupDirectory, backupCatalogFile, now);
+  const inventory = await backupInventory(
+    backupDirectory,
+    backupCatalogFile,
+    now,
+  );
   const rows = (
     await client.query(
       "SELECT * FROM privacy_requests WHERE state='waiting_backups'",
     )
   ).rows;
   let completed = 0;
-  for (const row of rows)
+  for (const row of rows) {
+    const additional = inventory.filter(
+      (entry) =>
+        !entry.managed &&
+        !row.backup_snapshot.some((previous) => previous.path === entry.path),
+    );
+    if (additional.length) {
+      row.backup_snapshot.push(...additional);
+      const deadline = new Date(
+        Math.max(
+          ...row.backup_snapshot.map((entry) =>
+            new Date(entry.expiresAt).getTime(),
+          ),
+        ),
+      );
+      await client.query(
+        "UPDATE privacy_requests SET backup_snapshot=$2,backup_deadline=$3 WHERE id=$1",
+        [row.id, JSON.stringify(row.backup_snapshot), deadline],
+      );
+    }
     if (await backupsGone(row.backup_snapshot)) {
       await client.query(
         "UPDATE privacy_requests SET state='completed' WHERE id=$1 AND state='waiting_backups'",
@@ -549,6 +606,7 @@ export async function finishDeletionBackups(client, config) {
       });
       completed++;
     }
+  }
   // A restored database that predates a persisted deletion must not silently
   // consider the request finished. Keep it visible for replay/reconciliation.
   const ledger = await readJson(ledgerFile, { version: 1, requests: [] });
@@ -611,7 +669,7 @@ export async function sweepMetadata(
     );
     const raw = (
       await client.query(
-        "SELECT re.* FROM raw_events re JOIN sources s ON s.id=re.source_id WHERE re.payload->>'retentionExpired'='true' AND re.collected_at<$1::timestamptz-CASE WHEN COALESCE(re.payload->>'metadataRetentionDays',CASE WHEN s.collection_policy->>'visibility'='public' THEN '365' ELSE '90' END)='365' THEN interval '1 year' ELSE interval '90 days' END AND NOT EXISTS(SELECT 1 FROM source_items si JOIN delivery_batch_items bi ON bi.source_item_id=si.id JOIN delivery_batches b ON b.id=bi.batch_id WHERE si.raw_event_id=re.id AND b.state NOT IN('delivered','failed','dead_letter'))",
+        "SELECT re.* FROM raw_events re JOIN sources s ON s.id=re.source_id WHERE re.payload->>'retentionExpired'='true' AND re.collected_at<$1::timestamptz-CASE WHEN COALESCE(re.payload->>'metadataRetentionDays',CASE WHEN s.collection_policy->>'visibility'='public' THEN '365' ELSE '90' END)='365' THEN interval '1 year' ELSE interval '90 days' END AND NOT EXISTS(SELECT 1 FROM source_items si JOIN delivery_batch_items bi ON bi.source_item_id=si.id JOIN delivery_batches b ON b.id=bi.batch_id WHERE si.raw_event_id=re.id AND b.state NOT IN('delivered','failed','dead_letter')) AND NOT EXISTS(SELECT 1 FROM source_items si JOIN queue_jobs q ON (q.payload->>'itemId'=si.id::text OR q.idempotency_key LIKE 'rss:'||si.id::text||':%') WHERE si.raw_event_id=re.id AND q.state='leased' AND q.lease_expires_at>$1)",
         [now],
       )
     ).rows;

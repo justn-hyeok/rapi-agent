@@ -119,6 +119,7 @@ export const environmentSchema = z
     BACKUP_STATUS_FILE: z.string().default("backups/backup-status.json"),
     SOURCE_EXPIRY_STATUS_FILE: z.string().optional(),
     PRIVACY_STATUS_FILE: z.string().optional(),
+    PRIVACY_MAINTENANCE_STATUS_FILE: z.string().optional(),
     PRIVACY_HMAC_KEY: z
       .string()
       .regex(/^[a-f0-9]{64}$/i)

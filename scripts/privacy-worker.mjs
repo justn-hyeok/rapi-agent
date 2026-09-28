@@ -2,6 +2,7 @@ import pg from "pg";
 import { setTimeout } from "node:timers/promises";
 import {
   processDeletion,
+  finishDeletionFiles,
   finishDeletionBackups,
   sweepMetadata,
 } from "./privacy-lifecycle.mjs";
@@ -27,13 +28,20 @@ do {
     const config = privacyConfig();
     const requests = (
       await client.query(
-        "SELECT id FROM privacy_requests WHERE state IN('confirmed','blocked') AND confirmed_at IS NOT NULL AND target_id IS NOT NULL AND (error_code IS NULL OR error_code IN('active_work','legacy_reply_ownership_unknown')) ORDER BY created_at LIMIT 10",
+        "SELECT id FROM privacy_requests WHERE state IN('confirmed','blocked') AND confirmed_at IS NOT NULL AND target_id IS NOT NULL AND (error_code IS NULL OR error_code IN('active_work','legacy_reply_ownership_unknown','processing_failed')) ORDER BY created_at LIMIT 10",
       )
     ).rows;
     if (requests.length || maintenance) await requirePrivacyBackup();
     for (const request of requests)
       await processDeletion(client, request.id, config);
     const completed = await finishDeletionBackups(client, config);
+    const files = (
+      await client.query(
+        "SELECT id FROM privacy_requests WHERE state='files_pending'",
+      )
+    ).rows;
+    for (const request of files)
+      await finishDeletionFiles(client, request.id, config);
     const result = maintenance
       ? await sweepMetadata(client, { ...config, apply: true })
       : { requests: requests.length, completed };

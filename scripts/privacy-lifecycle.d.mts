@@ -81,6 +81,11 @@ export function finishDeletionBackups(
   client: Client,
   config: PrivacyConfig,
 ): Promise<number>;
+export function finishDeletionFiles(
+  client: Client,
+  id: string,
+  config: PrivacyConfig,
+): Promise<void>;
 export function sweepMetadata(
   client: Client,
   input: { key: string; withdrawalsFile?: string; now?: Date; apply?: boolean },

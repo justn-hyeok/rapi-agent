@@ -12,11 +12,161 @@ import {
   processDeletion,
   deletionStatus,
   finishDeletionBackups,
+  finishDeletionFiles,
   sweepMetadata,
 } from "../../scripts/privacy-lifecycle.mjs";
 import { registerBackup } from "../../scripts/privacy-files.mjs";
 import { prune } from "../../scripts/prune-backups.mjs";
 const key = Buffer.alloc(32, 7).toString("hex");
+it("waits for backup snapshot publication before recording its deletion backup cohort", async () => {
+  const s = await setup();
+  const backupClient = new pg.Client({
+    connectionString: process.env.DATABASE_URL,
+  });
+  await backupClient.connect();
+  try {
+    const i = await item(s);
+    const r = await requestDeletion(s.client, {
+      guildId: guild,
+      userId: owner,
+      kind: "item",
+      target: i.id,
+      key,
+      admin: true,
+    });
+    await confirmDeletion(s.client, {
+      id: r.id,
+      guildId: guild,
+      userId: owner,
+      key,
+      admin: true,
+    });
+    await backupClient.query("SELECT pg_advisory_lock(731552024)");
+    const pending = processDeletion(s.client, r.id, s.config);
+    const backup = join(s.config.backupDirectory, "rapi-20260928T010000Z.dump");
+    await writeFile(backup, "snapshot before deletion");
+    await backupClient.query("SELECT pg_advisory_unlock(731552024)");
+    await pending;
+    assert.equal(await finishDeletionBackups(s.client, s.config), 0);
+    await rm(backup);
+    assert.equal(await finishDeletionBackups(s.client, s.config), 1);
+  } finally {
+    await backupClient.end();
+    await s.close();
+  }
+});
+it("defers metadata of an item that still has an active webhook lease", async () => {
+  const s = await setup();
+  try {
+    const i = await item(s, "private", 100);
+    await s.client.query(
+      'UPDATE raw_events SET payload=\'{"retentionExpired":true,"metadataRetentionDays":90}\' WHERE id=$1',
+      [i.raw],
+    );
+    await s.client.query(
+      "UPDATE source_items SET metadata='{\"retentionExpired\":true}' WHERE id=$1",
+      [i.id],
+    );
+    const job = randomUUID();
+    await s.client.query(
+      "INSERT INTO queue_jobs(id,kind,payload,state,idempotency_key,lease_expires_at) VALUES($1,'webhook',$2,'leased',$3,now()+interval '5 minutes')",
+      [job, { itemId: i.id }, `rss:${i.id}:destination`],
+    );
+    assert.equal(
+      (await sweepMetadata(s.client, { key, apply: true })).rawMetadata,
+      0,
+    );
+    assert.equal(
+      (await s.client.query("SELECT id FROM queue_jobs WHERE id=$1", [job]))
+        .rowCount,
+      1,
+    );
+    await s.client.query(
+      "UPDATE queue_jobs SET state='done',lease_expires_at=NULL WHERE id=$1",
+      [job],
+    );
+    assert.equal(
+      (await sweepMetadata(s.client, { key, apply: true })).rawMetadata,
+      1,
+    );
+  } finally {
+    await s.close();
+  }
+});
+it("keeps files when SQL rolls back and resumes file deletion after a committed request", async () => {
+  const s = await setup();
+  try {
+    const i = await item(s, "public");
+    const b = await batch(s, i.id);
+    const path = join(s.publicationRoot, "resumable.mdx");
+    const content = "original publication";
+    await writeFile(path, content);
+    await s.store.recordPublication(
+      b,
+      "public",
+      path,
+      createHash("sha256").update(content).digest("hex"),
+    );
+    const r = await requestDeletion(s.client, {
+      guildId: guild,
+      userId: owner,
+      kind: "item",
+      target: i.id,
+      key,
+      admin: true,
+    });
+    await confirmDeletion(s.client, {
+      id: r.id,
+      guildId: guild,
+      userId: owner,
+      key,
+      admin: true,
+    });
+    await s.client.query(
+      "CREATE TABLE privacy_fk_probe(item_id uuid REFERENCES source_items(id))",
+    );
+    await s.client.query("INSERT INTO privacy_fk_probe VALUES($1)", [i.id]);
+    await assert.rejects(
+      processDeletion(s.client, r.id, s.config),
+      /foreign key/,
+    );
+    assert.equal(await readFile(path, "utf8"), content);
+    assert.equal(
+      (await s.client.query("SELECT id FROM source_items WHERE id=$1", [i.id]))
+        .rowCount,
+      1,
+    );
+    await s.client.query("DROP TABLE privacy_fk_probe");
+    await writeFile(path, "newer replacement");
+    await assert.rejects(
+      processDeletion(s.client, r.id, s.config),
+      /changed_file/,
+    );
+    assert.equal(
+      (await s.client.query("SELECT id FROM source_items WHERE id=$1", [i.id]))
+        .rowCount,
+      0,
+    );
+    assert.equal(
+      (
+        await deletionStatus(s.client, {
+          id: r.id,
+          guildId: guild,
+          userId: owner,
+          key,
+        })
+      ).state,
+      "files_pending",
+    );
+    assert.equal(await readFile(path, "utf8"), "newer replacement");
+    await writeFile(path, content);
+    await finishDeletionFiles(s.client, r.id, s.config);
+    await assert.rejects(readFile(path), /ENOENT/);
+  } finally {
+    await s.client.query("DROP TABLE IF EXISTS privacy_fk_probe");
+    await s.close();
+  }
+});
 it("rolls back the new schema before it has processed data and reapplies it without touching application records", async () => {
   const s = await setup();
   try {
@@ -281,6 +431,21 @@ it("removes expired metadata and terminal audits, keeps live work, and suppresse
       ).retired,
       true,
     );
+    const withoutKey = new PostgresStore(process.env.DATABASE_URL!);
+    try {
+      await assert.rejects(
+        withoutKey.insertRawEvent(
+          old.source,
+          "event-1",
+          "checksum",
+          { body: "resurrected" },
+          new Date(),
+        ),
+        /Privacy key/,
+      );
+    } finally {
+      await withoutKey.close();
+    }
     assert.equal(
       (
         await s.client.query("SELECT id FROM raw_events WHERE source_id=$1", [
@@ -546,7 +711,7 @@ it("erases only a confirmed user scope while retaining other users and enforcing
     );
     assert.equal(
       (
-        await s.client.query("SELECT id FROM chatops_events WHERE run_id=$1", [
+        await s.client.query("SELECT seq FROM chatops_events WHERE run_id=$1", [
           run,
         ])
       ).rowCount,

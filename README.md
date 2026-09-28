@@ -134,6 +134,8 @@ RSS·GitHub 실수집, Discord·Gmail 브리핑, 공개 MDX 블로그, 기본 Co
 [현재 운영 기록](docs/evidence/full-runtime-20260928.md)에 있다.
 [GitHub·운영 보강 기록](docs/evidence/operations-live-20260928.md)에 기본 브랜치,
 CI, 외부 장애 감시와 백업·보관 정책의 현재 적용 범위를 기록했다.
+[데이터 보관·삭제 운영](docs/data-lifecycle.md)에 메타데이터 만료, 수신정보 축소,
+`/데이터삭제` 요청·확정·상태 확인과 백업 추적 절차를 기록했다.
 공개 글은 [라피 블로그](https://rapi-07ab7899e00f.justn.me/blog/)에서 볼 수 있다.
 질문·관리자 답변 처리 중에는 Discord의 ‘입력 중’ 표시를 갱신한다.
 검증 기록: [typing indicator evidence](docs/evidence/typing-indicator-20260928.md).

@@ -9,7 +9,7 @@ CREATE TABLE privacy_requests (
  id uuid PRIMARY KEY, guild_id text NOT NULL, requester_ref text NOT NULL,
  target_kind text NOT NULL CHECK(target_kind IN ('user','item','source')),
  target_id text, target_ref text NOT NULL,
- state text NOT NULL DEFAULT 'preview' CHECK(state IN ('preview','confirmed','blocked','waiting_backups','completed')),
+ state text NOT NULL DEFAULT 'preview' CHECK(state IN ('preview','confirmed','blocked','files_pending','waiting_backups','completed')),
  plan jsonb NOT NULL DEFAULT '{}', file_actions jsonb NOT NULL DEFAULT '[]',
  backup_snapshot jsonb NOT NULL DEFAULT '[]', error_code text,
  created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL,

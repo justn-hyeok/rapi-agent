@@ -7,6 +7,7 @@ Type=oneshot
 User=justn
 WorkingDirectory=/home/justn/rapi-releases/current
 EnvironmentFile=/home/justn/rapi-agent/.env
+Environment=PRIVACY_STATUS_FILE=/var/lib/rapi/privacy-maintenance-status.json
 ExecStart=/usr/local/bin/node scripts/privacy-worker.mjs --maintenance
 UMask=0077
 NoNewPrivileges=true

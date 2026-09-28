@@ -9,6 +9,8 @@ import {
 } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { open } from "node:fs/promises";
+import { setTimeout } from "node:timers/promises";
 import { expiredBackups } from "./prune-backups.mjs";
 
 export async function atomicJson(file, data) {
@@ -78,6 +80,7 @@ export async function backupInventory(
     if (!expiredBackups([name], new Date("9999-12-31T23:59:59Z"), 30).length)
       throw new Error("invalid_backup_date");
     entries.push({
+      managed: true,
       path: file,
       expiresAt: new Date(stat.mtimeMs + 30 * 86400000).toISOString(),
     });
@@ -103,7 +106,12 @@ export async function backupInventory(
       )
         throw new Error("changed_catalog_backup");
       await unlink(entry.path);
-    } else entries.push({ path: entry.path, expiresAt: entry.expiresAt });
+    } else
+      entries.push({
+        path: entry.path,
+        expiresAt: entry.expiresAt,
+        managed: false,
+      });
   }
   return entries;
 }
@@ -141,10 +149,40 @@ export async function backupsGone(entries) {
   return true;
 }
 export async function updateLedger(file, request) {
-  const ledger = await readJson(file, { version: 1, requests: [] });
-  if (ledger.version !== 1 || !Array.isArray(ledger.requests))
-    throw new Error("invalid_privacy_ledger");
-  ledger.requests = ledger.requests.filter((entry) => entry.id !== request.id);
-  ledger.requests.push(request);
-  await atomicJson(file, ledger);
+  const lockFile = `${file}.lock`;
+  let lock;
+  for (let i = 0; i < 100 && !lock; i++) {
+    try {
+      lock = await open(lockFile, "wx", 0o600);
+      await lock.writeFile(JSON.stringify({ pid: process.pid }));
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      // Do not remove another writer's lock automatically. Interrupted writes
+      // require operator recovery with both writers stopped.
+      await setTimeout(50);
+    }
+  }
+  if (!lock) throw new Error("privacy_ledger_busy");
+  try {
+    const ledger = await readJson(file, { version: 1, requests: [] });
+    if (ledger.version !== 1 || !Array.isArray(ledger.requests))
+      throw new Error("invalid_privacy_ledger");
+    const previous = ledger.requests.find((entry) => entry.id === request.id);
+    const rank = {
+      confirmed: 0,
+      files_pending: 1,
+      waiting_backups: 2,
+      completed: 3,
+    };
+    if (previous && (rank[previous.state] ?? -1) > (rank[request.state] ?? -1))
+      return;
+    ledger.requests = ledger.requests.filter(
+      (entry) => entry.id !== request.id,
+    );
+    ledger.requests.push(request);
+    await atomicJson(file, ledger);
+  } finally {
+    await lock.close();
+    await unlink(lockFile);
+  }
 }

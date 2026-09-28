@@ -288,6 +288,13 @@ async function check(): Promise<void> {
       );
     if (config.PRIVACY_STATUS_FILE)
       checks.push(checkBackup("data_lifecycle", config.PRIVACY_STATUS_FILE));
+    if (config.PRIVACY_MAINTENANCE_STATUS_FILE)
+      checks.push(
+        checkBackup(
+          "metadata_retention",
+          config.PRIVACY_MAINTENANCE_STATUS_FILE,
+        ),
+      );
     if (config.RAPI_PUBLIC_BASE_URL) {
       checks.push(
         checkEndpoint("public_gateway", config.PUBLIC_GATEWAY_READY_URL),

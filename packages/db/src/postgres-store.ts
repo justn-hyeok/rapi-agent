@@ -184,6 +184,21 @@ export class PostgresStore {
       if (!source.rows[0] || source.rows[0].state !== "active")
         throw new Error("Source is unavailable");
       const id = randomUUID();
+      if (!this.privacyKey) {
+        const exists = await client.query<{ table_name: string | null }>(
+          "SELECT to_regclass('privacy_event_tombstones')::text AS table_name",
+        );
+        if (exists.rows[0]?.table_name) {
+          const blocked = await client.query(
+            "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 LIMIT 1",
+            [sourceId],
+          );
+          if (blocked.rowCount)
+            throw new Error(
+              "Privacy key is required for retired source ingestion",
+            );
+        }
+      }
       if (this.privacyKey) {
         const ref = `hmac:v1:${createHmac(
           "sha256",
