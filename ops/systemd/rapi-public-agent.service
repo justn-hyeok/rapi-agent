@@ -16,7 +16,7 @@ Environment=PUBLIC_AGENT_RUNTIME=/var/lib/rapi-public/runtime
 Environment=PUBLIC_CODEX_BINARY=/opt/rapi-public-agent/codex
 Environment=PUBLIC_AGENT_CONCURRENCY=8
 Environment=PUBLIC_AGENT_HEALTH_PORT=3500
-ExecStart=/usr/bin/node /opt/rapi-public-agent/run.js
+ExecStart=/usr/local/bin/node /opt/rapi-public-agent/run.js
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=rapi-public-agent

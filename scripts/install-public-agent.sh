@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+node -e 'const [major,minor]=process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13)) throw new Error("Public executor installation requires Node >=22.13")'
 prepare_only=false
 if [[ "${1:-}" == "--prepare-only" ]]; then prepare_only=true; fi
 codex_source="$(node scripts/resolve-codex-binary.mjs "$(command -v codex)")"
