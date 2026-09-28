@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { PostgresStore, ChatOpsStore } from "@rapi/db";
-import { textDigest, type ChatScope, type RunEvidence } from "@rapi/contracts";
+import {
+  textDigest,
+  DEFAULT_CODEX_MODEL,
+  type ChatScope,
+  type RunEvidence,
+} from "@rapi/contracts";
 import { ChatOrchestrator } from "../../apps/chat/src/orchestrator.js";
 import {
   runProcess,
@@ -238,7 +243,7 @@ test("Discord duplicate admission, live status and actual cancellation bypass qu
     await ready;
     await chat.receive(request);
     assert.equal(calls, 1);
-    assert.equal((await store.recent(s))[0]?.model, "gpt-5.3-codex-spark");
+    assert.equal((await store.recent(s))[0]?.model, DEFAULT_CODEX_MODEL);
     await chat.receive(message("지금 뭐 하는 중이야?"));
     assert.ok(output.some((text) => text.includes("실행 중")));
     assert.ok(
@@ -419,7 +424,7 @@ test("explicit memory UX is deduplicated and injected as bounded data into read-
     await chat.receive(message("어떤 언어가 좋아?"));
     assert.equal(prompts.length, 1);
     assert.equal(prompts[0].execute, false);
-    assert.equal(prompts[0].model, "gpt-5.3-codex-spark");
+    assert.equal(prompts[0].model, DEFAULT_CODEX_MODEL);
     assert.ok(prompts[0].prompt.includes(memories[0]!.digest));
     await chat.receive(message("아스트라로 어떤 언어가 좋아?"));
     assert.equal(prompts[1].model, "gpt-6-astra");
