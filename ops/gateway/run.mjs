@@ -1,6 +1,10 @@
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { URL } from "node:url";
+import {
+  readWithdrawals,
+  filterWithdrawnBlog,
+} from "../../scripts/blog-withdrawals.mjs";
 
 const port = Number(process.env.RAPI_GATEWAY_PORT ?? "3600");
 const healthPort = Number(process.env.RAPI_GATEWAY_HEALTH_PORT ?? "3601");
@@ -34,6 +38,15 @@ const server = createServer(async (incoming, outgoing) => {
       let body = await readFile(
         new URL(`../../apps/blog/dist/${name}`, import.meta.url),
       );
+      const slugs = await readWithdrawals(
+        process.env.RAPI_BLOG_WITHDRAWALS_FILE,
+        process.env.RAPI_BLOG_WITHDRAWALS_REQUIRED === "true",
+      );
+      body = filterWithdrawnBlog(name, body, slugs);
+      if (!body) {
+        respond(outgoing, 404, { error: "not_found" });
+        return;
+      }
       if (name === "feed.xml" && process.env.RAPI_PUBLIC_BASE_URL) {
         const metadata = JSON.parse(
           await readFile(
@@ -55,7 +68,10 @@ const server = createServer(async (incoming, outgoing) => {
         "content-type": name.endsWith(".xml")
           ? "application/rss+xml; charset=utf-8"
           : "text/html; charset=utf-8",
-        "cache-control": "public, max-age=60",
+        "cache-control":
+          process.env.RAPI_BLOG_WITHDRAWALS_REQUIRED === "true"
+            ? "no-store"
+            : "public, max-age=60",
         "content-security-policy":
           "default-src 'none'; style-src 'unsafe-inline'; img-src https:; base-uri 'none'; frame-ancestors 'none'",
         "x-content-type-options": "nosniff",

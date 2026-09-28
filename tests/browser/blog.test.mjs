@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout, clearTimeout } from "node:timers";
 import { chromium } from "playwright";
 
@@ -10,6 +12,9 @@ test(
   "public blog navigation and narrow layouts work through the gateway",
   { timeout: 45_000 },
   async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rapi-blog-withdrawal-"));
+    const withdrawalsFile = join(directory, "withdrawals.json");
+    await writeFile(withdrawalsFile, JSON.stringify({ version: 1, slugs: [] }));
     const gateway = spawn(process.execPath, ["ops/gateway/run.mjs"], {
       env: {
         PATH: process.env.PATH,
@@ -17,6 +22,8 @@ test(
         RAPI_GATEWAY_HEALTH_PORT: "0",
         PORT: "1",
         RAPI_PUBLIC_BASE_URL: "https://rotated.example",
+        RAPI_BLOG_WITHDRAWALS_FILE: withdrawalsFile,
+        RAPI_BLOG_WITHDRAWALS_REQUIRED: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -104,6 +111,41 @@ test(
           await context.close();
         }
       }
+      const context = await browser.newContext();
+      try {
+        await writeFile(
+          withdrawalsFile,
+          JSON.stringify({ version: 1, slugs: ["rapi-start"] }),
+        );
+        assert.equal(
+          (
+            await context.request.get(`${origin}/blog/rapi-start.html`)
+          ).status(),
+          404,
+        );
+        const page = await context.newPage();
+        assert.equal((await page.goto(`${origin}/blog/`)).status(), 200);
+        assert.equal(
+          await page.getByRole("link", { name: "라피 사용 안내" }).count(),
+          0,
+        );
+        assert(
+          !(
+            await (await context.request.get(`${origin}/blog/feed.xml`)).text()
+          ).includes("rapi-start.html"),
+        );
+        await writeFile(withdrawalsFile, "invalid withdrawal state");
+        assert.equal(
+          (await context.request.get(`${origin}/blog/`)).status(),
+          404,
+        );
+        assert.equal(
+          (await context.request.get(`${origin}/blog/feed.xml`)).status(),
+          404,
+        );
+      } finally {
+        await context.close();
+      }
     } finally {
       await browser?.close();
       if (gateway.exitCode === null && gateway.signalCode === null) {
@@ -111,6 +153,7 @@ test(
         gateway.kill("SIGTERM");
         await exited;
       }
+      await rm(directory, { recursive: true, force: true });
     }
   },
 );

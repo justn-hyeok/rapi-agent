@@ -1,0 +1,22 @@
+[Unit]
+Description=Rapi source-body expiry and publication withdrawal
+After=network-online.target rapi-backup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=justn
+WorkingDirectory=/home/justn/rapi-releases/current
+EnvironmentFile=/home/justn/rapi-agent/.env
+Environment=RAPI_RETENTION_APPLY_APPROVED=true
+Environment=RAPI_EXPIRED_PUBLICATION_POLICY=withdraw
+Environment=RAPI_BLOG_WITHDRAWALS_FILE=/var/lib/rapi/blog-withdrawals.json
+Environment=RAPI_RETENTION_BACKUP_STATUS_FILE=/home/justn/rapi-agent/backups/backup-status.json
+Environment=RAPI_SOURCE_EXPIRY_STATUS_FILE=/var/lib/rapi/source-expiry-status.json
+ExecStart=/usr/local/bin/node scripts/expire-source-content.mjs --apply
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/rapi

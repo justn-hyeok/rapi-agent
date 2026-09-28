@@ -324,6 +324,8 @@ export class RapiAgent {
     generatedAt = new Date(),
   ): Promise<string> {
     const batch = await this.store.getBatch(batchId);
+    if (!batch.items.length)
+      throw new Error("Cannot publish an empty or expired batch");
     const content = renderMdx(
       slug,
       "Rapi daily briefing",
@@ -332,12 +334,13 @@ export class RapiAgent {
       generatedAt,
     );
     const filePath = await publisher.publish(slug, content);
-    await this.store.recordPublication(
-      batchId,
-      visibility,
-      filePath,
-      createHash("sha256").update(content).digest("hex"),
-    );
+    const hash = createHash("sha256").update(content).digest("hex");
+    try {
+      await this.store.recordPublication(batchId, visibility, filePath, hash);
+    } catch (error) {
+      await publisher.removeIfUnchanged(filePath, hash);
+      throw error;
+    }
     return filePath;
   }
 

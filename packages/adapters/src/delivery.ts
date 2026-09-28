@@ -347,6 +347,28 @@ export class MdxPublisher {
     return filePath;
   }
 
+  async removeIfUnchanged(
+    filePath: string,
+    expectedHash: string,
+  ): Promise<boolean> {
+    const name = basename(filePath);
+    if (
+      filePath !== join(this.contentDirectory, name) ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*\.mdx$/.test(name)
+    )
+      throw new Error("Cannot remove a file outside the publisher directory");
+    try {
+      const content = await readFile(filePath);
+      if (createHash("sha256").update(content).digest("hex") !== expectedHash)
+        return false;
+      await unlink(filePath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   async buildPublic(): Promise<string[]> {
     await mkdir(this.publicDirectory, { recursive: true });
     for (const name of await readdir(this.publicDirectory)) {

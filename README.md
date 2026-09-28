@@ -128,10 +128,12 @@ Discord 명령은 모두 한글이며 작업 실행에는 JSON이 필요 없다.
 
 ## 현재 상태
 
-2026-09-28 공개 커뮤니티 `1545832299671847013`에 코드 `798a3a2`를 배포했다.
+2026-09-28 공개 커뮤니티 `1545832299671847013`에 릴리스 `v0.1.1`을 적용했다.
 RSS·GitHub 실수집, Discord·Gmail 브리핑, 공개 MDX 블로그, 기본 Codex 개발 실행·실제 취소를 연결했다.
 8개 서비스는 실행 중이며 자동 시작이 설정돼 있다. 운영 증거와 제외한 검증 범위는
 [현재 운영 기록](docs/evidence/full-runtime-20260928.md)에 있다.
+[GitHub·운영 보강 기록](docs/evidence/operations-live-20260928.md)에 기본 브랜치,
+CI, 외부 장애 감시와 백업·보관 정책의 현재 적용 범위를 기록했다.
 공개 글은 [라피 블로그](https://rapi-07ab7899e00f.justn.me/blog/)에서 볼 수 있다.
 질문·관리자 답변 처리 중에는 Discord의 ‘입력 중’ 표시를 갱신한다.
 검증 기록: [typing indicator evidence](docs/evidence/typing-indicator-20260928.md).
