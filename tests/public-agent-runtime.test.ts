@@ -45,6 +45,16 @@ test("public agent reserves capacity before reading uploads and releases disconn
       },
     );
     await once(child.stdout!, "data");
+    const readyUrl = `http://127.0.0.1:${address.port}/ready`;
+    assert.equal(
+      (await fetch(readyUrl)).status,
+      503,
+      "missing tool host is not ready",
+    );
+    await writeFile(join(root, "codex-code-mode-host"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    });
+    assert.equal((await fetch(readyUrl)).status, 200);
     upload = request({
       socketPath,
       path: "/v1/answer",
@@ -53,7 +63,7 @@ test("public agent reserves capacity before reading uploads and releases disconn
     });
     upload.on("error", () => {});
     upload.write("{");
-    const health = `http://127.0.0.1:${address.port}/ready`;
+    const health = readyUrl;
     const waitActive = async (expected: number): Promise<void> => {
       for (let attempt = 0; attempt < 50; attempt++) {
         const status = (await (await fetch(health)).json()) as {

@@ -1,4 +1,5 @@
 import { access, chmod, mkdir, rm } from "node:fs/promises";
+import { constants } from "node:fs";
 import { createServer } from "node:http";
 import { dirname } from "node:path";
 import { runPublicCodex } from "./executor.js";
@@ -70,7 +71,11 @@ function json(
 
 async function ready(): Promise<boolean> {
   try {
-    await access(codexBinary);
+    await access(codexBinary, constants.X_OK);
+    await access(
+      `${dirname(codexBinary)}/codex-code-mode-host`,
+      constants.X_OK,
+    );
     await access(`${codexHome}/auth.json`);
     return true;
   } catch {

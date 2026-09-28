@@ -10,6 +10,11 @@ if [[ ! -x "$codex_source" ]]; then
   echo "Codex CLI를 찾지 못했습니다." >&2
   exit 1
 fi
+code_mode_host="$(dirname "$codex_source")/codex-code-mode-host"
+if [[ ! -x "$code_mode_host" ]]; then
+  echo "Codex web tool execution requires the bundled codex-code-mode-host." >&2
+  exit 1
+fi
 npx tsc -b apps/public-agent
 
 root=()
@@ -22,6 +27,7 @@ fi
 "${root[@]}" install -d -o root -g root -m 0755 /opt/rapi-public-agent
 "${root[@]}" install -d -o rapi-public -g rapi -m 0700 /var/lib/rapi-public /var/lib/rapi-public/codex /var/lib/rapi-public/empty /var/lib/rapi-public/runtime
 "${root[@]}" install -o root -g root -m 0755 "$codex_source" /opt/rapi-public-agent/codex
+"${root[@]}" install -o root -g root -m 0755 "$code_mode_host" /opt/rapi-public-agent/codex-code-mode-host
 /opt/rapi-public-agent/codex --version
 "${root[@]}" install -o root -g root -m 0644 apps/public-agent/dist/run.js apps/public-agent/dist/executor.js /opt/rapi-public-agent/
 "${root[@]}" install -o root -g root -m 0644 ops/systemd/rapi-public-agent.service /etc/systemd/system/rapi-public-agent.service
