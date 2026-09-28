@@ -67,3 +67,8 @@ gateway가 게시물·목록·RSS에서 제외한다. DB commit보다 먼저 철
 `rapi-retention-report.timer`, `rapi-source-expiry.service`, `rapi-source-expiry.timer`,
 gateway·monitor의 `20-source-expiry.conf`다. 서비스 설치 후 daemon-reload, timer enable,
 수동 최초 실행과 journal 확인을 실시한다.
+
+`scripts/launch-public-gateway.mjs`는 `/usr/local/lib/rapi/`에 설치한다. 이 영속
+launcher가 `current`를 한 번만 실제 immutable 경로로 해석하고 같은 경로에서
+검사와 gateway를 import한다. 시작 도중 포인터가 바뀌어도 서로 다른 버전이
+검사·실행되는 일이 없다. 철회 기능이 없는 이전 버전은 검사 단계에서 닫힌다.

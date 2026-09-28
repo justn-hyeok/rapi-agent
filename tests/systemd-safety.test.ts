@@ -10,11 +10,13 @@ test("withdrawal preflight checks the same sealed release the gateway starts", a
   const contents = await unit(
     "rapi-public-gateway.service.d/20-source-expiry.conf",
   );
-  const root = /^WorkingDirectory=(.+)$/m.exec(contents)?.[1];
   const start = /^ExecStart=(.+)$/m.exec(contents)?.[1].split(" ").at(-1);
-  const check = /^ExecStartPre=(.+)$/m.exec(contents)?.[1].split(" ").at(-1);
-  assert.equal(start, `${root}/ops/gateway/run.mjs`);
-  assert.equal(check, `${root}/scripts/check-withdrawal-support.mjs`);
+  assert.equal(start, "/usr/local/lib/rapi/launch-public-gateway.mjs");
+  assert.match(contents, /^ExecStartPre=$/m);
+  assert.match(
+    contents,
+    /^Environment=RAPI_CURRENT_RELEASE=\/home\/justn\/rapi-releases\/current$/m,
+  );
   assert.match(contents, /^ExecStart=$/m);
   assert.match(contents, /^Environment=RAPI_BLOG_WITHDRAWALS_REQUIRED=true$/m);
 });
