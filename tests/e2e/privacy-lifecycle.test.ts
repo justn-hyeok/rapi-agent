@@ -459,7 +459,7 @@ it("removes expired metadata and terminal audits, keeps live work, and suppresse
       "INSERT INTO webhook_connections(id,guild_id,name,kind,source_id,destination_kind,destination_id,secret_ciphertext) VALUES($1,$2,'erasure-test','generic_inbound',$3,'discord_channel','channel','test-encrypted')",
       [connection, guild, old.source],
     );
-    const replay = await s.store.ingestManagedWebhook({
+    const input: Parameters<PostgresStore["ingestManagedWebhook"]>[0] = {
       connectionId: connection,
       deliveryId: "event-1",
       eventType: "test",
@@ -482,8 +482,22 @@ it("removes expired metadata and terminal audits, keeps live work, and suppresse
         categories: [],
       },
       summary: "erased",
-    });
+    };
+    const replay = await s.store.ingestManagedWebhook(input);
     assert.equal(replay.inserted, false);
+    await s.client.query(
+      "UPDATE webhook_connections SET event_filters=ARRAY['allowed'] WHERE id=$1",
+      [connection],
+    );
+    await assert.rejects(s.store.ingestManagedWebhook(input), /not allowed/);
+    await s.client.query(
+      "UPDATE webhook_connections SET state='disabled' WHERE id=$1",
+      [connection],
+    );
+    await assert.rejects(
+      s.store.ingestManagedWebhook({ ...input, eventType: "allowed" }),
+      /not active/,
+    );
     assert.equal(
       (
         await s.client.query("SELECT id FROM raw_events WHERE source_id=$1", [

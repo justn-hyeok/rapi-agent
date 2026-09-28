@@ -1489,6 +1489,13 @@ export class PostgresStore {
         [input.connectionId],
       );
       const target = connection.rows[0];
+      if (!target || target.state !== "active" || !target.source_id)
+        throw new Error("Webhook connection is not active");
+      if (
+        target.event_filters.length > 0 &&
+        !target.event_filters.includes(input.eventType)
+      )
+        throw new Error("Webhook event type is not allowed");
       if (target?.source_id) {
         const source = await client.query<{ state: string }>(
           "SELECT state FROM sources WHERE id=$1 FOR UPDATE",
@@ -1506,13 +1513,6 @@ export class PostgresStore {
         )
           return { inserted: false };
       }
-      if (!target || target.state !== "active" || !target.source_id)
-        throw new Error("Webhook connection is not active");
-      if (
-        target.event_filters.length > 0 &&
-        !target.event_filters.includes(input.eventType)
-      )
-        throw new Error("Webhook event type is not allowed");
       const existing = await client.query<{
         payload_hash: string;
         source_item_id: string | null;

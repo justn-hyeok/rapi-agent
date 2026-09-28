@@ -17,7 +17,7 @@ try {
   if (code !== 0) throw new Error("Backup child failed");
 } catch {
   const file = process.env.BACKUP_STATUS_FILE ?? "backups/backup-status.json";
-  const previous = await readJson(file, {});
+  const previous = await readJson(file, {}).catch(() => ({}));
   await atomicJson(file, {
     ...previous,
     state: "failed",
