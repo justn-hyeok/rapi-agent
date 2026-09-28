@@ -68,9 +68,45 @@ export const discordCommandAliases = {
   작업: "task",
   승인: "approve",
   취소: "cancel",
+  데이터삭제: "privacy",
 } as const satisfies Record<string, DiscordCommand["name"]>;
 
 export const slashCommandDefinitions = [
+  {
+    name: "데이터삭제",
+    description: "라피가 보관하는 본인 정보 또는 관리 대상의 삭제를 요청합니다",
+    type: 1,
+    options: [
+      {
+        type: 1,
+        name: "요청",
+        description: "삭제 대상과 건수를 미리 확인합니다",
+        options: [
+          {
+            ...stringOption("종류", "삭제할 데이터 종류"),
+            choices: [
+              { name: "내 정보", value: "user" },
+              { name: "수집 항목 (소유자)", value: "item" },
+              { name: "수집원 (소유자)", value: "source" },
+            ],
+          },
+          stringOption("대상", "항목·수집원 UUID", false),
+        ],
+      },
+      {
+        type: 1,
+        name: "확정",
+        description: "미리 확인한 삭제 요청을 실행합니다",
+        options: [stringOption("요청id", "삭제 요청 UUID")],
+      },
+      {
+        type: 1,
+        name: "상태",
+        description: "본인 삭제 요청의 진행·백업 만료 상태를 확인합니다",
+        options: [stringOption("요청id", "삭제 요청 UUID")],
+      },
+    ],
+  },
   {
     name: "브리핑",
     description: "최근 24시간 브리핑을 만들어 보냅니다",
@@ -512,6 +548,8 @@ export function createDiscordInteractionServer(
         task_id: "taskId",
         message_ref: "messageRef",
         종류: "kind",
+        대상: "target",
+        요청id: "deletionId",
         목적지종류: "destinationKind",
         목적지: "destinationId",
         이벤트: "events",
@@ -540,6 +578,7 @@ export function createDiscordInteractionServer(
           commandName === "brief" ||
           commandName === "approve" ||
           commandName === "cancel" ||
+          commandName === "privacy" ||
           (commandName === "server_config" && options.action === "적용")) &&
         interaction.application_id &&
         interaction.token

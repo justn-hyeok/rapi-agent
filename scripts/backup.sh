@@ -12,6 +12,9 @@ fi
 mkdir -p "$backup_directory" "$(dirname "$backup_status_file")"
 DATABASE_URL=${DATABASE_URL:-postgresql://rapi:rapi-local-only@127.0.0.1:5432/rapi}
 export DATABASE_URL
+if [[ "${RAPI_BACKUP_LOCK_HELD:-}" != "1" ]]; then
+  exec node scripts/backup-with-lock.mjs
+fi
 
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 target="$backup_directory/rapi-$stamp.dump"

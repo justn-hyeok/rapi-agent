@@ -114,11 +114,11 @@ export async function expireSourceContent(
       [ids],
     );
     await client.query(
-      `UPDATE source_items SET title='[expired]', body='', author=NULL, canonical_url='', visibility='private', metadata=jsonb_build_object('retentionExpired',true,'expiredAt',$2::text), updated_at=$2::timestamptz WHERE id=ANY($1::uuid[])`,
+      `UPDATE source_items SET title='[expired]', body='', author=NULL, canonical_url='', metadata=jsonb_build_object('retentionExpired',true,'expiredAt',$2::text,'metadataRetentionDays',CASE WHEN visibility='public' THEN 365 ELSE 90 END),visibility='private',updated_at=$2::timestamptz WHERE id=ANY($1::uuid[])`,
       [ids, now.toISOString()],
     );
     await client.query(
-      `UPDATE raw_events SET payload=jsonb_build_object('retentionExpired',true,'expiredAt',$2::text), updated_at=$2::timestamptz WHERE id=ANY($1::uuid[])`,
+      `UPDATE raw_events re SET payload=jsonb_build_object('retentionExpired',true,'expiredAt',$2::text,'metadataRetentionDays',COALESCE((SELECT min((si.metadata->>'metadataRetentionDays')::int) FROM source_items si WHERE si.raw_event_id=re.id),(SELECT CASE WHEN collection_policy->>'visibility'='public' THEN 365 ELSE 90 END FROM sources WHERE id=re.source_id))), updated_at=$2::timestamptz WHERE id=ANY($1::uuid[])`,
       [raw.rows.map((row) => row.id), now.toISOString()],
     );
     await client.query("COMMIT");

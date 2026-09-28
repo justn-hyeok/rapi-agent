@@ -45,6 +45,7 @@ export async function switchRelease({
   services,
   driver,
   receiptPath,
+  schemaMigration,
 }) {
   if (
     !services.length ||
@@ -69,8 +70,18 @@ export async function switchRelease({
   const previous = await verifyRelease(previousPath);
   if (candidate.sha === previous.sha)
     throw new Error("Candidate is already current");
+  const added = candidate.migrations.filter(
+    (name) => !previous.migrations.includes(name),
+  );
+  const removed = previous.migrations.filter(
+    (name) => !candidate.migrations.includes(name),
+  );
   if (
-    JSON.stringify(previous.migrations) !== JSON.stringify(candidate.migrations)
+    JSON.stringify(previous.migrations) !==
+      JSON.stringify(candidate.migrations) &&
+    (!schemaMigration ||
+      removed.length ||
+      JSON.stringify(added) !== JSON.stringify(schemaMigration.namesAdded))
   )
     throw new Error(
       "Previous release schema compatibility has not been established",
@@ -91,6 +102,7 @@ export async function switchRelease({
   let active = [];
   let switched = false;
   let touched = false;
+  let migrationAttempted = false;
   const point = async (target) => {
     const temporary = join(
       dirname(currentPath),
@@ -125,6 +137,10 @@ export async function switchRelease({
     await driver.stop(active);
     await point(candidatePath);
     switched = true;
+    if (schemaMigration && added.length) {
+      migrationAttempted = true;
+      await schemaMigration.upgrade();
+    }
     await driver.start(active);
     await driver.ready(active, candidate.sha);
     receipt.status = "switched";
@@ -135,6 +151,7 @@ export async function switchRelease({
       try {
         // A failed start can leave a partial set running. Drain it before rollback.
         await driver.stop(active);
+        if (migrationAttempted) await schemaMigration.rollback();
         if (switched) await point(previousPath);
         await driver.start(active);
         await driver.ready(active, previous.sha);

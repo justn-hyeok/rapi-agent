@@ -18,4 +18,9 @@ export function switchRelease(options: {
   services: string[];
   receiptPath: string;
   driver: ServiceDriver;
+  schemaMigration?: {
+    namesAdded: string[];
+    upgrade(): Promise<void>;
+    rollback(): Promise<void>;
+  };
 }): Promise<{ status: string; rollback: string | null }>;

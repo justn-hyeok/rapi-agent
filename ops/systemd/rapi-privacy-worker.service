@@ -1,0 +1,21 @@
+[Unit]
+Description=Rapi confirmed deletion requests and backup tracking
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=justn
+WorkingDirectory=/home/justn/rapi-releases/current
+EnvironmentFile=/home/justn/rapi-agent/.env
+Environment=PRIVACY_STATUS_FILE=/var/lib/rapi/privacy-worker-status.json
+ExecStart=/usr/local/bin/node scripts/privacy-worker.mjs
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/rapi /home/justn/rapi-release-evidence /home/justn/rapi-agent/backups
+[Install]
+WantedBy=multi-user.target

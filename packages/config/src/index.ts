@@ -118,6 +118,12 @@ export const environmentSchema = z
     OMP_READY_URL: z.string().url().default("http://127.0.0.1:3200/ready"),
     BACKUP_STATUS_FILE: z.string().default("backups/backup-status.json"),
     SOURCE_EXPIRY_STATUS_FILE: z.string().optional(),
+    PRIVACY_STATUS_FILE: z.string().optional(),
+    PRIVACY_MAINTENANCE_STATUS_FILE: z.string().optional(),
+    PRIVACY_HMAC_KEY: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i)
+      .optional(),
     GITHUB_READ_TOKEN: z.string().min(1).optional(),
     POLL_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(300),
     DELIVERY_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(3600),
