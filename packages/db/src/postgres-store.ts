@@ -248,6 +248,14 @@ export class PostgresStore {
     summary: string,
   ): Promise<{ id: string; inserted: boolean }> {
     return this.transaction(async (client) => {
+      const raw = await client.query<{ expired: boolean }>(
+        "SELECT COALESCE(payload->>'retentionExpired'='true',false) AS expired FROM raw_events WHERE id=$1 FOR UPDATE",
+        [item.rawEventId],
+      );
+      if (raw.rows[0]?.expired)
+        throw new Error(
+          "Source content has expired; normalization is forbidden",
+        );
       const result = await client.query<{ id: string }>(
         `INSERT INTO source_items
           (id, raw_event_id, normalizer_version, canonical_url, title, body, author, published_at,
@@ -392,6 +400,7 @@ export class PostgresStore {
            COALESCE(array_agg(DISTINCT c.label) FILTER (WHERE c.label IS NOT NULL),'{}') AS categories
            FROM source_items si LEFT JOIN classifications c ON c.source_item_id=si.id
            WHERE si.collected_at >= $1 AND si.collected_at < $2
+             AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
            GROUP BY si.id ORDER BY COALESCE(si.published_at,si.collected_at) DESC`,
           [periodStart, periodEnd],
         );
@@ -452,7 +461,7 @@ export class PostgresStore {
        COALESCE((SELECT content FROM summaries WHERE si.id=ANY(evidence_item_ids) AND purpose='item' ORDER BY created_at DESC LIMIT 1),si.body) AS summary,
        COALESCE((SELECT array_agg(label ORDER BY label) FROM classifications WHERE source_item_id=si.id),'{}') AS categories
        FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
-       WHERE bi.batch_id=$1 ORDER BY bi.position`,
+       WHERE bi.batch_id=$1 AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true' ORDER BY bi.position`,
       [batchId],
     );
     return {
@@ -586,7 +595,8 @@ export class PostgresStore {
       url: string;
     }>(
       `SELECT id,title,canonical_url AS url FROM source_items
-       WHERE to_tsvector('simple',title || ' ' || body) @@ plainto_tsquery('simple',$1)
+       WHERE metadata->>'retentionExpired' IS DISTINCT FROM 'true'
+         AND to_tsvector('simple',title || ' ' || body) @@ plainto_tsquery('simple',$1)
        ORDER BY collected_at DESC LIMIT $2`,
       [query, limit],
     );

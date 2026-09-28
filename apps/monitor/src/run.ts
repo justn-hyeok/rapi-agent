@@ -137,19 +137,20 @@ function healthUrl(readyUrl: string): string {
   return url.toString();
 }
 
-async function checkBackup(): Promise<ComponentHealth> {
+async function checkBackup(
+  name = "backup",
+  file = config.BACKUP_STATUS_FILE,
+): Promise<ComponentHealth> {
   const checkedAt = new Date().toISOString();
   try {
-    const status = JSON.parse(
-      await readFile(config.BACKUP_STATUS_FILE, "utf8"),
-    ) as {
+    const status = JSON.parse(await readFile(file, "utf8")) as {
       state?: "success" | "failed";
       lastSuccessAt?: string;
       lastFailureAt?: string;
     };
     const assessment = assessBackupStatus(status, new Date(checkedAt));
     return {
-      name: "backup",
+      name,
       status: assessment.healthy ? "ok" : "failed",
       checkedAt,
       required: true,
@@ -160,7 +161,7 @@ async function checkBackup(): Promise<ComponentHealth> {
     };
   } catch {
     return {
-      name: "backup",
+      name,
       status: "failed",
       checkedAt,
       required: true,
@@ -281,6 +282,10 @@ async function check(): Promise<void> {
     ];
     if (config.PUBLIC_AGENT_ENABLED)
       checks.push(checkEndpoint("public_agent", config.PUBLIC_AGENT_READY_URL));
+    if (config.SOURCE_EXPIRY_STATUS_FILE)
+      checks.push(
+        checkBackup("source_expiry", config.SOURCE_EXPIRY_STATUS_FILE),
+      );
     if (config.RAPI_PUBLIC_BASE_URL) {
       checks.push(
         checkEndpoint("public_gateway", config.PUBLIC_GATEWAY_READY_URL),

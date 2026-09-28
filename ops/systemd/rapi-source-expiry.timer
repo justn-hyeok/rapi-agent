@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Rapi source-body expiry
+
+[Timer]
+OnCalendar=*-*-* 04:05:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

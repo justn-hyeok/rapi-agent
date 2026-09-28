@@ -50,11 +50,20 @@ Discord 발송 직후 GitHub 상태 기록이 실패하면 다음 시도에서 �
 수신자 식별자 축소 대상은 90일이다. 원문·주소·credential을 보고서에 넣지 않는다.
 공개 여부가 불명확한 raw envelope는 보수적으로 비공개 30일로 계산한다.
 
-이 inventory는 본문을 삭제하지 않는다. 실제 자동 삭제에는 원본과 연결된 게시물
-철회, 진행 중인 발송·작업 보호, 참조 무결성, 백업 만료까지의 삭제 요청 추적을
-포함한 별도 executor가 필요하다. 이 작업에서 그 구현이나 적용을 완료했다고
-주장하지 않는다. 만료 후보는 journal의 `rapi-retention-report.service`에서 확인한다.
+inventory 자체는 본문을 삭제하지 않는다. `v0.1.1`의 별도
+`rapi-source-expiry.service`가 매일 04:05 UTC에 원본 본문과 연결된 요약·분류를
+만료한다. 발송 중인 항목은 보류하고 완료된 공개 게시물은 함께 철회한다.
+철회 목록은 `/var/lib/rapi/blog-withdrawals.json`에 atomic rename으로 저장하고
+gateway가 게시물·목록·RSS에서 제외한다. DB commit보다 먼저 철회 상태를 적용해
+중단 시에도 만료 본문이 공개로 남지 않게 한다. 상태 파일 오류 시 공개 블로그는
+404로 닫히며 영속 파일은 이전 코드로 되돌려도 유지한다.
+
+실행은 최근 26시간 이내 성공한 실제 백업을 요구한다. 만료 작업의 실패나
+26시간 넘는 미실행은 monitor가 `source_expiry` 장애로 감지한다. 원문·credential은
+실행 보고서에 넣지 않는다. 1년 감사 메타데이터의 최종 제거, 수신자 축소와 사용자
+삭제 요청 추적은 아직 inventory 범위다. 전체 정책을 실행한 것으로 해석하지 않는다.
 
 운영 설치 대상은 `rapi-backup.service`, `rapi-retention-report.service`,
-`rapi-retention-report.timer`다. 서비스 설치 후 daemon-reload, timer enable,
+`rapi-retention-report.timer`, `rapi-source-expiry.service`, `rapi-source-expiry.timer`,
+gateway·monitor의 `20-source-expiry.conf`다. 서비스 설치 후 daemon-reload, timer enable,
 수동 최초 실행과 journal 확인을 실시한다.
