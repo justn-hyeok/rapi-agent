@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 prepare_only=false
 if [[ "${1:-}" == "--prepare-only" ]]; then prepare_only=true; fi
-codex_source="$(readlink -f "$(command -v codex)")"
+codex_source="$(node scripts/resolve-codex-binary.mjs "$(command -v codex)")"
 if [[ ! -x "$codex_source" ]]; then
   echo "Codex CLI를 찾지 못했습니다." >&2
   exit 1
@@ -21,6 +21,7 @@ fi
 "${root[@]}" install -d -o root -g root -m 0755 /opt/rapi-public-agent
 "${root[@]}" install -d -o rapi-public -g rapi -m 0700 /var/lib/rapi-public /var/lib/rapi-public/codex /var/lib/rapi-public/empty /var/lib/rapi-public/runtime
 "${root[@]}" install -o root -g root -m 0755 "$codex_source" /opt/rapi-public-agent/codex
+/opt/rapi-public-agent/codex --version
 "${root[@]}" install -o root -g root -m 0644 apps/public-agent/dist/run.js apps/public-agent/dist/executor.js /opt/rapi-public-agent/
 "${root[@]}" install -o root -g root -m 0644 ops/systemd/rapi-public-agent.service /etc/systemd/system/rapi-public-agent.service
 "${root[@]}" systemctl daemon-reload
