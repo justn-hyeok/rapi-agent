@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -257,12 +257,15 @@ export class SmtpDeliveryAdapter implements DeliveryAdapter {
       await command(`RCPT TO:<${safeHeader(target.recipientId)}>`, 250);
       await command("DATA", 354);
       const boundary = `rapi-${randomUUID()}`;
-      const messageId = `<${safeHeader(idempotencyKey)}@rapi-agent.local>`;
+      // Delivery keys contain colons and recipient addresses, which are not
+      // valid dot-atom Message-ID local parts. Keep correlation deterministic.
+      const messageId = `<${createHash("sha256").update(idempotencyKey).digest("hex")}@rapi-agent.local>`;
       const message = [
         `From: ${safeHeader(this.options.from)}`,
         `To: ${safeHeader(target.recipientId)}`,
         `Subject: ${safeHeader(payload.subject)}`,
         `Message-ID: ${messageId}`,
+        `Date: ${new Date().toUTCString()}`,
         "MIME-Version: 1.0",
         `Content-Type: multipart/alternative; boundary="${boundary}"`,
         "",

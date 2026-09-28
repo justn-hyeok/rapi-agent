@@ -42,6 +42,7 @@ test("SMTP terminates on silence/close and classifies accepted, rejected and unc
       "uncertain",
       "accepted",
     ] as const) {
+      let transmitted = "";
       const sockets = new Set<import("node:tls").TLSSocket>();
       const server = createServer(
         {
@@ -65,6 +66,7 @@ test("SMTP terminates on silence/close and classifies accepted, rejected and unc
             buffer += chunk.toString();
             if (data) {
               if (!buffer.includes("\r\n.\r\n")) return;
+              transmitted = buffer;
               if (mode === "uncertain") socket.destroy();
               else if (mode === "accepted") socket.end("250 accepted\r\n");
               else
@@ -122,15 +124,16 @@ test("SMTP terminates on silence/close and classifies accepted, rejected and unc
             html: "<p>hello</p>",
             itemIds: [],
           },
-          "test-batch",
+          "test-batch:email:recipient@example.invalid:briefing-v1",
         );
       try {
-        if (mode === "accepted")
-          assert.equal(
-            (await send()).providerId,
-            "<test-batch@rapi-agent.local>",
-          );
-        else if (mode === "uncertain")
+        if (mode === "accepted") {
+          const result = await send();
+          assert.match(result.providerId, /^<[a-f0-9]{64}@rapi-agent\.local>$/);
+          assert(transmitted.includes(`Message-ID: ${result.providerId}\r\n`));
+          const date = /^Date: (.*)\r?$/m.exec(transmitted)?.[1];
+          assert(date && Number.isFinite(new Date(date).getTime()));
+        } else if (mode === "uncertain")
           await assert.rejects(send(), UncertainDeliveryError);
         else if (mode === "permanent")
           await assert.rejects(send(), PermanentDeliveryError);
