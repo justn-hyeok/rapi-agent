@@ -1,5 +1,9 @@
 # Public community application — 2026-09-28
 
+Latest chat deployment is `9e20fa0`; the natural wake-phrase fix and the recovered
+real Discord reply are recorded in `chat-invocation-fix-20260928.md`. The detailed
+release snapshot below records the preceding `948b40d` deployment.
+
 The owner authorized candidate commits, server deployment and community
 configuration in this session. This receipt supersedes the pending operational
 state in `completion-resume-20260928.md`; its earlier verification remains a
