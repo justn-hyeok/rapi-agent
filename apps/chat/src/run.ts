@@ -9,7 +9,11 @@ import {
   splitDiscordMessage,
   summarizeReadiness,
 } from "@rapi/core";
-import { discordChatMessageSchema, redactChat } from "@rapi/contracts";
+import {
+  discordChatMessageSchema,
+  parseRapiInvocation,
+  redactChat,
+} from "@rapi/contracts";
 import { PostgresStore, ChatOpsStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
@@ -163,7 +167,7 @@ async function enqueue(raw: unknown): Promise<void> {
   if (
     message.author.bot ||
     !message.guild_id ||
-    !message.content.trimStart().startsWith("라피야!") ||
+    parseRapiInvocation(message.content) === null ||
     !(await store.chatChannelEnabled(message.guild_id, message.channel_id))
   )
     return;

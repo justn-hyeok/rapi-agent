@@ -49,6 +49,17 @@ export const discordChatMessageSchema = z.object({
     .optional(),
 });
 export type DiscordChatMessage = z.infer<typeof discordChatMessageSchema>;
+
+export function parseRapiInvocation(content: string): string | null {
+  const text = content.trimStart();
+  const wake = /^라피(?:야)?(?=$|[\s!！?,，:：.。~～])/.exec(text);
+  if (!wake) return null;
+  return text
+    .slice(wake[0].length)
+    .trimStart()
+    .replace(/^[!！?,，:：.。~～]+\s*/, "")
+    .trim();
+}
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const gitObservationSchema = z
   .object({

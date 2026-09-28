@@ -1,6 +1,7 @@
 import { assertDiscordLevel, type DiscordAccessLevel } from "@rapi/core";
 import {
   parseModelDirective,
+  parseRapiInvocation,
   redactChat,
   type ChatRoute,
   type ChatScope,
@@ -129,9 +130,16 @@ export class ChatOrchestrator {
       channel: message.channel_id,
       owner: message.author.id,
     };
-    const rawText = redactChat(
-      message.content.trimStart().replace(/^라피야!\s*/, ""),
-    ).slice(0, 20000);
+    const request = parseRapiInvocation(message.content);
+    if (request === null) return;
+    if (!request) {
+      await this.reply(
+        scope.channel,
+        "무엇을 도와드릴까요? 질문을 함께 보내주세요.",
+      );
+      return;
+    }
+    const rawText = redactChat(request).slice(0, 20000);
     const selection = parseModelDirective(rawText);
     const text = selection.task;
     const route = routeIntent(text);
