@@ -1,0 +1,57 @@
+{
+  "checkedAt": "2026-09-28T01:35:16.518Z",
+  "guild": "1545832299671847013",
+  "planId": "2c3daaf7-d4d0-48ff-8b25-3c8064c64e43",
+  "actions": [
+    {
+      "kind": "create_role",
+      "key": "rapi_user"
+    },
+    {
+      "kind": "create_category",
+      "key": "getting_started"
+    },
+    {
+      "kind": "create_category",
+      "key": "rapi"
+    },
+    {
+      "kind": "create_category",
+      "key": "operations"
+    },
+    {
+      "kind": "create_channel",
+      "key": "roles",
+      "parentKey": "getting_started"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_questions",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_briefing",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_help",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_admin",
+      "parentKey": "operations"
+    },
+    {
+      "kind": "create_channel",
+      "key": "operations_alerts",
+      "parentKey": "operations"
+    }
+  ],
+  "existingChannels": 12,
+  "afterChannels": 21,
+  "allExistingPreserved": true,
+  "result": "서버 구성을 적용했습니다: 역할 생성 1 · 카테고리 생성 3 · 채널 생성 6"
+}

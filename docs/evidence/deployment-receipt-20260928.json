@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-09-28T01:45:04.777Z",
+  "sha": "6a5e22b451666928f915f025a2fb11bf09b41e94",
+  "tree": "e75a889f5b1da7e014a5f9185004ff3c431309b2",
+  "origin": "https://rapi-07ab7899e00f.justn.me",
+  "states": {
+    "bot": {
+      "status": 200,
+      "ready": true,
+      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+    },
+    "chat": {
+      "status": 200,
+      "ready": true,
+      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+    },
+    "omp": {
+      "status": 200,
+      "ready": true,
+      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+    },
+    "monitor": {
+      "status": 200,
+      "ready": true,
+      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94",
+      "probe": "health",
+      "dependencyReadiness": {
+        "status": 503,
+        "ready": false,
+        "failedRequired": [
+          {
+            "name": "worker",
+            "status": "failed",
+            "reason": "endpoint unavailable"
+          }
+        ]
+      }
+    },
+    "publicAgent": {
+      "status": 200,
+      "ready": true,
+      "revision": null
+    },
+    "gateway": {
+      "status": 200,
+      "ready": true,
+      "revision": "6a5e22b451666928f915f025a2fb11bf09b41e94"
+    },
+    "tunnel": {
+      "status": 200,
+      "ready": true,
+      "revision": null,
+      "connections": 4
+    }
+  },
+  "existingGuildResourcesPreserved": true,
+  "publicModel": "gpt-5.6-luna",
+  "publicQuestionServiceVerified": true,
+  "workerIntentionallyInactive": true,
+  "githubPushed": false,
+  "humanQaVerified": false,
+  "commandCount": 16
+}
