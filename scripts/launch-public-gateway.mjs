@@ -7,6 +7,7 @@ import { join } from "node:path";
 const release = await realpath(
   process.env.RAPI_CURRENT_RELEASE ?? "/home/justn/rapi-releases/current",
 );
+process.stdout.write(`${JSON.stringify({ gatewayRelease: release })}\n`);
 await import(
   pathToFileURL(join(release, "scripts/check-withdrawal-support.mjs")).href
 );

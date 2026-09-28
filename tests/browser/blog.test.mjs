@@ -15,18 +15,23 @@ test(
     const directory = await mkdtemp(join(tmpdir(), "rapi-blog-withdrawal-"));
     const withdrawalsFile = join(directory, "withdrawals.json");
     await writeFile(withdrawalsFile, JSON.stringify({ version: 1, slugs: [] }));
-    const gateway = spawn(process.execPath, ["ops/gateway/run.mjs"], {
-      env: {
-        PATH: process.env.PATH,
-        RAPI_GATEWAY_PORT: "0",
-        RAPI_GATEWAY_HEALTH_PORT: "0",
-        PORT: "1",
-        RAPI_PUBLIC_BASE_URL: "https://rotated.example",
-        RAPI_BLOG_WITHDRAWALS_FILE: withdrawalsFile,
-        RAPI_BLOG_WITHDRAWALS_REQUIRED: "true",
+    const gateway = spawn(
+      process.execPath,
+      ["scripts/launch-public-gateway.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          RAPI_CURRENT_RELEASE: process.cwd(),
+          RAPI_GATEWAY_PORT: "0",
+          RAPI_GATEWAY_HEALTH_PORT: "0",
+          PORT: "1",
+          RAPI_PUBLIC_BASE_URL: "https://rotated.example",
+          RAPI_BLOG_WITHDRAWALS_FILE: withdrawalsFile,
+          RAPI_BLOG_WITHDRAWALS_REQUIRED: "true",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
     let browser;
     try {
       const origin = await new Promise((resolve, reject) => {
