@@ -1496,7 +1496,7 @@ export class PostgresStore {
         !target.event_filters.includes(input.eventType)
       )
         throw new Error("Webhook event type is not allowed");
-      if (target?.source_id) {
+      if (target.source_id) {
         const source = await client.query<{ state: string }>(
           "SELECT state FROM sources WHERE id=$1 FOR UPDATE",
           [target.source_id],
