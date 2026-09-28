@@ -117,7 +117,7 @@ export async function adoptRelease({
       }
     }
     throw new Error(
-      `Initial adoption failed; rollback ${receipt.rollback ?? "not needed"}`,
+      `Initial adoption failed; rollback ${receipt.rollback ?? "not needed"}: ${receipt.error}`,
       { cause: error },
     );
   } finally {
