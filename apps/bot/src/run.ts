@@ -203,8 +203,8 @@ const commands = new DiscordCommandService(
         const usage = await store.aiUsageStatus(guildId, userId);
         return [
           tier === "staff"
-            ? "내 Spark 사용량: 운영진 무제한"
-            : `내 Spark 사용량: ${usage.used}회 · 남음 ${usage.remaining}회`,
+            ? "내 AI 사용량: 운영진 무제한"
+            : `내 AI 사용량: ${usage.used}회 · 남음 ${usage.remaining}회`,
           `서버 전체: ${usage.globalUsed}회 · 남음 ${usage.globalRemaining}회`,
           `초기화: ${usage.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (Asia/Seoul)`,
         ].join("\n");
@@ -226,7 +226,7 @@ const commands = new DiscordCommandService(
           guildId,
           updatedBy: actorId,
         });
-        return "Spark 사용 정책을 변경했습니다.";
+        return "AI 사용 정책을 변경했습니다.";
       },
     },
     serverConfig: {

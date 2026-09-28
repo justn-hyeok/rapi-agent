@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-export const PUBLIC_CODEX_MODEL = "gpt-5.3-codex-spark";
+export const PUBLIC_CODEX_MODEL = "gpt-5.6-luna";
 // Includes the fixed policy prompt and bounded public-feed context. User input is capped at 4,000.
 export const PUBLIC_PROMPT_LIMIT = 16_000;
 export const PUBLIC_OUTPUT_LIMIT = 6_000;

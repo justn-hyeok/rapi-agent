@@ -37,7 +37,7 @@ export class PublicCommunityService {
       requestId: input.requestId,
       tier: input.tier,
       requestDigest: createHash("sha256").update(input.text).digest("hex"),
-      model: "gpt-5.3-codex-spark",
+      model: "gpt-5.6-luna",
     });
     if (reservation.duplicate) return undefined;
     if (!reservation.accepted) {
@@ -45,7 +45,7 @@ export class PublicCommunityService {
         return `쿨다운 중입니다. ${reservation.retryAt?.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul" }) ?? "잠시 후"} 다시 시도해주세요.`;
       if (reservation.reason === "concurrency")
         return "현재 라피 질문 두 건을 처리 중입니다. 잠시 후 다시 시도해주세요.";
-      return `오늘의 Spark 사용 한도에 도달했습니다. ${reservation.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}에 초기화됩니다.`;
+      return `오늘의 AI 사용 한도에 도달했습니다. ${reservation.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}에 초기화됩니다.`;
     }
     try {
       const feedContext =

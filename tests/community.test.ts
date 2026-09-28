@@ -48,7 +48,7 @@ describe("community usage policy", () => {
 });
 
 describe("public Codex executor", () => {
-  it("pins Spark, web search and a tool-free ephemeral session", () => {
+  it("pins the supported public model, web search and a tool-free ephemeral session", () => {
     const command = buildPublicCodexCommand("/var/empty", "/tmp/answer.txt");
     assert.equal(command.command, "/usr/local/bin/codex");
     assert.deepEqual(command.args.slice(0, 5), [
@@ -58,7 +58,7 @@ describe("public Codex executor", () => {
       "exec",
       "--strict-config",
     ]);
-    assert.ok(command.args.includes("gpt-5.3-codex-spark"));
+    assert.ok(command.args.includes("gpt-5.6-luna"));
     assert.ok(command.args.includes("--search"));
     assert.deepEqual(
       [
