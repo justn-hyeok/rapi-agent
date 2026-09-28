@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Rapi retention policy inventory
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

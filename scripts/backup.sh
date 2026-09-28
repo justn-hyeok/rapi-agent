@@ -4,7 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 backup_directory=${RAPI_BACKUP_DIRECTORY:-backups}
 backup_status_file=${BACKUP_STATUS_FILE:-backups/backup-status.json}
-backup_retention=${BACKUP_RETENTION_COUNT:-7}
+backup_retention_days=${BACKUP_RETENTION_DAYS:-30}
+if [[ ! "$backup_retention_days" =~ ^[1-9][0-9]*$ ]] || (( backup_retention_days > 3650 )); then
+  echo "BACKUP_RETENTION_DAYS must be between 1 and 3650." >&2
+  exit 2
+fi
 mkdir -p "$backup_directory" "$(dirname "$backup_status_file")"
 DATABASE_URL=${DATABASE_URL:-postgresql://rapi:rapi-local-only@127.0.0.1:5432/rapi}
 export DATABASE_URL
@@ -56,9 +60,5 @@ printf '{"state":"success","lastSuccessAt":"%s","file":"%s"}\n' "$successful_at"
 chmod 600 "$status_temporary"
 mv "$status_temporary" "$backup_status_file"
 trap - ERR
-find "$backup_directory" -maxdepth 1 -type f -name 'rapi-*.dump' -printf '%T@ %p\n' \
-  | sort -rn \
-  | tail -n "+$((backup_retention + 1))" \
-  | cut -d' ' -f2- \
-  | xargs -r rm --
+BACKUP_RETENTION_DAYS="$backup_retention_days" node scripts/prune-backups.mjs "$backup_directory"
 echo "$target"

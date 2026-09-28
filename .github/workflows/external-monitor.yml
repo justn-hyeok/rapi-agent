@@ -1,0 +1,33 @@
+name: External monitor
+on:
+  schedule:
+    - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Production probe or isolated alert self-test
+        type: choice
+        default: normal
+        options: [normal, self-test-fail, self-test-recover]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: rapi-external-monitor
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/external-monitor.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RAPI_MONITOR_ALERT_WEBHOOK_URL: ${{ secrets.RAPI_MONITOR_ALERT_WEBHOOK_URL }}
+          RAPI_MONITOR_ORIGIN: ${{ vars.RAPI_MONITOR_ORIGIN }}
+          RAPI_MONITOR_MODE: ${{ inputs.mode || 'normal' }}

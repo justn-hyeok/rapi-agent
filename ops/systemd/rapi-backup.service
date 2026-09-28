@@ -6,9 +6,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=justn
-WorkingDirectory=/home/justn/rapi-agent
+WorkingDirectory=/home/justn/rapi-releases/current
 EnvironmentFile=/home/justn/rapi-agent/.env
-ExecStart=/home/justn/rapi-agent/scripts/backup.sh
+Environment=RAPI_BACKUP_DIRECTORY=/home/justn/rapi-agent/backups
+Environment=BACKUP_STATUS_FILE=/home/justn/rapi-agent/backups/backup-status.json
+Environment=BACKUP_RETENTION_DAYS=30
+ExecStart=/bin/bash /home/justn/rapi-releases/current/scripts/backup.sh
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

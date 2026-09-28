@@ -1,0 +1,16 @@
+[Unit]
+Description=Read-only Rapi data retention inventory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=justn
+WorkingDirectory=/home/justn/rapi-releases/current
+EnvironmentFile=/home/justn/rapi-agent/.env
+ExecStart=/usr/local/bin/node scripts/retention-report.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
