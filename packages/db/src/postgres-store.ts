@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import type {
   BriefingItem,
@@ -13,6 +13,7 @@ import { usageWindow } from "@rapi/core";
 interface RawEventResult {
   id: string;
   inserted: boolean;
+  retired?: boolean;
 }
 
 interface DeliveryAttemptResult {
@@ -89,6 +90,7 @@ export interface DiscordLayoutPlanRecord {
 
 export class PostgresStore {
   readonly pool: Pool;
+  private readonly privacyKey: string | undefined;
 
   constructor(
     connectionString: string,
@@ -96,8 +98,10 @@ export class PostgresStore {
       max?: number;
       connectionTimeoutMs?: number;
       queryTimeoutMs?: number;
+      privacyHmacKey?: string;
     } = {},
   ) {
+    this.privacyKey = options.privacyHmacKey ?? process.env.PRIVACY_HMAC_KEY;
     this.pool = new Pool({
       connectionString,
       max: options.max ?? 5,
@@ -132,7 +136,7 @@ export class PostgresStore {
     if (!database.rows[0]?.name.endsWith("_test"))
       throw new Error("Refusing to reset a database without an _test suffix");
     await this.pool
-      .query(`TRUNCATE chatops_memory_events, chatops_memory, chatops_events, chatops_runs,
+      .query(`TRUNCATE privacy_requests,privacy_event_tombstones,chatops_memory_events, chatops_memory, chatops_events, chatops_runs,
       chat_messages, chat_channels, callback_events, execution_attempts, approvals, task_revisions,
       task_requests, mdx_publications, delivery_attempts, delivery_batch_items, delivery_batches,
       discord_layout_plans, discord_managed_resources, ai_usage_events, ai_usage_policies,
@@ -172,29 +176,53 @@ export class PostgresStore {
     payload: unknown,
     collectedAt: Date,
   ): Promise<RawEventResult> {
-    const id = randomUUID();
-    const inserted = await this.pool.query<{ id: string }>(
-      `INSERT INTO raw_events (id, source_id, external_event_id, canonical_payload_hash, payload, collected_at)
+    return this.transaction(async (client) => {
+      const source = await client.query<{ state: string }>(
+        "SELECT state FROM sources WHERE id=$1 FOR UPDATE",
+        [sourceId],
+      );
+      if (!source.rows[0] || source.rows[0].state !== "active")
+        throw new Error("Source is unavailable");
+      const id = randomUUID();
+      if (this.privacyKey) {
+        const ref = `hmac:v1:${createHmac(
+          "sha256",
+          Buffer.from(this.privacyKey, "hex"),
+        )
+          .update(
+            `event\0${externalId === null ? `hash:${checksum}` : `id:${externalId}`}`,
+          )
+          .digest("hex")}`;
+        const retired = await client.query<{ raw_id: string }>(
+          "SELECT raw_id FROM privacy_event_tombstones WHERE source_id=$1 AND event_ref=$2",
+          [sourceId, ref],
+        );
+        if (retired.rows[0])
+          return { id: retired.rows[0].raw_id, inserted: false, retired: true };
+      }
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO raw_events (id, source_id, external_event_id, canonical_payload_hash, payload, collected_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
        ON CONFLICT DO NOTHING RETURNING id`,
-      [
-        id,
-        sourceId,
-        externalId,
-        checksum,
-        JSON.stringify(payload),
-        collectedAt,
-      ],
-    );
-    if (inserted.rows[0]) return { id: inserted.rows[0].id, inserted: true };
-    const existing = await this.pool.query<{ id: string }>(
-      `SELECT id FROM raw_events WHERE source_id = $1 AND
+        [
+          id,
+          sourceId,
+          externalId,
+          checksum,
+          JSON.stringify(payload),
+          collectedAt,
+        ],
+      );
+      if (inserted.rows[0]) return { id: inserted.rows[0].id, inserted: true };
+      const existing = await client.query<{ id: string }>(
+        `SELECT id FROM raw_events WHERE source_id = $1 AND
        (($2::text IS NOT NULL AND external_event_id = $2) OR ($2::text IS NULL AND canonical_payload_hash = $3))`,
-      [sourceId, externalId, checksum],
-    );
-    if (!existing.rows[0])
-      throw new Error("Conflicting raw event could not be resolved");
-    return { id: existing.rows[0].id, inserted: false };
+        [sourceId, externalId, checksum],
+      );
+      if (!existing.rows[0])
+        throw new Error("Conflicting raw event could not be resolved");
+      return { id: existing.rows[0].id, inserted: false };
+    });
   }
 
   async saveCursor(
@@ -497,41 +525,57 @@ export class PostgresStore {
     target: DeliveryTarget,
     rendererVersion: string,
   ): Promise<DeliveryAttemptResult> {
-    const key = `${batchId}:${target.channel}:${target.recipientId}:${rendererVersion}`;
-    const id = randomUUID();
-    await this.pool.query(
-      `INSERT INTO delivery_attempts (id,batch_id,channel,recipient_id,renderer_version,idempotency_key,status,attempt_count)
+    return this.transaction(async (client) => {
+      await client.query(
+        "SELECT id FROM delivery_batches WHERE id=$1 FOR UPDATE",
+        [batchId],
+      );
+      const retired = await client.query<{ id: string; attempt_count: number }>(
+        "SELECT id,attempt_count FROM delivery_attempts WHERE batch_id=$1 AND anonymized_at IS NOT NULL LIMIT 1",
+        [batchId],
+      );
+      if (retired.rows[0])
+        return {
+          id: retired.rows[0].id,
+          skip: true,
+          attempts: retired.rows[0].attempt_count,
+        };
+      const key = `${batchId}:${target.channel}:${target.recipientId}:${rendererVersion}`;
+      const id = randomUUID();
+      await client.query(
+        `INSERT INTO delivery_attempts (id,batch_id,channel,recipient_id,renderer_version,idempotency_key,status,attempt_count)
        VALUES ($1,$2,$3,$4,$5,$6,'pending',0) ON CONFLICT (idempotency_key) DO NOTHING`,
-      [id, batchId, target.channel, target.recipientId, rendererVersion, key],
-    );
-    const claimed = await this.pool.query<{
-      id: string;
-      attempt_count: number;
-    }>(
-      `UPDATE delivery_attempts
+        [id, batchId, target.channel, target.recipientId, rendererVersion, key],
+      );
+      const claimed = await client.query<{
+        id: string;
+        attempt_count: number;
+      }>(
+        `UPDATE delivery_attempts
        SET lease_expires_at=now()+interval '5 minutes',attempt_count=attempt_count+1,updated_at=now()
        WHERE idempotency_key=$1
          AND status NOT IN ('success','permanent_failure','uncertain')
          AND (lease_expires_at IS NULL OR lease_expires_at<=now())
        RETURNING id,attempt_count`,
-      [key],
-    );
-    if (claimed.rows[0]) {
-      return {
-        id: claimed.rows[0].id,
-        skip: false,
-        attempts: claimed.rows[0].attempt_count,
-      };
-    }
-    const existing = await this.pool.query<{
-      id: string;
-      attempt_count: number;
-    }>(
-      "SELECT id,attempt_count FROM delivery_attempts WHERE idempotency_key=$1",
-      [key],
-    );
-    const row = existing.rows[0]!;
-    return { id: row.id, skip: true, attempts: row.attempt_count };
+        [key],
+      );
+      if (claimed.rows[0]) {
+        return {
+          id: claimed.rows[0].id,
+          skip: false,
+          attempts: claimed.rows[0].attempt_count,
+        };
+      }
+      const existing = await client.query<{
+        id: string;
+        attempt_count: number;
+      }>(
+        "SELECT id,attempt_count FROM delivery_attempts WHERE idempotency_key=$1",
+        [key],
+      );
+      const row = existing.rows[0]!;
+      return { id: row.id, skip: true, attempts: row.attempt_count };
+    });
   }
 
   async finishDelivery(
@@ -1996,11 +2040,12 @@ export class PostgresStore {
     authorId: string;
     role: "user" | "assistant";
     content: string;
+    replyOwnerId?: string;
   }): Promise<boolean> {
     const result = await this.pool.query(
       `INSERT INTO chat_messages
-       (id,guild_id,channel_id,discord_message_id,author_id,role,content)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (discord_message_id) DO NOTHING`,
+       (id,guild_id,channel_id,discord_message_id,author_id,role,content,reply_owner_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (discord_message_id) DO NOTHING`,
       [
         randomUUID(),
         input.guildId,
@@ -2009,6 +2054,7 @@ export class PostgresStore {
         input.authorId,
         input.role,
         input.content.slice(0, 20_000),
+        input.replyOwnerId ?? null,
       ],
     );
     return (result.rowCount ?? 0) > 0;

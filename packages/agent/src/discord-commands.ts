@@ -27,6 +27,7 @@ export const slashCommands = [
   "task",
   "approve",
   "cancel",
+  "privacy",
 ] as const;
 
 export interface DiscordCommand {
@@ -95,6 +96,11 @@ export class DiscordCommandService {
     private readonly allowlists: DiscordAllowlists,
     private readonly operations?: {
       status: () => Promise<string>;
+      privacy?: (
+        identity: DiscordIdentity,
+        options: Record<string, unknown>,
+        level: DiscordAccessLevel,
+      ) => Promise<DiscordCommandResult>;
       usage?: {
         status(
           guildId: string,
@@ -168,6 +174,16 @@ export class DiscordCommandService {
     assertDiscordLevel(level, requiredCommandAccess(command.name));
     const ownerId = identity.userId;
     switch (command.name) {
+      case "privacy": {
+        if (!this.operations?.privacy)
+          throw new Error("개인정보 정리 기능이 연결되지 않았습니다.");
+        if (
+          command.options.action === "요청" &&
+          (command.options.kind ?? "user") !== "user"
+        )
+          assertDiscordLevel(level, "superadmin");
+        return this.operations.privacy(identity, command.options, level);
+      }
       case "subscribe": {
         const supplied = command.options.subscription as
           | SubscriptionInput

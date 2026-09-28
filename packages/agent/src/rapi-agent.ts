@@ -64,6 +64,7 @@ export class RapiAgent {
       payload,
       collectedAt,
     );
+    if (raw.retired) return { itemId: raw.id, inserted: false };
     const visibility = await this.store.sourceVisibility(sourceId);
     const normalized = {
       id: randomUUID(),

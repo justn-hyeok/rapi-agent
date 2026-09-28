@@ -488,6 +488,7 @@ export class ChatOrchestrator {
               guildId: active.scope.guild,
               channelId: active.scope.channel,
               authorId: "rapi",
+              replyOwnerId: active.scope.owner,
               role: "assistant",
               content: redactChat(result.output),
             });

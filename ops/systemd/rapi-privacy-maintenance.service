@@ -1,0 +1,16 @@
+[Unit]
+Description=Rapi metadata retention and recipient pseudonymization
+After=network-online.target rapi-backup.service
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=justn
+WorkingDirectory=/home/justn/rapi-releases/current
+EnvironmentFile=/home/justn/rapi-agent/.env
+ExecStart=/usr/local/bin/node scripts/privacy-worker.mjs --maintenance
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/rapi /home/justn/rapi-agent/backups /home/justn/rapi-release-evidence

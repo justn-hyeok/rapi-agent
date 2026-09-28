@@ -30,6 +30,7 @@ import {
   registerSlashCommands,
 } from "./discord-http.js";
 import { readFile } from "node:fs/promises";
+import { executePrivacyCommand } from "../../../scripts/privacy-command.mjs";
 
 class DisabledDeliveryAdapter implements DeliveryAdapter {
   constructor(private readonly reason: string) {}
@@ -154,6 +155,14 @@ const commands = new DiscordCommandService(
       : {}),
   },
   {
+    privacy: async (identity, options, level) =>
+      executePrivacyCommand(
+        identity,
+        options,
+        level,
+        config.PRIVACY_HMAC_KEY ?? "",
+        config.DATABASE_URL,
+      ),
     status: async () => {
       try {
         const monitor = JSON.parse(
