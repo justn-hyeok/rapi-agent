@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   assessBackupStatus,
   createLocalHealthServer,
+  decideHealthAlert,
   HealthTransitionTracker,
   summarizeReadiness,
   type ComponentHealth,
@@ -58,6 +59,56 @@ describe("operational health", () => {
     const tracker = new HealthTransitionTracker(3, 2);
     assert.equal(tracker.observe("bot", true), undefined);
     assert.equal(tracker.observe("bot", true), undefined);
+  });
+
+  it("supports longer per-component failure thresholds", () => {
+    const tracker = new HealthTransitionTracker(3, 2, {
+      chat: { failureThreshold: 4 },
+      omp: { failureThreshold: 1 },
+    });
+    assert.equal(tracker.observe("chat", false), undefined);
+    assert.equal(tracker.observe("chat", false), undefined);
+    assert.equal(tracker.observe("chat", false), undefined);
+    assert.equal(tracker.observe("chat", false), "down");
+    assert.equal(tracker.observe("omp", false), "down");
+  });
+
+  it("only reports recovery for a notified incident and cools down repeats", () => {
+    const started = new Date("2026-09-10T10:00:00Z");
+    const down = decideHealthAlert("down", undefined, started);
+    assert.equal(down.notify, true);
+    assert.equal(down.state.active, true);
+
+    const recovered = decideHealthAlert(
+      "recovered",
+      down.state,
+      new Date("2026-09-10T10:05:00Z"),
+    );
+    assert.equal(recovered.notify, true);
+    assert.equal(recovered.state.active, false);
+
+    const repeated = decideHealthAlert(
+      "down",
+      recovered.state,
+      new Date("2026-09-10T10:30:00Z"),
+    );
+    assert.equal(repeated.notify, false);
+    assert.equal(
+      decideHealthAlert(
+        "recovered",
+        repeated.state,
+        new Date("2026-09-10T10:35:00Z"),
+      ).notify,
+      false,
+    );
+    assert.equal(
+      decideHealthAlert(
+        "down",
+        repeated.state,
+        new Date("2026-09-10T11:00:00Z"),
+      ).notify,
+      true,
+    );
   });
 
   it("marks failed and stale required components unavailable", () => {

@@ -74,6 +74,50 @@ export function summarizeReadiness(
 
 export type HealthTransition = "down" | "recovered";
 
+export interface HealthTransitionThresholds {
+  failureThreshold?: number;
+  recoveryThreshold?: number;
+}
+
+export interface HealthAlertState {
+  active: boolean;
+  lastDownAlertAt?: string;
+}
+
+export interface HealthAlertDecision {
+  notify: boolean;
+  state: HealthAlertState;
+}
+
+export function decideHealthAlert(
+  transition: HealthTransition,
+  previous: HealthAlertState | undefined,
+  now: Date,
+  cooldownMs = 60 * 60_000,
+): HealthAlertDecision {
+  const state = previous ?? { active: false };
+  if (transition === "recovered")
+    return state.active
+      ? { notify: true, state: { ...state, active: false } }
+      : { notify: false, state };
+
+  if (state.active) return { notify: false, state };
+  const lastDownAlert = state.lastDownAlertAt
+    ? new Date(state.lastDownAlertAt)
+    : undefined;
+  if (
+    lastDownAlert &&
+    Number.isFinite(lastDownAlert.getTime()) &&
+    now.getTime() - lastDownAlert.getTime() < cooldownMs
+  )
+    return { notify: false, state };
+
+  return {
+    notify: true,
+    state: { active: true, lastDownAlertAt: now.toISOString() },
+  };
+}
+
 interface TransitionState {
   state: "initial" | "up" | "down";
   failures: number;
@@ -86,9 +130,17 @@ export class HealthTransitionTracker {
   constructor(
     private readonly failureThreshold = 3,
     private readonly recoveryThreshold = 2,
+    private readonly thresholds: Record<
+      string,
+      HealthTransitionThresholds
+    > = {},
   ) {}
 
   observe(name: string, healthy: boolean): HealthTransition | undefined {
+    const failureThreshold =
+      this.thresholds[name]?.failureThreshold ?? this.failureThreshold;
+    const recoveryThreshold =
+      this.thresholds[name]?.recoveryThreshold ?? this.recoveryThreshold;
     const current = this.components.get(name) ?? {
       state: "initial" as const,
       failures: 0,
@@ -102,7 +154,7 @@ export class HealthTransitionTracker {
         current.successes = 0;
       } else if (
         current.state === "down" &&
-        current.successes >= this.recoveryThreshold
+        current.successes >= recoveryThreshold
       ) {
         current.state = "up";
         current.successes = 0;
@@ -112,10 +164,7 @@ export class HealthTransitionTracker {
     } else {
       current.successes = 0;
       current.failures += 1;
-      if (
-        current.state !== "down" &&
-        current.failures >= this.failureThreshold
-      ) {
+      if (current.state !== "down" && current.failures >= failureThreshold) {
         current.state = "down";
         current.failures = 0;
         this.components.set(name, current);
