@@ -18,6 +18,7 @@ import { PostgresStore, ChatOpsStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
 import { establishesGatewaySession } from "./gateway-state.js";
+import { DiscordTyping } from "./typing.js";
 
 const config = loadEnvironment();
 const discordAccess = {
@@ -94,6 +95,12 @@ const chat = new ChatOrchestrator(
       });
     },
   },
+  new DiscordTyping(async (channel, signal) => {
+    await discordRequest(`/channels/${channel}/typing`, {
+      method: "POST",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+    });
+  }),
 );
 lease.on("error", () => {
   void chat.shutdown().finally(() => process.exit(1));
@@ -108,7 +115,7 @@ async function discordRequest(
   headers.set("content-type", "application/json");
   const response = await fetch(`https://discord.com/api/v10${route}`, {
     ...init,
-    signal: AbortSignal.timeout(10000),
+    signal: init.signal ?? AbortSignal.timeout(10000),
     headers,
   });
   if (!response.ok) throw new Error(`Discord API returned ${response.status}`);

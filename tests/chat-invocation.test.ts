@@ -4,6 +4,7 @@ import { parseRapiInvocation } from "@rapi/contracts";
 import type { ChatOpsStore } from "@rapi/db";
 import { ChatOrchestrator } from "../apps/chat/src/orchestrator.js";
 import type { Executor } from "../apps/chat/src/executor.js";
+import { DiscordTyping } from "../apps/chat/src/typing.js";
 
 test("ordinary ways of addressing Rapi are accepted without matching unrelated words", () => {
   for (const text of [
@@ -28,6 +29,7 @@ test("ordinary ways of addressing Rapi are accepted without matching unrelated w
 test("the reported 라피! message reaches the public responder and replies once", async () => {
   const inputs: string[] = [];
   const replies: string[] = [];
+  const typingSignals: AbortSignal[] = [];
   const chat = new ChatOrchestrator(
     {} as ChatOpsStore,
     {} as Executor,
@@ -39,12 +41,18 @@ test("the reported 라피! message reaches the public responder and replies once
         return false;
       },
       async answer(input) {
+        assert.equal(typingSignals.length, 1);
+        assert.equal(typingSignals[0]!.aborted, false);
         inputs.push(input.text);
         assert.equal(input.requestId, "1553952792266416280");
         assert.equal(input.tier, "user");
         return "확인한 뉴스입니다.";
       },
     },
+    new DiscordTyping(async (channel, signal) => {
+      assert.equal(channel, "1553943104950636544");
+      typingSignals.push(signal);
+    }),
   );
   await chat.receive(
     {
@@ -58,4 +66,5 @@ test("the reported 라피! message reaches the public responder and replies once
   );
   assert.deepEqual(inputs, ["오늘 주요 ai 뉴스 찾아줘"]);
   assert.deepEqual(replies, ["확인한 뉴스입니다."]);
+  assert.equal(typingSignals[0]!.aborted, true);
 });

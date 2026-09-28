@@ -13,6 +13,7 @@ import {
 import { ChatOpsStore } from "@rapi/db";
 import { routeIntent } from "./router.js";
 import type { Executor, ProcessResult } from "./executor.js";
+import type { DiscordTyping } from "./typing.js";
 
 export function memoryPack(memories: ChatMemory[]): string {
   const rows: string[] = [];
@@ -113,7 +114,11 @@ export class ChatOrchestrator {
     readonly executor: Executor,
     readonly send: (channel: string, text: string) => Promise<unknown>,
     readonly community?: PublicCommunityResponder,
+    readonly typing?: DiscordTyping,
   ) {}
+  private withTyping<T>(channel: string, work: () => Promise<T>): Promise<T> {
+    return this.typing ? this.typing.run(channel, work) : work();
+  }
   private key(scope: ChatScope): string {
     return JSON.stringify([scope.guild, scope.channel, scope.owner]);
   }
@@ -157,14 +162,16 @@ export class ChatOrchestrator {
           );
           return;
         }
-        const response = await this.community.answer({
-          guildId: scope.guild,
-          channelId: scope.channel,
-          userId: scope.owner,
-          requestId: message.id,
-          text: text.slice(0, 4_000),
-          tier: accessLevel === "user" ? "user" : "staff",
-        });
+        const response = await this.withTyping(scope.channel, () =>
+          this.community!.answer({
+            guildId: scope.guild,
+            channelId: scope.channel,
+            userId: scope.owner,
+            requestId: message.id,
+            text: text.slice(0, 4_000),
+            tier: accessLevel === "user" ? "user" : "staff",
+          }),
+        );
         if (response) await this.reply(scope.channel, response);
         return;
       }
@@ -266,16 +273,18 @@ export class ChatOrchestrator {
         const controller = new AbortController();
         const active: Active = { scope, controller, done: Promise.resolve() };
         this.active.set(this.key(scope), active);
-        active.done = this.perform(
-          active,
-          admission.run,
-          text,
-          route === "loop"
-            ? "loop"
-            : route === "execute"
-              ? "execute"
-              : "answer",
-          selection.model,
+        active.done = this.withTyping(scope.channel, () =>
+          this.perform(
+            active,
+            admission.run,
+            text,
+            route === "loop"
+              ? "loop"
+              : route === "execute"
+                ? "execute"
+                : "answer",
+            selection.model,
+          ),
         );
         try {
           await active.done;
