@@ -259,7 +259,11 @@ export class SmtpDeliveryAdapter implements DeliveryAdapter {
       const boundary = `rapi-${randomUUID()}`;
       // Delivery keys contain colons and recipient addresses, which are not
       // valid dot-atom Message-ID local parts. Keep correlation deterministic.
-      const messageId = `<${createHash("sha256").update(idempotencyKey).digest("hex")}@rapi-agent.local>`;
+      const fromDomain = this.options.from.split("@").at(-1) ?? "";
+      const messageDomain = /^[a-z0-9.-]+$/i.test(fromDomain)
+        ? fromDomain
+        : "rapi-agent.local";
+      const messageId = `<${createHash("sha256").update(idempotencyKey).digest("hex")}@${messageDomain}>`;
       const message = [
         `From: ${safeHeader(this.options.from)}`,
         `To: ${safeHeader(target.recipientId)}`,

@@ -129,7 +129,7 @@ test("SMTP terminates on silence/close and classifies accepted, rejected and unc
       try {
         if (mode === "accepted") {
           const result = await send();
-          assert.match(result.providerId, /^<[a-f0-9]{64}@rapi-agent\.local>$/);
+          assert.match(result.providerId, /^<[a-f0-9]{64}@example\.invalid>$/);
           assert(transmitted.includes(`Message-ID: ${result.providerId}\r\n`));
           const date = /^Date: (.*)\r?$/m.exec(transmitted)?.[1];
           assert(date && Number.isFinite(new Date(date).getTime()));
