@@ -2,6 +2,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+unset MIGRATION_DATABASE_URL RAPI_MIGRATIONS_DIRECTORY
+export RAPI_ENV=test
 
 restore_project=${RESTORE_SMOKE_PROJECT:-}
 restore_database=${RESTORE_SMOKE_DATABASE:-}

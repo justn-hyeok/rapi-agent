@@ -1,0 +1,65 @@
+{
+  "observedAt": "2026-09-28T00:24:31.920Z",
+  "guildId": "1545832299671847013",
+  "invite": "https://discord.gg/DVbb9uwu8V",
+  "layoutFile": "config/discord-community-1545832299671847013.yaml",
+  "existingChannelCount": 12,
+  "applied": false,
+  "layoutDigest": "464f2bca39e792bc5b5955539b546cd76003c75e2a3fd3846f865ec7711db4ff",
+  "snapshotDigest": "c44309f2e54a6c653eccfe440bff157618a710cda448963d48f2a64227a2c509",
+  "actions": [
+    {
+      "kind": "create_role",
+      "key": "rapi_user"
+    },
+    {
+      "kind": "create_category",
+      "key": "getting_started"
+    },
+    {
+      "kind": "create_category",
+      "key": "rapi"
+    },
+    {
+      "kind": "create_category",
+      "key": "operations"
+    },
+    {
+      "kind": "create_channel",
+      "key": "roles",
+      "parentKey": "getting_started"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_questions",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_briefing",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_help",
+      "parentKey": "rapi"
+    },
+    {
+      "kind": "create_channel",
+      "key": "rapi_admin",
+      "parentKey": "operations"
+    },
+    {
+      "kind": "create_channel",
+      "key": "operations_alerts",
+      "parentKey": "operations"
+    }
+  ],
+  "adopted": [
+    {
+      "resourceType": "role",
+      "key": "rapi_staff",
+      "id": "1547779901934014624"
+    }
+  ]
+}

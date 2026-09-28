@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { redactChat } from "@rapi/contracts";
+import { runtimeRevision } from "@rapi/core";
 import {
   assertProviderReady,
   buildProviderCommand,
@@ -409,6 +410,7 @@ const server = createServer(async (request, response) => {
       );
       return json(response, ready ? 200 : 503, {
         ready,
+        revision: runtimeRevision,
         checkedAt: new Date().toISOString(),
         executor: "omp",
         providers,

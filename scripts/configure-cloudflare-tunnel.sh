@@ -53,7 +53,7 @@ for attempt in {1..12}; do
   interaction_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 -X POST "https://${hostname}/interactions" || true)"
   if [[ "$health_status" == "404" && "$interaction_status" == "401" ]]; then
     node --env-file=.env scripts/mark-tunnel-verified.mjs "https://${hostname}"
-    "${root[@]}" systemctl restart rapi-bot.service rapi-worker.service rapi-monitor.service
+    "${root[@]}" systemctl try-restart rapi-bot.service rapi-worker.service rapi-monitor.service
     echo "고정 공개 주소가 준비됐습니다: https://${hostname}"
     echo "공개 health 차단과 Discord interaction 전달을 확인했습니다."
     exit 0

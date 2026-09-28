@@ -1,0 +1,79 @@
+{
+  "recordedAt": "2026-09-28T00:37:56.274218+00:00",
+  "baseSha": "197c29e3bec1712ae8a339f8176693a7689e48f4",
+  "sourceSnapshotDigest": "85625d8c1a60e934216fd213f2f370d4fa7746f44b6629a42247d5b6517c3f95",
+  "sourceFileCount": 223,
+  "dirtyCandidate": true,
+  "scope": "public Discord community 1545832299671847013",
+  "gates": {
+    "check": {
+      "passed": true,
+      "tests": 181
+    },
+    "postgresE2E": {
+      "passed": true,
+      "sourceSnapshotDigest": "85625d8c1a60e934216fd213f2f370d4fa7746f44b6629a42247d5b6517c3f95",
+      "tests": 18
+    },
+    "restart": {
+      "passed": true,
+      "countsBefore": "0:0:1",
+      "countsAfter": "0:0:1"
+    },
+    "restore": {
+      "passed": true,
+      "tables": 31,
+      "migrations": 12,
+      "constraints": 105
+    },
+    "webProxy": {
+      "passed": true,
+      "tests": 4
+    },
+    "productionAudit": {
+      "passed": true,
+      "vulnerabilities": 0
+    },
+    "review": {
+      "runs": 2,
+      "uniqueFindings": 4,
+      "findingsAddressed": [
+        "release unit/environment wiring",
+        "monitor preflight with inactive worker",
+        "bounded request upload and reservation release",
+        "configured service health ports"
+      ],
+      "focusedRegressionChecksPassed": true,
+      "cleanIndependentReviewOnFinalSnapshot": false
+    },
+    "diffAndScriptSyntax": {
+      "passed": true
+    }
+  },
+  "databaseVerification": {
+    "codeWorkspace": "/Users/justn/dev/.worktrees/rapi-completion-owner",
+    "dockerHost": "ssh://rapi-agent",
+    "projectIsolation": "rapi-e2e-*, rapi-restart-*, rapi-restore-*",
+    "connection": "owned SSH loopback forwards",
+    "productionDatabaseUsed": false
+  },
+  "operationalState": {
+    "remoteHead": "adec9f4",
+    "worker": "inactive",
+    "publicAgent": "inactive",
+    "publicGateway": "inactive",
+    "tunnel": "inactive"
+  },
+  "livePublicQuestionVerified": false,
+  "communityPlanApplied": false,
+  "committed": false,
+  "deployed": false,
+  "remaining": [
+    "bot Administrator permission and role hierarchy",
+    "dedicated public executor device login",
+    "approved exact candidate commit and production adoption/deployment",
+    "fixed interaction tunnel and guild configuration",
+    "real public question and USER/ADMIN/SUPERADMIN human QA"
+  ],
+  "verificationFinishedAt": "2026-09-28T00:45:25.590288+00:00"
+}

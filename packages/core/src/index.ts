@@ -8,3 +8,4 @@ export * from "./domain/usage.js";
 export * from "./ports/clock.js";
 export * from "./ports/repositories.js";
 export * from "./ports/health-server.js";
+export * from "./ports/runtime-revision.js";

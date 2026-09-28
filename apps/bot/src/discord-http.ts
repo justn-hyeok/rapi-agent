@@ -12,6 +12,7 @@ import {
   type DiscordCommand,
 } from "@rapi/agent";
 import { verifyWebhookSignature, type ExternalItem } from "@rapi/adapters";
+import { runtimeRevision } from "@rapi/core";
 
 const ed25519SpkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
 
@@ -319,7 +320,10 @@ export function createDiscordInteractionServer(
           typeof ready === "object" &&
           "ready" in ready &&
           (ready as { ready: unknown }).ready === true;
-        return json(response, isReady ? 200 : 503, ready);
+        return json(response, isReady ? 200 : 503, {
+          ...(ready && typeof ready === "object" ? ready : {}),
+          revision: runtimeRevision,
+        });
       }
       if (request.method !== "POST")
         return json(response, 404, { error: "not found" });

@@ -128,6 +128,10 @@ Discord 명령은 모두 한글이며 작업 실행에는 JSON이 필요 없다.
 
 ## 현재 상태
 
+지정된 공개 커뮤니티의 실제 적용은 아직 완료되지 않았다. 2026-09-28 확인에서
+봇 관리자 권한, 공개 실행기 전용 로그인과 고정 interaction 진입점이 남아 있다.
+현재 적용안과 검증 범위는 [커뮤니티 완성 작업 기록](docs/evidence/completion-resume-20260928.md)에 있다.
+
 MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhook 수집,
 정규화·중복 후보·분류·요약, Discord 권한과 명령, Discord/SMTP 발송, 공개 범위가
 보호된 MDX, revision 승인 기반 OMP 실행, 재시작·백업 복구 검증을 포함한다.

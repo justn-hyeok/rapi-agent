@@ -2,6 +2,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+unset MIGRATION_DATABASE_URL RAPI_MIGRATIONS_DIRECTORY
+export RAPI_ENV=test
 
 # e2e imports workspace packages through their dist exports; build first so the
 # suite also runs when an upstream check step was skipped or never built.

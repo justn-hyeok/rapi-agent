@@ -87,6 +87,94 @@ GitHub 읽기와 쓰기 자격 증명은 분리한다. 평상시 수집 프로�
 
 ## 6. 배포 절차
 
+릴리스 후보를 서비스 전환 없이 준비할 때는 깨끗한 후보 checkout에서 전체 SHA와
+기존 스테이징 루트 디렉터리를 명시한다. `deploy-revision.sh`는 Git archive로
+비밀값 없는 revision을 별도 디렉터리에 풀고, 새 `npm ci`와 check, proxy,
+격리 E2E·restart·restore, audit를 모두 통과한 경우에만
+`release-manifest.json`을 쓴다. 실패한 스테이징 디렉터리는 조사할 수 있도록 남긴다.
+이 단계는 서비스를 교체하거나 worker를 재시작하지 않는다.
+
+```bash
+RAPI_RELEASE_SHA="$(git rev-parse HEAD)" \
+RAPI_RELEASE_ROOT=/absolute/existing/staging-directory \
+  ./scripts/deploy-revision.sh
+```
+
+manifest에는 원본·빌드 파일의 digest와 migration 목록도 들어간다.
+`scripts/switch-release.mjs`는 후보와 이전 artifact를 검증하고, 현재 실행 중인
+서비스만 중지·전환·재시작한다. `/ready`의 기동 시점 revision과 readiness가
+일치해야 전환을 인정하며 실패하면 이전 artifact로 돌아가 같은 검사를 수행한다.
+이미 중지된 worker는 이 절차나 터널 구성으로 자동 재시작하지 않는다.
+
+승인된 baseline/current pointer를 만든 뒤 `release-units.mjs --preview`로
+unit 연결안을 확인한다. `--apply`는 기존 drop-in을 receipt에 보존하고 원자적으로
+교체한 뒤 daemon-reload만 수행한다. 실패하면 이전 drop-in을 복구하며, 이 명령은
+서비스를 재시작하지 않는다.
+
+```bash
+RAPI_CURRENT_RELEASE=/home/justn/rapi-releases/current \
+RAPI_SERVICE_ENV_FILE=/home/justn/rapi-agent/.env \
+  node scripts/release-units.mjs --preview
+
+# 운영 승인 후 root 권한으로 실행한다.
+RAPI_RELEASE_UNITS_APPROVED=true \
+RAPI_RELEASE_UNITS_RECEIPT=/absolute/evidence/unit-wiring.json \
+RAPI_CURRENT_RELEASE=/home/justn/rapi-releases/current \
+RAPI_SERVICE_ENV_FILE=/home/justn/rapi-agent/.env \
+  node scripts/release-units.mjs --apply
+```
+
+monitor는 중지된 worker의 경고를 계속 보고하므로, 배포 전환에서는 monitor의
+`/health`와 기동 revision을 검사한다. 나머지 활성 애플리케이션은 `/ready`를
+검사한다. monitor 경고를 지우거나 중지된 worker를 켜서 검사를 통과시키지 않는다.
+
+```bash
+RAPI_SWITCH_APPROVED=true \
+RAPI_CURRENT_RELEASE=/absolute/releases/current \
+RAPI_CANDIDATE_RELEASE=/absolute/releases/candidate-directory \
+RAPI_RELEASE_SHA=full-40-character-candidate-sha \
+RAPI_SWITCH_RECEIPT=/absolute/evidence/switch-receipt.json \
+RAPI_SERVICE_ENV_FILE=/home/justn/rapi-agent/.env \
+RAPI_SWITCH_SERVICES=bot,chat,omp,monitor \
+  node scripts/switch-release.mjs
+```
+
+운영 승인을 받은 뒤에만 실행한다. current는 기존 symlink여야 하고, 이전
+artifact에도 검증 manifest가 있어야 한다. 두 revision의 migration 목록이 다르면
+자동 전환을 거부한다. 각 systemd unit의 WorkingDirectory가 current를 가리키고
+ExecStart가 별도 보관한 운영 환경 파일을 읽도록 사전 설정해야 한다. 처음
+도입하는 서버는 이전 코드의 실행 revision·호환성을 기록한 승인된 baseline
+전환이 먼저 필요하다. 구 서비스에 manifest가 없다는 이유로 검사를 생략하지 않는다.
+
+공개 커뮤니티 `1545832299671847013`의 준비된 구성은
+`config/discord-community-1545832299671847013.yaml`과
+`docs/evidence/community-plan-20260928.json`이다. 기존 ADMIN 역할을 채택하고
+기존 채널을 삭제하지 않는다. 봇 관리자 권한·역할 순서와 공개 실행기 전용
+로그인을 확보한 뒤, 배포된 `DiscordLayoutManager.preview/apply`로 fresh plan을
+확인·적용한다. 저장된 snapshot은 사전 검토용이며 그대로 재사용하는 승인 토큰이 아니다.
+
+역할·채널 적용 후 공개 대화 접근 설정을 독립적으로 준비할 수 있다. 이 명령은
+RSS·이메일·GitHub 등록을 요구하지 않으며, 별도 실행기 활성화까지 자동 수행하지 않는다.
+
+```bash
+COMMUNITY_GUILD_ID=1545832299671847013 \
+  node --env-file=.env --import tsx scripts/configure-public-community.ts --preview
+
+# 운영 승인 후 역할/채널 ID를 환경 파일에 반영한다.
+RAPI_COMMUNITY_APPROVED=true COMMUNITY_GUILD_ID=1545832299671847013 \
+  node --env-file=.env --import tsx scripts/configure-public-community.ts --apply
+```
+
+공개 실행기 전용 로그인은 설치된 전용 계정에서 진행한다. 장치 승인 단계는
+소유자가 직접 수행한다. 승인된 실제 질문이 성공한 뒤 공개 기능을 활성화하고
+USER/ADMIN/SUPERADMIN의 허용·거부 흐름을 각각 확인한다.
+
+```bash
+sudo -u rapi-public env HOME=/var/lib/rapi-public \
+  CODEX_HOME=/var/lib/rapi-public/codex \
+  /opt/rapi-public-agent/codex login --device-auth
+```
+
 1. CI가 typecheck, lint, unit/integration test, migration 검사를 수행한다.
 2. 불변 revision 또는 image tag를 만든다.
 3. DB 백업과 migration dry-run 결과를 확인한다.
