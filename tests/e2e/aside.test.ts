@@ -40,6 +40,11 @@ it("Aside serial leases, retries, atomic private ingestion, dedup and disabled-s
       ],
     );
     const claims = await Promise.all([collector.claim(), collector.claim()]);
+    assert.equal(
+      (await store.activeSourceIds()).includes(sourceId),
+      false,
+      "default subscriptions must exclude browser sources",
+    );
     assert.equal(claims.filter(Boolean).length, 1);
     let claim = claims.find(Boolean)!;
     const stories = ["123", "456"].map((id) => ({
@@ -104,6 +109,30 @@ it("Aside serial leases, retries, atomic private ingestion, dedup and disabled-s
         new Date(Date.now() + 60_000),
       );
       assert.equal(batch.items.length, expected, name);
+      if (expected > 0) {
+        await assert.rejects(
+          store.beginDelivery(
+            batch.id,
+            { channel: "discord_channel", recipientId: "a-channel" },
+            batch.rendererVersion,
+          ),
+          /Aside delivery/,
+        );
+        await assert.rejects(
+          store.beginDelivery(
+            batch.id,
+            { channel: "discord_dm", recipientId: "other-owner" },
+            batch.rendererVersion,
+          ),
+          /Aside delivery/,
+        );
+        const allowed = await store.beginDelivery(
+          batch.id,
+          { channel: "discord_dm", recipientId: "aside-owner" },
+          batch.rendererVersion,
+        );
+        assert.equal(allowed.skip, false);
+      }
     }
     assert.equal(
       (

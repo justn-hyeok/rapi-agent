@@ -4,6 +4,7 @@ import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { managedPreviousVersion } from "./aside-install-guard.mjs";
 
 if (process.platform !== "darwin")
   throw new Error("Aside bridge requires this Mac's Aside installation");
@@ -83,8 +84,33 @@ try {
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
 }
-if (oldPlist && oldPlist !== payload)
-  throw new Error("Existing launch agent differs; refusing to overwrite");
+if (oldPlist && oldPlist !== payload) {
+  const existing = JSON.parse(
+    execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist], {
+      encoding: "utf8",
+    }),
+  );
+  // Verify fixed fields against our own payload, never trust existing policy.
+  const expectedPolicy = JSON.parse(
+    execFileSync("/usr/bin/plutil", ["-convert", "json", "-o", "-", "-"], {
+      input: payload,
+      encoding: "utf8",
+    }),
+  );
+  const oldVersion = managedPreviousVersion(
+    existing,
+    expectedPolicy,
+    root,
+  );
+  const oldFiles = await Promise.all(
+    files.map((file) => readFile(join(oldVersion, file.name))),
+  );
+  if (
+    createHash("sha256").update(Buffer.concat(oldFiles)).digest("hex") !==
+    oldVersion.slice(oldVersion.lastIndexOf("/") + 1)
+  )
+    throw new Error("Existing managed Aside bridge files were modified");
+}
 for (const file of files) {
   try {
     const installed = await readFile(join(versionPath, file.name));
@@ -117,6 +143,12 @@ try {
     stdio: "ignore",
   });
 } catch {
+  loaded = false;
+}
+if (loaded && oldPlist !== payload) {
+  execFileSync("/bin/launchctl", ["bootout", `${domain}/${label}`], {
+    stdio: "ignore",
+  });
   loaded = false;
 }
 if (!loaded)

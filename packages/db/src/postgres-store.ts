@@ -588,6 +588,21 @@ export class PostgresStore {
         "SELECT id FROM delivery_batches WHERE id=$1 FOR UPDATE",
         [batchId],
       );
+      const forbiddenAside = await client.query(
+        `SELECT 1 FROM delivery_batch_items bi
+        JOIN source_items si ON si.id=bi.source_item_id JOIN raw_events re ON re.id=si.raw_event_id
+        JOIN sources src ON src.id=re.source_id JOIN delivery_batches b ON b.id=bi.batch_id
+        JOIN subscriptions sub ON sub.id=b.subscription_id
+        WHERE bi.batch_id=$1 AND src.kind='aside' AND (
+          src.collection_policy->>'ownerId' IS DISTINCT FROM sub.owner_id
+          OR NOT(src.id=ANY(sub.source_ids)) OR $2='discord_channel'
+          OR ($2='discord_dm' AND $3<>sub.owner_id)) LIMIT 1`,
+        [batchId, target.channel, target.recipientId],
+      );
+      if (forbiddenAside.rowCount)
+        throw new Error(
+          "Aside delivery requires explicit owner and private target scope",
+        );
       const retired = await client.query<{ id: string; attempt_count: number }>(
         "SELECT id,attempt_count FROM delivery_attempts WHERE batch_id=$1 AND anonymized_at IS NOT NULL LIMIT 1",
         [batchId],
@@ -812,7 +827,7 @@ export class PostgresStore {
 
   async activeSourceIds(): Promise<string[]> {
     const result = await this.pool.query<{ id: string }>(
-      "SELECT id FROM sources WHERE state='active' ORDER BY created_at",
+      "SELECT id FROM sources WHERE state='active' AND kind<>'aside' ORDER BY created_at",
     );
     return result.rows.map((row) => row.id);
   }
