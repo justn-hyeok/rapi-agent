@@ -97,11 +97,7 @@ if (oldPlist && oldPlist !== payload) {
       encoding: "utf8",
     }),
   );
-  const oldVersion = managedPreviousVersion(
-    existing,
-    expectedPolicy,
-    root,
-  );
+  const oldVersion = managedPreviousVersion(existing, expectedPolicy, root);
   const oldFiles = await Promise.all(
     files.map((file) => readFile(join(oldVersion, file.name))),
   );
