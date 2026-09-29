@@ -35,6 +35,7 @@ import {
   type SourcePayload,
 } from "@rapi/adapters";
 import { PostgresStore } from "@rapi/db";
+import type { PoolClient } from "pg";
 
 export class RapiAgent {
   constructor(
@@ -55,6 +56,7 @@ export class RapiAgent {
     sourceId: string,
     item: ExternalItem,
     collectedAt = new Date(),
+    transactionClient?: PoolClient,
   ): Promise<{ itemId: string; inserted: boolean }> {
     const payload = { ...item };
     const raw = await this.store.insertRawEvent(
@@ -63,9 +65,13 @@ export class RapiAgent {
       checksumPayload(payload),
       payload,
       collectedAt,
+      transactionClient,
     );
     if (raw.retired) return { itemId: raw.id, inserted: false };
-    const visibility = await this.store.sourceVisibility(sourceId);
+    const visibility = await this.store.sourceVisibility(
+      sourceId,
+      transactionClient,
+    );
     const normalized = {
       id: randomUUID(),
       rawEventId: raw.id,
@@ -82,7 +88,11 @@ export class RapiAgent {
       metadata: item.metadata,
       categories: classify(item.title, item.body),
     };
-    const saved = await this.store.saveItem(normalized, summarize(normalized));
+    const saved = await this.store.saveItem(
+      normalized,
+      summarize(normalized),
+      transactionClient,
+    );
     return { itemId: saved.id, inserted: raw.inserted && saved.inserted };
   }
 

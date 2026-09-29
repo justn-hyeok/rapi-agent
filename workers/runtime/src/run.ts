@@ -10,6 +10,8 @@ import {
   GitHubSourceAdapter,
   OmpHttpAdapter,
   SmtpDeliveryAdapter,
+  ASIDE_ADAPTER,
+  ASIDE_LOCATOR,
 } from "@rapi/adapters";
 import {
   CompositeDeliveryAdapter,
@@ -181,6 +183,18 @@ const healthServer = createLocalHealthServer(
         kind: String(source.kind),
         active: source.state === "active",
         failureCount: Number(source.failure_count ?? 0),
+        asideBridge:
+          source.kind === "aside" &&
+          source.locator === ASIDE_LOCATOR &&
+          (
+            source.collection_policy as {
+              visibility?: string;
+              aside?: { adapter?: string };
+            }
+          ).visibility === "private" &&
+          (source.collection_policy as { aside?: { adapter?: string } }).aside
+            ?.adapter === ASIDE_ADAPTER,
+        lastSuccessAt: source.last_success_at as Date | null,
       })),
     );
     const webhookQueue = await store.webhookQueueStatus();

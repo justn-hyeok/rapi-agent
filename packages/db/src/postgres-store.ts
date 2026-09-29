@@ -160,8 +160,13 @@ export class PostgresStore {
     return result.rows[0]!.id;
   }
 
-  async sourceVisibility(sourceId: string): Promise<Visibility> {
-    const result = await this.pool.query<{ visibility: Visibility }>(
+  async sourceVisibility(
+    sourceId: string,
+    client?: PoolClient,
+  ): Promise<Visibility> {
+    const result = await (client ?? this.pool).query<{
+      visibility: Visibility;
+    }>(
       `SELECT COALESCE(collection_policy->>'visibility', 'private')::text AS visibility FROM sources WHERE id = $1`,
       [sourceId],
     );
@@ -212,8 +217,9 @@ export class PostgresStore {
     checksum: string,
     payload: unknown,
     collectedAt: Date,
+    transactionClient?: PoolClient,
   ): Promise<RawEventResult> {
-    return this.transaction(async (client) => {
+    const work = async (client: PoolClient): Promise<RawEventResult> => {
       const source = await client.query<{ state: string }>(
         "SELECT state FROM sources WHERE id=$1 FOR UPDATE",
         [sourceId],
@@ -250,7 +256,8 @@ export class PostgresStore {
       if (!existing.rows[0])
         throw new Error("Conflicting raw event could not be resolved");
       return { id: existing.rows[0].id, inserted: false };
-    });
+    };
+    return transactionClient ? work(transactionClient) : this.transaction(work);
   }
 
   async saveCursor(
@@ -302,8 +309,11 @@ export class PostgresStore {
   async saveItem(
     item: NormalizedItem,
     summary: string,
+    transactionClient?: PoolClient,
   ): Promise<{ id: string; inserted: boolean }> {
-    return this.transaction(async (client) => {
+    const work = async (
+      client: PoolClient,
+    ): Promise<{ id: string; inserted: boolean }> => {
       const raw = await client.query<{ expired: boolean }>(
         "SELECT COALESCE(payload->>'retentionExpired'='true',false) AS expired FROM raw_events WHERE id=$1 FOR UPDATE",
         [item.rawEventId],
@@ -372,7 +382,8 @@ export class PostgresStore {
         );
       }
       return { id: item.id, inserted: true };
-    });
+    };
+    return transactionClient ? work(transactionClient) : this.transaction(work);
   }
 
   async createSubscription(input: SubscriptionInput): Promise<string> {
@@ -421,6 +432,7 @@ export class PostgresStore {
   ): Promise<FrozenBatch> {
     return this.transaction(async (client) => {
       const subscription = await client.query<{
+        owner_id: string;
         source_ids: string[];
         categories: string[];
         include_keywords: string[];
@@ -428,7 +440,7 @@ export class PostgresStore {
         channels: DeliveryTarget[];
         max_items: number;
       }>(
-        "SELECT source_ids,categories,include_keywords,exclude_keywords,channels,max_items FROM subscriptions WHERE id=$1 AND active=true",
+        "SELECT owner_id,source_ids,categories,include_keywords,exclude_keywords,channels,max_items FROM subscriptions WHERE id=$1 AND active=true",
         [subscriptionId],
       );
       const sub = subscription.rows[0];
@@ -457,18 +469,36 @@ export class PostgresStore {
           canonical_url: string;
           visibility: Visibility;
           source_id: string;
+          source_kind: string;
+          source_owner: string | null;
           categories: string[];
         }>(
-          `SELECT si.id,si.title,si.body,si.canonical_url,si.visibility,si.metadata->>'sourceId' AS source_id,
+          `SELECT si.id,si.title,si.body,si.canonical_url,si.visibility,s.id::text AS source_id,
+           s.kind AS source_kind,s.collection_policy->>'ownerId' AS source_owner,
            COALESCE(array_agg(DISTINCT c.label) FILTER (WHERE c.label IS NOT NULL),'{}') AS categories
-           FROM source_items si LEFT JOIN classifications c ON c.source_item_id=si.id
+           FROM source_items si JOIN raw_events re ON re.id=si.raw_event_id JOIN sources s ON s.id=re.source_id
+           LEFT JOIN classifications c ON c.source_item_id=si.id
            WHERE si.collected_at >= $1 AND si.collected_at < $2
              AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
-           GROUP BY si.id ORDER BY COALESCE(si.published_at,si.collected_at) DESC`,
+           GROUP BY si.id,s.id ORDER BY COALESCE(si.published_at,si.collected_at) DESC`,
           [periodStart, periodEnd],
         );
         const matches = rows.rows
           .filter((row) => {
+            // Browser data never joins existing catch-all or public-channel
+            // subscriptions. Its owner must explicitly select this source.
+            if (
+              row.source_kind === "aside" &&
+              (row.source_owner !== sub.owner_id ||
+                !sub.source_ids.includes(row.source_id) ||
+                sub.channels.some(
+                  (target) =>
+                    target.channel === "discord_channel" ||
+                    (target.channel === "discord_dm" &&
+                      target.recipientId !== sub.owner_id),
+                ))
+            )
+              return false;
             const haystack = `${row.title} ${row.body}`.toLowerCase();
             return (
               (sub.source_ids.length === 0 ||
@@ -558,6 +588,21 @@ export class PostgresStore {
         "SELECT id FROM delivery_batches WHERE id=$1 FOR UPDATE",
         [batchId],
       );
+      const forbiddenAside = await client.query(
+        `SELECT 1 FROM delivery_batch_items bi
+        JOIN source_items si ON si.id=bi.source_item_id JOIN raw_events re ON re.id=si.raw_event_id
+        JOIN sources src ON src.id=re.source_id JOIN delivery_batches b ON b.id=bi.batch_id
+        JOIN subscriptions sub ON sub.id=b.subscription_id
+        WHERE bi.batch_id=$1 AND src.kind='aside' AND (
+          src.collection_policy->>'ownerId' IS DISTINCT FROM sub.owner_id
+          OR NOT(src.id=ANY(sub.source_ids)) OR $2='discord_channel'
+          OR ($2='discord_dm' AND $3<>sub.owner_id)) LIMIT 1`,
+        [batchId, target.channel, target.recipientId],
+      );
+      if (forbiddenAside.rowCount)
+        throw new Error(
+          "Aside delivery requires explicit owner and private target scope",
+        );
       const retired = await client.query<{ id: string; attempt_count: number }>(
         "SELECT id,attempt_count FROM delivery_attempts WHERE batch_id=$1 AND anonymized_at IS NOT NULL LIMIT 1",
         [batchId],
@@ -729,7 +774,7 @@ export class PostgresStore {
 
   async sourceStatus(): Promise<Array<Record<string, unknown>>> {
     const result = await this.pool.query(
-      `SELECT s.id,s.kind,s.locator,s.state,c.last_success_at,c.last_error,COALESCE(c.failure_count,0) AS failure_count
+      `SELECT s.id,s.kind,s.locator,s.state,s.collection_policy,c.last_success_at,c.last_error,COALESCE(c.failure_count,0) AS failure_count
        FROM sources s LEFT JOIN source_cursors c ON c.source_id=s.id ORDER BY s.created_at`,
     );
     return result.rows;
@@ -782,7 +827,7 @@ export class PostgresStore {
 
   async activeSourceIds(): Promise<string[]> {
     const result = await this.pool.query<{ id: string }>(
-      "SELECT id FROM sources WHERE state='active' ORDER BY created_at",
+      "SELECT id FROM sources WHERE state='active' AND kind<>'aside' ORDER BY created_at",
     );
     return result.rows.map((row) => row.id);
   }

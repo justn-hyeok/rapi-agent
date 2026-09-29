@@ -270,6 +270,10 @@ describe("rapi-agent MVP", () => {
         "approved-browser-session",
         "private",
       );
+      await store.pool.query(
+        'UPDATE sources SET collection_policy=collection_policy || \'{"ownerId":"owner-1"}\'::jsonb WHERE id=$1',
+        [privateSource],
+      );
       await agent.ingestExternalItem(
         privateSource,
         {
