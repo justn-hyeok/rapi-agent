@@ -16,8 +16,10 @@ import {
 import {
   CompositeDeliveryAdapter,
   RapiAgent,
+  CrawlerCollector,
   WebhookDeliveryWorker,
 } from "@rapi/agent";
+import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
 import { PostgresStore } from "@rapi/db";
 import { requireHealthyDeliveryResults } from "./delivery-loop.js";
@@ -62,6 +64,16 @@ const omp = config.OMP_ENDPOINT
   ? new OmpHttpAdapter(config.OMP_ENDPOINT)
   : { dispatch: () => Promise.reject(new Error("OMP is not configured")) };
 const agent = new RapiAgent(store, delivery, omp);
+const crawler =
+  process.env.CRAWLER_ENDPOINT && process.env.CRAWLER_CALLER_TOKEN
+    ? new CrawlerCollector(
+        agent,
+        new CrawlerClient(
+          process.env.CRAWLER_ENDPOINT,
+          process.env.CRAWLER_CALLER_TOKEN,
+        ),
+      )
+    : undefined;
 const feed = new FeedSourceAdapter();
 const github = new GitHubSourceAdapter(config.GITHUB_READ_TOKEN);
 const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
@@ -114,6 +126,18 @@ async function runLoop(
 }
 
 async function collect(): Promise<void> {
+  if (
+    !crawler &&
+    (
+      await store.pool.query(
+        "SELECT 1 FROM sources WHERE state='active' AND collection_policy->'crawler'->>'enabled'='true' LIMIT 1",
+      )
+    ).rowCount
+  )
+    throw new Error(
+      "Delegated sources require CRAWLER_ENDPOINT and CRAWLER_CALLER_TOKEN",
+    );
+  await crawler?.runOnce();
   const destination = config.COMMUNITY_GUILD_ID
     ? await store.webhookConnectionByName(
         config.COMMUNITY_GUILD_ID,
@@ -183,6 +207,10 @@ const healthServer = createLocalHealthServer(
         kind: String(source.kind),
         active: source.state === "active",
         failureCount: Number(source.failure_count ?? 0),
+        crawler:
+          !!crawler &&
+          (source.collection_policy as { crawler?: { enabled?: boolean } })
+            .crawler?.enabled === true,
         asideBridge:
           source.kind === "aside" &&
           source.locator === ASIDE_LOCATOR &&

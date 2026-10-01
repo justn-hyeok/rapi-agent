@@ -27,6 +27,7 @@ export class AsideCollector {
         `SELECT s.id FROM sources s
         LEFT JOIN source_cursors c ON c.source_id=s.id
         WHERE s.kind='aside' AND s.state='active' AND s.locator=$1
+          AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true'
           AND s.collection_policy->>'visibility'='private'
           AND s.collection_policy->'aside'->>'adapter'=$2
           AND (c.last_success_at IS NULL OR c.last_success_at<now()-interval '15 minutes')
@@ -68,7 +69,7 @@ export class AsideCollector {
         collection_policy: Record<string, unknown>;
       }>(
         `SELECT s.locator,s.collection_policy FROM sources s JOIN source_cursors c ON c.source_id=s.id
-        WHERE s.id=$1 AND s.kind='aside' AND s.state='active' AND c.cursor_value=$2
+        WHERE s.id=$1 AND s.kind='aside' AND s.state='active' AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true' AND c.cursor_value=$2
           AND c.modified_at>now() FOR UPDATE OF s,c`,
         [snapshot.sourceId, snapshot.token],
       );

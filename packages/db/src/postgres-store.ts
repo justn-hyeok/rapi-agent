@@ -791,7 +791,7 @@ export class PostgresStore {
     }>(
       `SELECT s.id,s.kind,s.locator,c.etag FROM sources s
        LEFT JOIN source_cursors c ON c.source_id=s.id
-       WHERE s.state='active' AND s.kind IN ('github','rss') ORDER BY s.created_at`,
+       WHERE s.state='active' AND s.kind IN ('github','rss') AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true' ORDER BY s.created_at`,
     );
     return result.rows;
   }
