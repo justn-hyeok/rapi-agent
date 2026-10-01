@@ -5,6 +5,7 @@ export interface SourceHealthInput {
   active: boolean;
   failureCount: number;
   asideBridge?: boolean;
+  crawler?: boolean;
   lastSuccessAt?: string | Date | null;
 }
 
@@ -23,12 +24,13 @@ export function assessSourceHealth(
   const supported = active.filter(
     (source) =>
       COLLECTABLE_KINDS.has(source.kind) ||
-      (source.kind === "aside" && source.asideBridge === true),
+      (source.kind === "aside" &&
+        (source.asideBridge === true || source.crawler === true)),
   );
   const failing = supported.filter(
     (source) =>
       source.failureCount > 0 ||
-      (source.kind === "aside" &&
+      ((source.kind === "aside" || source.crawler === true) &&
         (!source.lastSuccessAt ||
           !Number.isFinite(new Date(source.lastSuccessAt).getTime()) ||
           Date.now() - new Date(source.lastSuccessAt).getTime() > 30 * 60_000)),
