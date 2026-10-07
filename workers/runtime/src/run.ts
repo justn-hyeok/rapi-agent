@@ -9,11 +9,13 @@ import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
+  CodexSummarizer,
   OmpHttpAdapter,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
 import {
   CompositeDeliveryAdapter,
+  DEFAULT_SUMMARY_MODEL,
   RapiAgent,
   CrawlerCollector,
   WebhookDeliveryWorker,
@@ -62,7 +64,11 @@ const delivery = new CompositeDeliveryAdapter({
 const omp = config.OMP_ENDPOINT
   ? new OmpHttpAdapter(config.OMP_ENDPOINT)
   : { dispatch: () => Promise.reject(new Error("OMP is not configured")) };
-const agent = new RapiAgent(store, delivery, omp);
+const summarizer =
+  process.env.SUMMARY_MODEL === "off"
+    ? undefined
+    : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
+const agent = new RapiAgent(store, delivery, omp, summarizer);
 const crawler =
   process.env.CRAWLER_ENDPOINT && process.env.CRAWLER_CALLER_TOKEN
     ? new CrawlerCollector(

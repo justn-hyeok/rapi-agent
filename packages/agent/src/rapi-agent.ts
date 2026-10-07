@@ -5,6 +5,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { resolveProviderSelection } from "@rapi/contracts";
+export { DEFAULT_CODEX_MODEL as DEFAULT_SUMMARY_MODEL } from "@rapi/contracts";
 import type {
   DeliveryAdapter,
   DeliveryTarget,
@@ -27,6 +28,8 @@ import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
+  SUMMARY_PROMPT_VERSION,
+  type ItemSummarizer,
   parseFeed,
   parseGitHubEvent,
   type ExternalItem,
@@ -67,7 +70,28 @@ export class RapiAgent {
     readonly store: PostgresStore,
     private readonly delivery: DeliveryAdapter,
     private readonly omp: OmpAdapter,
+    private readonly summarizer?: ItemSummarizer,
   ) {}
+
+  // Model summaries are written once per item and reused by every retry, so
+  // a delivered briefing never changes between attempts.
+  async summarizeBatch(batchId: string): Promise<number> {
+    if (!this.summarizer) return 0;
+    const items = await this.store.itemsNeedingSummary(
+      batchId,
+      this.summarizer.policy,
+    );
+    if (items.length === 0) return 0;
+    const summaries = await this.summarizer.summarize(items);
+    for (const [itemId, content] of summaries)
+      await this.store.saveItemSummary(
+        itemId,
+        this.summarizer.policy,
+        SUMMARY_PROMPT_VERSION,
+        content,
+      );
+    return summaries.size;
+  }
 
   createSource(
     kind: "github" | "rss" | "webhook" | "aside" | "github_stars",
@@ -343,6 +367,14 @@ export class RapiAgent {
   }
 
   async deliverBatch(batchId: string): Promise<string> {
+    try {
+      await this.summarizeBatch(batchId);
+    } catch (error) {
+      // A model failure must not block delivery; items fall back to labeled excerpts.
+      process.stderr.write(
+        `Summaries skipped: ${error instanceof Error ? error.message : "unknown error"}\n`,
+      );
+    }
     const batch = await this.store.getBatch(batchId);
     if (batch.items.length === 0)
       return (await this.store.markEmptyBatchDelivered(batch.id))
