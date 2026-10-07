@@ -10,6 +10,7 @@ import {
   GitHubSourceAdapter,
   GitHubStarRecommender,
   CodexSummarizer,
+  GitHubRepositoryInfo,
   OmpHttpAdapter,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
@@ -68,7 +69,13 @@ const summarizer =
   process.env.SUMMARY_MODEL === "off"
     ? undefined
     : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
-const agent = new RapiAgent(store, delivery, omp, summarizer);
+const agent = new RapiAgent(
+  store,
+  delivery,
+  omp,
+  summarizer,
+  new GitHubRepositoryInfo(config.GITHUB_READ_TOKEN),
+);
 const crawler =
   process.env.CRAWLER_ENDPOINT && process.env.CRAWLER_CALLER_TOKEN
     ? new CrawlerCollector(

@@ -229,3 +229,76 @@ export class GitHubStarRecommender {
     });
   }
 }
+
+export interface RepositoryInfo {
+  fullName: string;
+  description: string;
+  stars: number;
+  topics: string[];
+}
+
+export interface RepositoryDescriber {
+  describe(fullName: string): Promise<RepositoryInfo | null>;
+}
+
+export function repositoryContext(info: RepositoryInfo): string {
+  return [
+    `GitHub 저장소 ${info.fullName}: ${info.description || "설명 없음"}`,
+    `★${info.stars}`,
+    ...(info.topics.length
+      ? [`topics: ${info.topics.slice(0, 5).join(", ")}`]
+      : []),
+  ].join(" · ");
+}
+
+export class GitHubRepositoryInfo implements RepositoryDescriber {
+  private readonly getJson: JsonGetter;
+  private readonly cache = new Map<string, Promise<RepositoryInfo | null>>();
+
+  constructor(
+    token?: string,
+    options: SourceHttpOptions = {},
+    getJson?: JsonGetter,
+  ) {
+    this.getJson =
+      getJson ??
+      (async (path) => {
+        const { body } = await readSource(
+          `https://api.github.com/${path}`,
+          {
+            Accept: "application/vnd.github+json",
+            "User-Agent": "rapi-agent",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          options,
+        );
+        return JSON.parse(body) as unknown;
+      });
+  }
+
+  describe(fullName: string): Promise<RepositoryInfo | null> {
+    const key = fullName.toLowerCase();
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    if (this.cache.size >= 500) this.cache.clear();
+    // Missing context only makes a summary less helpful; never fail on it.
+    const pending = this.getJson(
+      `repos/${fullName.split("/").map(encodeURIComponent).join("/")}`,
+    ).then(
+      (value) => {
+        const repo = toRepository(value);
+        return repo
+          ? {
+              fullName: repo.fullName,
+              description: repo.description,
+              stars: repo.stars,
+              topics: repo.topics,
+            }
+          : null;
+      },
+      () => null,
+    );
+    this.cache.set(key, pending);
+    return pending;
+  }
+}

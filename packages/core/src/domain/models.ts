@@ -55,6 +55,8 @@ export interface BriefingItem {
   summary: string;
   categories: string[];
   visibility: Visibility;
+  /** Items with the same key are rendered as one entry (e.g. one repository). */
+  groupKey?: string | null;
 }
 
 export interface FrozenBatch {

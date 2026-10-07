@@ -8,7 +8,7 @@ import type {
   SubscriptionInput,
   Visibility,
 } from "@rapi/core";
-import { capItemsPerSource, usageWindow } from "@rapi/core";
+import { capItemsPerSource, repositoryKey, usageWindow } from "@rapi/core";
 
 interface RawEventResult {
   id: string;
@@ -472,11 +472,13 @@ export class PostgresStore {
           source_kind: string;
           source_owner: string | null;
           max_per_batch: string | null;
+          group_by: string | null;
           categories: string[];
         }>(
           `SELECT si.id,si.title,si.body,si.canonical_url,si.visibility,s.id::text AS source_id,
            s.kind AS source_kind,s.collection_policy->>'ownerId' AS source_owner,
            s.collection_policy->>'maxPerBatch' AS max_per_batch,
+           s.collection_policy->>'groupBy' AS group_by,
            COALESCE(array_agg(DISTINCT c.label) FILTER (WHERE c.label IS NOT NULL),'{}') AS categories
            FROM source_items si JOIN raw_events re ON re.id=si.raw_event_id JOIN sources s ON s.id=re.source_id
            LEFT JOIN classifications c ON c.source_item_id=si.id
@@ -486,38 +488,46 @@ export class PostgresStore {
           [periodStart, periodEnd],
         );
         const matches = capItemsPerSource(
-          rows.rows.filter((row) => {
-            // Browser data never joins existing catch-all or public-channel
-            // subscriptions. Its owner must explicitly select this source.
-            if (
-              row.source_kind === "aside" &&
-              (row.source_owner !== sub.owner_id ||
-                !sub.source_ids.includes(row.source_id) ||
-                sub.channels.some(
-                  (target) =>
-                    target.channel === "discord_channel" ||
-                    (target.channel === "discord_dm" &&
-                      target.recipientId !== sub.owner_id),
-                ))
-            )
-              return false;
-            const haystack = `${row.title} ${row.body}`.toLowerCase();
-            return (
-              (sub.source_ids.length === 0 ||
-                sub.source_ids.includes(row.source_id)) &&
-              (sub.categories.length === 0 ||
-                sub.categories.some((category) =>
-                  row.categories.includes(category),
-                )) &&
-              (sub.include_keywords.length === 0 ||
-                sub.include_keywords.some((keyword) =>
-                  haystack.includes(keyword.toLowerCase()),
-                )) &&
-              !sub.exclude_keywords.some((keyword) =>
-                haystack.includes(keyword.toLowerCase()),
+          rows.rows
+            .map((row) => ({
+              ...row,
+              group_key:
+                row.group_by === "repository"
+                  ? repositoryKey(row.canonical_url)
+                  : null,
+            }))
+            .filter((row) => {
+              // Browser data never joins existing catch-all or public-channel
+              // subscriptions. Its owner must explicitly select this source.
+              if (
+                row.source_kind === "aside" &&
+                (row.source_owner !== sub.owner_id ||
+                  !sub.source_ids.includes(row.source_id) ||
+                  sub.channels.some(
+                    (target) =>
+                      target.channel === "discord_channel" ||
+                      (target.channel === "discord_dm" &&
+                        target.recipientId !== sub.owner_id),
+                  ))
               )
-            );
-          }),
+                return false;
+              const haystack = `${row.title} ${row.body}`.toLowerCase();
+              return (
+                (sub.source_ids.length === 0 ||
+                  sub.source_ids.includes(row.source_id)) &&
+                (sub.categories.length === 0 ||
+                  sub.categories.some((category) =>
+                    row.categories.includes(category),
+                  )) &&
+                (sub.include_keywords.length === 0 ||
+                  sub.include_keywords.some((keyword) =>
+                    haystack.includes(keyword.toLowerCase()),
+                  )) &&
+                !sub.exclude_keywords.some((keyword) =>
+                  haystack.includes(keyword.toLowerCase()),
+                )
+              );
+            }),
           sub.max_items,
         );
         for (const [position, item] of matches.entries()) {
@@ -551,9 +561,14 @@ export class PostgresStore {
     const row = batch.rows[0];
     if (!row) throw new Error("Batch not found");
     const items = await client.query<
-      BriefingItem & { summary: string; categories: string[] }
+      BriefingItem & {
+        summary: string;
+        categories: string[];
+        groupBy: string | null;
+      }
     >(
       `SELECT si.id,si.title,si.canonical_url AS "canonicalUrl",si.visibility,
+       src.collection_policy->>'groupBy' AS "groupBy",
        COALESCE((SELECT CASE WHEN sm.model_policy_version='rules-v1' AND src.kind<>'github_stars' THEN '[발췌] '||sm.content ELSE sm.content END
          FROM summaries sm WHERE si.id=ANY(sm.evidence_item_ids) AND sm.purpose='item' ORDER BY sm.created_at DESC LIMIT 1),si.body) AS summary,
        COALESCE((SELECT array_agg(label ORDER BY label) FROM classifications WHERE source_item_id=si.id),'{}') AS categories
@@ -570,21 +585,34 @@ export class PostgresStore {
       rendererVersion: row.renderer_version,
       state: row.state,
       targets: targets ?? row.channels,
-      items: items.rows,
+      items: items.rows.map(({ groupBy, ...item }) => ({
+        ...item,
+        groupKey:
+          groupBy === "repository" ? repositoryKey(item.canonicalUrl) : null,
+      })),
     };
   }
 
   async itemsNeedingSummary(
     batchId: string,
     policy: string,
-  ): Promise<Array<{ id: string; title: string; body: string; url: string }>> {
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      body: string;
+      url: string;
+      group_by: string | null;
+    }>
+  > {
     const result = await this.pool.query<{
       id: string;
       title: string;
       body: string;
       url: string;
+      group_by: string | null;
     }>(
-      `SELECT si.id,si.title,si.body,si.canonical_url AS url
+      `SELECT si.id,si.title,si.body,si.canonical_url AS url,src.collection_policy->>'groupBy' AS group_by
        FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
        JOIN raw_events re ON re.id=si.raw_event_id JOIN sources src ON src.id=re.source_id
        WHERE bi.batch_id=$1 AND src.kind<>'github_stars'
