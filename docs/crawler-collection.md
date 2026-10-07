@@ -4,7 +4,7 @@ Go/Playwright `rapi-crawler`와 연결하는 CrawlerCollector를 구현했다. r
 
 먼저 기존 migration 절차로 `0014_crawler_collection.sql`을 적용한다. source collection_policy의 crawler에는 enabled, 독립 registry sourceId, tenantId, requirements, pipeline, limits를 명시한다. browser가 포함된 source는 기존 `kind='aside'`, private, ownerId를 사용해 owner-only subscription/delivery 경계를 유지한다. RSS-only source는 기존 RSS kind를 사용할 수 있다.
 
-요청을 DB에 저장하고 그 UUID를 Idempotency-Key로 사용한다. 결과 page ingestion, 기존 raw/normalized item 저장, receipt와 cursor는 같은 transaction이다. 요구 수준보다 낮은 listing은 detail 원문으로 저장하지 않는다. source policy hash를 제출·ingestion 때 다시 검사한다. 전환된 출처는 native RSS/GitHub와 Mac Aside collector에서 제외되고 기존 Aside lease의 후속 ingestion도 차단된다.
+요청을 DB에 저장하고 그 UUID를 Idempotency-Key로 사용한다. 결과 page ingestion, 기존 raw/normalized item 저장, receipt와 cursor는 같은 transaction이다. 요구 수준보다 낮은 listing은 detail 원문으로 저장하지 않는다. source policy hash를 제출·ingestion 때 다시 검사한다. 전환된 출처는 native RSS/GitHub collector에서 제외된다. Mac Aside collector는 제거됐다(D-011).
 
 source 삭제는 DB trigger가 remote cleanup UUID를 outbox에 먼저 남겨 local binding이 cascade 삭제돼도 취소·purge를 계속한다. source 변경/비활성화는 신규 ingestion을 차단하고 remote job을 취소한다. 종료 후 DELETE items로 중간 원문을 purge한다. 본체 자료의 삭제/보존/tombstone은 기존 privacy 경로가 담당한다. 전환 시 기존 worker의 drain을 먼저 수행한다. 이번 작업에서 운영 source policy를 바꾸거나 운영 worker를 재시작하지 않았다.
 

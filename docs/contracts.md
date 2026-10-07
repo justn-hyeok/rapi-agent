@@ -8,7 +8,6 @@ JSON schema와 DB migration은 Phase 0에서 이 계약을 바탕으로 만든�
 | 용어 | 이 프로젝트에서의 의미 | 신뢰·배포 경계 |
 | --- | --- | --- |
 | `rapi-core` | 정규화, 중복 제거, 구독, 발송, 승인, 작업 상태를 소유하는 TypeScript 도메인 계층 | VM의 신뢰된 애플리케이션 경계 |
-| Aside | API가 없거나 사용자 승인 브라우저 상태가 필요한 지정 출처를 확인하는 브라우저 리서치 실행기 | 별도 사용자 세션이며 결과는 기본적으로 비공개 입력 |
 | OMP | 승인된 개발 작업 명세를 받아 코드 수정·검증을 수행하는 외부 실행 harness | 별도 작업공간과 실행 receipt를 가진 비신뢰 callback 발신자 |
 | OpenClaw | Discord, webhook, cron, Gateway를 연결하는 초기 실행 계층 후보 | `rapi-core` runtime port 밖의 교체 가능 어댑터 |
 | ZeroClaw | 저자원 장기 실행과 승인 gate 관점에서 평가할 대안 runtime | OpenClaw와 같은 port 계약을 구현하는 별도 후보 |
@@ -101,7 +100,7 @@ revision/commit, diff 또는 PR, 결과 보고서가 서로 같은 execution att
 
 ## 5. 공개 범위 승격
 
-Aside 세션, 비공개 저장소, Discord DM, 이메일 수신자 정보에서 들어온 항목은
+비공개 저장소, Discord DM, 이메일 수신자 정보에서 들어온 항목은
 기본 `private`다. `private -> unlisted -> public` 승격에는 출처 공개 범위 검사와
 승인 정책 검사가 필요하다. 모델 판단만으로 공개 범위를 높이지 않는다.
 

@@ -20,7 +20,6 @@
 
 - GitHub App 또는 fine-grained token
 - 웹훅 발신자별 shared secret
-- Aside 실행 환경과 사용자가 승인한 로그인 상태
 - S3 호환 object storage
 
 ## 2. 최초 사용자 작업
