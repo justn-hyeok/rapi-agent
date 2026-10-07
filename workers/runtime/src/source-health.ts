@@ -1,4 +1,5 @@
 const COLLECTABLE_KINDS = new Set(["github", "rss", "github_stars"]);
+const SOURCE_FAILURE_THRESHOLD = 3;
 
 export interface SourceHealthInput {
   kind: string;
@@ -27,7 +28,7 @@ export function assessSourceHealth(
   );
   const failing = supported.filter(
     (source) =>
-      source.failureCount > 0 ||
+      source.failureCount >= SOURCE_FAILURE_THRESHOLD ||
       (source.crawler === true &&
         (!source.lastSuccessAt ||
           !Number.isFinite(new Date(source.lastSuccessAt).getTime()) ||

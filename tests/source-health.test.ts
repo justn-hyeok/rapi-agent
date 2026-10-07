@@ -15,11 +15,19 @@ test("does not count an active Aside source as a healthy collector", () => {
   );
 });
 
-test("counts only supported active sources and their failures", () => {
+test("tolerates a transient source failure but reports sustained failures", () => {
+  assert.equal(
+    assessSourceHealth([{ kind: "rss", active: true, failureCount: 1 }]).status,
+    "ok",
+  );
+  assert.equal(
+    assessSourceHealth([{ kind: "rss", active: true, failureCount: 2 }]).status,
+    "ok",
+  );
   assert.deepEqual(
     assessSourceHealth([
       { kind: "github", active: true, failureCount: 0 },
-      { kind: "rss", active: true, failureCount: 2 },
+      { kind: "rss", active: true, failureCount: 3 },
       { kind: "webhook", active: false, failureCount: 0 },
     ]),
     {
