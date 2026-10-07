@@ -70,6 +70,12 @@ npm run bootstrap
 전체 검증을 실행한다. 애플리케이션
 비밀값은 `.env.example`을 참고해 저장소 밖의 `.env` 또는 비밀 관리 도구에 넣는다.
 
+## 배포
+
+main에 머지되고 GitHub CI가 통과하면 VM의 `rapi-auto-deploy.timer`가 5분 안에
+검증·전환을 수행하고 운영 채널에 결과를 알린다. 절차는
+[운영 문서의 자동 배포](docs/operations.md#자동-배포)에 있다.
+
 ## 실행
 
 `.env.example`을 저장소 밖의 운영 환경 값으로 채운 뒤 다음 프로세스를 실행한다.
