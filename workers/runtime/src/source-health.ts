@@ -1,4 +1,4 @@
-const COLLECTABLE_KINDS = new Set(["github", "rss"]);
+const COLLECTABLE_KINDS = new Set(["github", "rss", "github_stars"]);
 
 export interface SourceHealthInput {
   kind: string;

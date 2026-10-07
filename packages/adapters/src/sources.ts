@@ -10,7 +10,7 @@ export interface SourcePayload {
   body: string;
 }
 
-async function readSource(
+export async function readSource(
   url: string,
   headers: Record<string, string>,
   options: SourceHttpOptions,

@@ -8,7 +8,7 @@ import type {
   SubscriptionInput,
   Visibility,
 } from "@rapi/core";
-import { usageWindow } from "@rapi/core";
+import { capItemsPerSource, usageWindow } from "@rapi/core";
 
 interface RawEventResult {
   id: string;
@@ -471,10 +471,12 @@ export class PostgresStore {
           source_id: string;
           source_kind: string;
           source_owner: string | null;
+          max_per_batch: string | null;
           categories: string[];
         }>(
           `SELECT si.id,si.title,si.body,si.canonical_url,si.visibility,s.id::text AS source_id,
            s.kind AS source_kind,s.collection_policy->>'ownerId' AS source_owner,
+           s.collection_policy->>'maxPerBatch' AS max_per_batch,
            COALESCE(array_agg(DISTINCT c.label) FILTER (WHERE c.label IS NOT NULL),'{}') AS categories
            FROM source_items si JOIN raw_events re ON re.id=si.raw_event_id JOIN sources s ON s.id=re.source_id
            LEFT JOIN classifications c ON c.source_item_id=si.id
@@ -483,8 +485,8 @@ export class PostgresStore {
            GROUP BY si.id,s.id ORDER BY COALESCE(si.published_at,si.collected_at) DESC`,
           [periodStart, periodEnd],
         );
-        const matches = rows.rows
-          .filter((row) => {
+        const matches = capItemsPerSource(
+          rows.rows.filter((row) => {
             // Browser data never joins existing catch-all or public-channel
             // subscriptions. Its owner must explicitly select this source.
             if (
@@ -515,8 +517,9 @@ export class PostgresStore {
                 haystack.includes(keyword.toLowerCase()),
               )
             );
-          })
-          .slice(0, sub.max_items);
+          }),
+          sub.max_items,
+        );
         for (const [position, item] of matches.entries()) {
           await client.query(
             "INSERT INTO delivery_batch_items (batch_id,source_item_id,position) VALUES ($1,$2,$3)",
@@ -781,17 +784,24 @@ export class PostgresStore {
   }
 
   async collectableSources(): Promise<
-    Array<{ id: string; kind: string; locator: string; etag: string | null }>
+    Array<{
+      id: string;
+      kind: string;
+      locator: string;
+      etag: string | null;
+      last_success_at: Date | null;
+    }>
   > {
     const result = await this.pool.query<{
       id: string;
       kind: string;
       locator: string;
       etag: string | null;
+      last_success_at: Date | null;
     }>(
-      `SELECT s.id,s.kind,s.locator,c.etag FROM sources s
+      `SELECT s.id,s.kind,s.locator,c.etag,c.last_success_at FROM sources s
        LEFT JOIN source_cursors c ON c.source_id=s.id
-       WHERE s.state='active' AND s.kind IN ('github','rss') AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true' ORDER BY s.created_at`,
+       WHERE s.state='active' AND s.kind IN ('github','rss','github_stars') AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true' ORDER BY s.created_at`,
     );
     return result.rows;
   }
@@ -823,6 +833,14 @@ export class PostgresStore {
       [subscriptionId],
     );
     return result.rows.map((row) => row.id);
+  }
+
+  async sourceExternalIds(sourceId: string): Promise<string[]> {
+    const result = await this.pool.query<{ external_event_id: string }>(
+      "SELECT external_event_id FROM raw_events WHERE source_id=$1 AND external_event_id IS NOT NULL",
+      [sourceId],
+    );
+    return result.rows.map((row) => row.external_event_id);
   }
 
   async activeSourceIds(): Promise<string[]> {

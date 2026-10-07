@@ -8,6 +8,7 @@ import {
   DiscordDeliveryAdapter,
   FeedSourceAdapter,
   GitHubSourceAdapter,
+  GitHubStarRecommender,
   OmpHttpAdapter,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
@@ -74,6 +75,7 @@ const crawler =
     : undefined;
 const feed = new FeedSourceAdapter();
 const github = new GitHubSourceAdapter(config.GITHUB_READ_TOKEN);
+const stars = new GitHubStarRecommender(config.GITHUB_READ_TOKEN);
 const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
   ? new WebhookDeliveryWorker(
       store,
@@ -142,23 +144,28 @@ async function collect(): Promise<void> {
         config.TECHNICAL_RSS_WEBHOOK_NAME,
       )
     : null;
-  await agent.collectConfiguredSources(feed, github, async (input) => {
-    if (
-      input.sourceKind !== "rss" ||
-      !destination ||
-      destination.kind !== "discord_outbound" ||
-      destination.state !== "active"
-    )
-      return;
-    await store.enqueueWebhookJob(`rss:${input.itemId}:${destination.id}`, {
-      destinationKind: "discord_webhook",
-      destinationId: destination.id,
-      title: input.item.title,
-      summary: input.item.body.slice(0, 1200),
-      url: input.item.url,
-      sentChunks: 0,
-    });
-  });
+  await agent.collectConfiguredSources(
+    feed,
+    github,
+    async (input) => {
+      if (
+        input.sourceKind !== "rss" ||
+        !destination ||
+        destination.kind !== "discord_outbound" ||
+        destination.state !== "active"
+      )
+        return;
+      await store.enqueueWebhookJob(`rss:${input.itemId}:${destination.id}`, {
+        destinationKind: "discord_webhook",
+        destinationId: destination.id,
+        title: input.item.title,
+        summary: input.item.body.slice(0, 1200),
+        url: input.item.url,
+        sentChunks: 0,
+      });
+    },
+    stars,
+  );
 }
 
 async function deliver(): Promise<"delivered" | "idle"> {

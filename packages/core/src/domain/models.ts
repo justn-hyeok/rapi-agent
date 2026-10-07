@@ -2,7 +2,7 @@ export type Visibility = "private" | "unlisted" | "public";
 
 export interface SourceRecord {
   id: string;
-  kind: "github" | "rss" | "webhook" | "aside";
+  kind: "github" | "rss" | "webhook" | "aside" | "github_stars";
   locator: string;
   visibility: Visibility;
 }
