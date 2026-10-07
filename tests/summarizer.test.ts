@@ -47,7 +47,7 @@ test("keeps only known, unique, non-empty summaries and bounds length", () => {
   );
   assert.deepEqual([...result.keys()], ["a", "b"]);
   assert.equal(result.get("a"), "MCP 지원이 추가됐다.");
-  assert.equal(result.get("b")!.length, 220);
+  assert.equal(result.get("b")!.length, 260);
 });
 
 test("runs codex read-only with an output schema and parses its last message", async () => {

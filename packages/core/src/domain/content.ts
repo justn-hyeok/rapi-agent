@@ -82,7 +82,31 @@ export function renderBriefing(
 ): DeliveryPayload {
   const textLines = [title, ""];
   const htmlItems: string[] = [];
+  const groupCounts = new Map<string, number>();
+  for (const item of items)
+    if (item.groupKey)
+      groupCounts.set(item.groupKey, (groupCounts.get(item.groupKey) ?? 0) + 1);
+  const rendered = new Set<string>();
+  const entries: BriefingItem[] = [];
   for (const item of items) {
+    if (!item.groupKey) {
+      entries.push(item);
+      continue;
+    }
+    if (rendered.has(item.groupKey)) continue;
+    rendered.add(item.groupKey);
+    const count = groupCounts.get(item.groupKey) ?? 1;
+    entries.push(
+      count > 1
+        ? {
+            ...item,
+            title: `${item.groupKey} · GitHub 활동 ${count}건`,
+            canonicalUrl: `https://github.com/${item.groupKey}`,
+          }
+        : item,
+    );
+  }
+  for (const item of entries) {
     textLines.push(
       `- ${item.title}`,
       `  ${item.summary}`,

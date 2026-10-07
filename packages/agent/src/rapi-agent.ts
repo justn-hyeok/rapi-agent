@@ -22,6 +22,7 @@ import {
   completedDeliveryPeriodWindow,
   renderBriefing,
   renderMdx,
+  repositoryKey,
   summarize,
 } from "@rapi/core";
 import {
@@ -29,7 +30,11 @@ import {
   GitHubSourceAdapter,
   GitHubStarRecommender,
   SUMMARY_PROMPT_VERSION,
+  plainText,
+  repositoryContext,
   type ItemSummarizer,
+  type RepositoryDescriber,
+  type SummaryInput,
   parseFeed,
   parseGitHubEvent,
   type ExternalItem,
@@ -71,6 +76,7 @@ export class RapiAgent {
     private readonly delivery: DeliveryAdapter,
     private readonly omp: OmpAdapter,
     private readonly summarizer?: ItemSummarizer,
+    private readonly repositories?: RepositoryDescriber,
   ) {}
 
   // Model summaries are written once per item and reused by every retry, so
@@ -82,15 +88,62 @@ export class RapiAgent {
       this.summarizer.policy,
     );
     if (items.length === 0) return 0;
-    const summaries = await this.summarizer.summarize(items);
-    for (const [itemId, content] of summaries)
-      await this.store.saveItemSummary(
-        itemId,
-        this.summarizer.policy,
-        SUMMARY_PROMPT_VERSION,
-        content,
-      );
-    return summaries.size;
+    // Activity in one repository is delivered as one entry, so it is
+    // summarized as one unit and the result is stored for every member.
+    const units = new Map<
+      string,
+      { key: string | null; members: typeof items }
+    >();
+    for (const item of items) {
+      const key =
+        item.group_by === "repository" ? repositoryKey(item.url) : null;
+      const unit = units.get(key ? `g:${key}` : `i:${item.id}`) ?? {
+        key,
+        members: [],
+      };
+      unit.members.push(item);
+      units.set(key ? `g:${key}` : `i:${item.id}`, unit);
+    }
+    const inputs: SummaryInput[] = [];
+    for (const { key, members } of units.values()) {
+      const lead = members[0]!;
+      const repository = key ?? repositoryKey(lead.url);
+      const info = repository
+        ? await this.repositories?.describe(repository)
+        : undefined;
+      inputs.push({
+        id: lead.id,
+        url: lead.url,
+        title:
+          members.length > 1 ? `${key} 활동 ${members.length}건` : lead.title,
+        body:
+          members.length > 1
+            ? members
+                .map(
+                  (member) =>
+                    `- ${member.title}: ${plainText(member.body, 500)}`,
+                )
+                .join("\n")
+            : lead.body,
+        ...(info ? { context: repositoryContext(info) } : {}),
+      });
+    }
+    const summaries = await this.summarizer.summarize(inputs);
+    let saved = 0;
+    for (const { members } of units.values()) {
+      const content = summaries.get(members[0]!.id);
+      if (!content) continue;
+      for (const member of members) {
+        await this.store.saveItemSummary(
+          member.id,
+          this.summarizer.policy,
+          SUMMARY_PROMPT_VERSION,
+          content,
+        );
+        saved += 1;
+      }
+    }
+    return saved;
   }
 
   createSource(
