@@ -183,13 +183,18 @@ export async function switchRelease({
   return receipt;
 }
 
+// These units Require= rapi-bot (directly or through the gateway), so stopping
+// bot stops them too. They are not switched themselves and must come back.
+const dependentUnits = ["rapi-public-gateway.service", "rapi-tunnel.service"];
+
 export function systemdDriver(
   endpointPorts = configuredHealthPorts(process.env),
   maximumAttempts = 30,
+  run = (args) =>
+    execute("systemctl", args, { timeout: 60_000, maxBuffer: 64_000 }),
 ) {
   const unit = (name) => `rapi-${name}.service`;
-  const run = (args) =>
-    execute("systemctl", args, { timeout: 60_000, maxBuffer: 64_000 });
+  let stoppedDependents = [];
   return {
     async active(services) {
       const active = [];
@@ -207,10 +212,21 @@ export function systemdDriver(
       return active;
     },
     async stop(services) {
+      const running = [];
+      for (const name of dependentUnits) {
+        const { stdout } = await run([
+          "show",
+          name,
+          "--property=ActiveState",
+          "--value",
+        ]);
+        if (stdout.trim() === "active") running.push(name);
+      }
+      stoppedDependents = [...new Set([...stoppedDependents, ...running])];
       await run(["stop", ...services.map(unit)]);
     },
     async start(services) {
-      await run(["start", ...services.map(unit)]);
+      await run(["start", ...services.map(unit), ...stoppedDependents]);
     },
     async ready(services, sha) {
       // Unit drop-ins must already point WorkingDirectory at the current symlink.

@@ -157,3 +157,28 @@ test("monitor revision preflight tolerates a down contained worker while bot rea
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("systemd driver restarts dependents that stopping bot took down", async () => {
+  const calls: string[][] = [];
+  const states: Record<string, string> = {
+    "rapi-public-gateway.service": "active",
+    "rapi-tunnel.service": "inactive",
+  };
+  const driver = systemdDriver({ bot: 1 }, 1, async (args) => {
+    calls.push(args);
+    return { stdout: args[0] === "show" ? `${states[args[1]!] ?? ""}\n` : "" };
+  });
+  await driver.stop(["bot", "worker"]);
+  await driver.start(["bot", "worker"]);
+  assert.deepEqual(calls.at(-2), [
+    "stop",
+    "rapi-bot.service",
+    "rapi-worker.service",
+  ]);
+  assert.deepEqual(calls.at(-1), [
+    "start",
+    "rapi-bot.service",
+    "rapi-worker.service",
+    "rapi-public-gateway.service",
+  ]);
+});

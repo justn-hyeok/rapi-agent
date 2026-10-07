@@ -10,6 +10,7 @@ export function configuredHealthPorts(
 export function systemdDriver(
   endpointPorts?: Record<string, number>,
   maximumAttempts?: number,
+  run?: (args: string[]) => Promise<{ stdout: string }>,
 ): ServiceDriver;
 export function switchRelease(options: {
   currentPath: string;
