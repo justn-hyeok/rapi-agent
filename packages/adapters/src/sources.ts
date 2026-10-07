@@ -106,7 +106,9 @@ function atomLink(value: unknown): string {
 export function parseFeed(xml: string): ExternalItem[] {
   if (Buffer.byteLength(xml) > 2_000_000)
     throw new Error("Feed exceeds the 2 MB input limit");
-  if (/<!DOCTYPE/i.test(xml))
+  // CDATA content is inert text; feeds such as WordPress embed full HTML
+  // documents there. Only a real document type declaration is rejected.
+  if (/<!DOCTYPE/i.test(xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")))
     throw new Error("DOCTYPE is not allowed in feeds");
   const parser = new XMLParser({
     ignoreAttributes: false,
