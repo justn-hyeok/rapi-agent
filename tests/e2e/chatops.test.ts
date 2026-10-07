@@ -8,7 +8,10 @@ import {
   type ChatScope,
   type RunEvidence,
 } from "@rapi/contracts";
-import { ChatOrchestrator } from "../../apps/chat/src/orchestrator.js";
+import {
+  CODE_CHANGE_POLICY,
+  ChatOrchestrator,
+} from "../../apps/chat/src/orchestrator.js";
 import {
   runProcess,
   type Executor,
@@ -219,6 +222,7 @@ test("Discord duplicate admission, live status and actual cancellation bypass qu
     verify: async () => undefined,
     run: async (input: ExecuteInput) => {
       calls++;
+      assert.ok(input.execute && input.prompt.includes(CODE_CHANGE_POLICY));
       started();
       return runProcess(process.execPath, ["-e", "setInterval(()=>{},1000)"], {
         signal: input.signal,
@@ -424,6 +428,7 @@ test("explicit memory UX is deduplicated and injected as bounded data into read-
     await chat.receive(message("어떤 언어가 좋아?"));
     assert.equal(prompts.length, 1);
     assert.equal(prompts[0].execute, false);
+    assert.ok(!prompts[0].prompt.includes(CODE_CHANGE_POLICY));
     assert.equal(prompts[0].model, DEFAULT_CODEX_MODEL);
     assert.ok(prompts[0].prompt.includes(memories[0]!.digest));
     await chat.receive(message("아스트라로 어떤 언어가 좋아?"));

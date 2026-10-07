@@ -42,3 +42,22 @@ test("HTTP bot startup does not require the optional runtime socket path", async
 
   assert.doesNotMatch(bot, /^ReadWritePaths=.*\/run\/rapi-public-agent/m);
 });
+
+test("auto deploy runs CI-verified main without production secrets", async () => {
+  const service = await unit("rapi-auto-deploy.service");
+  const timer = await unit("rapi-auto-deploy.timer");
+  assert.doesNotMatch(service, /^EnvironmentFile=/m);
+  assert.match(service, /^User=justn$/m);
+  assert.match(
+    service,
+    /^ExecStart=\/bin\/bash \/home\/justn\/rapi-releases\/current\/scripts\/auto-deploy\.sh$/m,
+  );
+  assert.match(timer, /^OnUnitInactiveSec=5min$/m);
+  const script = await readFile(
+    new URL("../scripts/auto-deploy.sh", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /deploy-revision\.sh <\/dev\/null/);
+  assert.match(script, /switch-release\.mjs <\/dev\/null/);
+  assert.match(script, /check-runs/);
+});
