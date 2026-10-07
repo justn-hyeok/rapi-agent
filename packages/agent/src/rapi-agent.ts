@@ -26,6 +26,7 @@ import {
 import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
+  GitHubStarRecommender,
   parseFeed,
   parseGitHubEvent,
   type ExternalItem,
@@ -45,7 +46,7 @@ export class RapiAgent {
   ) {}
 
   createSource(
-    kind: "github" | "rss" | "webhook" | "aside",
+    kind: "github" | "rss" | "webhook" | "aside" | "github_stars",
     locator: string,
     visibility: Visibility,
   ): Promise<string> {
@@ -160,10 +161,11 @@ export class RapiAgent {
     github: GitHubSourceAdapter,
     onInserted?: (input: {
       sourceId: string;
-      sourceKind: "github" | "rss" | "webhook" | "aside";
+      sourceKind: "github" | "rss" | "webhook" | "aside" | "github_stars";
       itemId: string;
       item: ExternalItem;
     }) => Promise<void>,
+    stars?: GitHubStarRecommender,
   ): Promise<void> {
     const sources = await this.store.collectableSources();
     await this.collectIndependently(
@@ -190,6 +192,28 @@ export class RapiAgent {
               source.id,
               new Date().toISOString(),
               result.etag ?? null,
+            );
+            return;
+          }
+          if (source.kind === "github_stars") {
+            if (!stars)
+              throw new Error("GitHub star recommendations are not configured");
+            // Recommendations are a daily digest, not a polled stream.
+            if (
+              source.last_success_at &&
+              Date.now() - new Date(source.last_success_at).getTime() <
+                20 * 3_600_000
+            )
+              return;
+            const exclude = new Set(
+              await this.store.sourceExternalIds(source.id),
+            );
+            for (const item of await stars.recommend(source.locator, exclude))
+              await this.ingestExternalItem(source.id, item);
+            await this.store.saveCursor(
+              source.id,
+              new Date().toISOString(),
+              null,
             );
             return;
           }
