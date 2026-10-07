@@ -38,6 +38,30 @@ import {
 import { PostgresStore } from "@rapi/db";
 import type { PoolClient } from "pg";
 
+// A feed URL that embeds a credential (e.g. GitHub's private dashboard feed)
+// is stored as `env:NAME` so the secret stays in the service environment and
+// out of the database, status commands and raw payloads.
+export function resolveFeedLocator(
+  locator: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!locator.startsWith("env:")) return locator;
+  const name = locator.slice(4);
+  if (!/^[A-Z][A-Z0-9_]*_FEED_URL$/.test(name))
+    throw new Error("Feed locator environment name must end with _FEED_URL");
+  const value = environment[name];
+  if (!value?.startsWith("https://"))
+    throw new Error(`${name} must be an https URL`);
+  return value;
+}
+
+export function redactUrlTokens(body: string): string {
+  return body.replace(
+    /([?&](?:token|access_token)=)[^&"'<>\s]+/g,
+    "$1REDACTED",
+  );
+}
+
 export class RapiAgent {
   constructor(
     readonly store: PostgresStore,
@@ -173,10 +197,17 @@ export class RapiAgent {
         sourceId: source.id,
         collect: async () => {
           if (source.kind === "rss") {
+            const secret = source.locator.startsWith("env:");
             const result = await feed.fetch(
-              source.locator,
+              resolveFeedLocator(source.locator),
               source.etag ?? undefined,
-              (payload) => this.persistSourcePayload(source.id, payload),
+              (payload) =>
+                this.persistSourcePayload(
+                  source.id,
+                  secret
+                    ? { ...payload, body: redactUrlTokens(payload.body) }
+                    : payload,
+                ),
             );
             for (const item of result.items) {
               const saved = await this.ingestExternalItem(source.id, item);
