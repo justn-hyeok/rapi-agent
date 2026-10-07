@@ -554,9 +554,11 @@ export class PostgresStore {
       BriefingItem & { summary: string; categories: string[] }
     >(
       `SELECT si.id,si.title,si.canonical_url AS "canonicalUrl",si.visibility,
-       COALESCE((SELECT content FROM summaries WHERE si.id=ANY(evidence_item_ids) AND purpose='item' ORDER BY created_at DESC LIMIT 1),si.body) AS summary,
+       COALESCE((SELECT CASE WHEN sm.model_policy_version='rules-v1' AND src.kind<>'github_stars' THEN '[발췌] '||sm.content ELSE sm.content END
+         FROM summaries sm WHERE si.id=ANY(sm.evidence_item_ids) AND sm.purpose='item' ORDER BY sm.created_at DESC LIMIT 1),si.body) AS summary,
        COALESCE((SELECT array_agg(label ORDER BY label) FROM classifications WHERE source_item_id=si.id),'{}') AS categories
        FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
+       JOIN raw_events re ON re.id=si.raw_event_id JOIN sources src ON src.id=re.source_id
        WHERE bi.batch_id=$1 AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true' ORDER BY bi.position`,
       [batchId],
     );
@@ -570,6 +572,49 @@ export class PostgresStore {
       targets: targets ?? row.channels,
       items: items.rows,
     };
+  }
+
+  async itemsNeedingSummary(
+    batchId: string,
+    policy: string,
+  ): Promise<Array<{ id: string; title: string; body: string; url: string }>> {
+    const result = await this.pool.query<{
+      id: string;
+      title: string;
+      body: string;
+      url: string;
+    }>(
+      `SELECT si.id,si.title,si.body,si.canonical_url AS url
+       FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
+       JOIN raw_events re ON re.id=si.raw_event_id JOIN sources src ON src.id=re.source_id
+       WHERE bi.batch_id=$1 AND src.kind<>'github_stars'
+         AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
+         AND NOT EXISTS (SELECT 1 FROM summaries sm WHERE si.id=ANY(sm.evidence_item_ids)
+           AND sm.purpose='item' AND sm.model_policy_version=$2)
+       ORDER BY bi.position`,
+      [batchId, policy],
+    );
+    return result.rows;
+  }
+
+  async saveItemSummary(
+    itemId: string,
+    policy: string,
+    promptVersion: string,
+    content: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO summaries (id,purpose,cache_key,model_policy_version,prompt_version,content,evidence_item_ids)
+       VALUES ($1,'item',$2,$3,$4,$5,$6::uuid[]) ON CONFLICT (cache_key) DO NOTHING`,
+      [
+        randomUUID(),
+        `${itemId}:item:${policy}:${promptVersion}`,
+        policy,
+        promptVersion,
+        content,
+        [itemId],
+      ],
+    );
   }
 
   async getBatch(batchId: string): Promise<FrozenBatch> {
