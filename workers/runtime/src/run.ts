@@ -10,8 +10,6 @@ import {
   GitHubSourceAdapter,
   OmpHttpAdapter,
   SmtpDeliveryAdapter,
-  ASIDE_ADAPTER,
-  ASIDE_LOCATOR,
 } from "@rapi/adapters";
 import {
   CompositeDeliveryAdapter,
@@ -211,17 +209,6 @@ const healthServer = createLocalHealthServer(
           !!crawler &&
           (source.collection_policy as { crawler?: { enabled?: boolean } })
             .crawler?.enabled === true,
-        asideBridge:
-          source.kind === "aside" &&
-          source.locator === ASIDE_LOCATOR &&
-          (
-            source.collection_policy as {
-              visibility?: string;
-              aside?: { adapter?: string };
-            }
-          ).visibility === "private" &&
-          (source.collection_policy as { aside?: { adapter?: string } }).aside
-            ?.adapter === ASIDE_ADAPTER,
         lastSuccessAt: source.last_success_at as Date | null,
       })),
     );

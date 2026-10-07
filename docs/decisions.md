@@ -146,3 +146,17 @@ processes, logs and reports. Health exposes only binary/config presence, not an
 assertion of valid authentication. Preserve owner-authorized broad permissions,
 existing approval/idempotency/evidence behavior, and the separate Codex ChatOps
 executor. This extends D-009's OMP model policy without changing ChatOps routing.
+
+## D-011: Remove Aside browser collection (accepted, 2026-10-07)
+
+Remove the Mac Aside bridge, receiver, collector and setup scripts added in
+v0.1.3. Collection depended on a signed-in, awake Mac, and its only source
+(Hacker News) has public feeds. All collection runs on the VM through official
+feeds and APIs; sites without feeds get an approved VM HTTP/HTML extractor.
+Rapi does not collect through the owner's logged-in browser state.
+
+The `aside` source kind stays as the private, owner-bound browser source kind
+used by the delegated crawler (`collection_policy.crawler.enabled`). Delivery
+keeps rejecting those items outside an explicit owner-only private subscription.
+An active `aside` source without an enabled crawler policy reports failed
+readiness as unsupported until it is disabled or converted.

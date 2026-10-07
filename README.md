@@ -20,7 +20,7 @@ Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업
 ## 시스템 경계
 
 ```text
-웹훅 / GitHub / RSS·사이트 / Aside 리서치
+웹훅 / GitHub / RSS·사이트
                     │
                     ▼
              수집 어댑터 계층
@@ -138,9 +138,8 @@ CI, 외부 장애 감시와 백업·보관 정책의 현재 적용 범위를 기
 `/데이터삭제` 요청·확정·상태 확인과 백업 추적 절차를 기록했다.
 공개 글은 [라피 블로그](https://rapi-07ab7899e00f.justn.me/blog/)에서 볼 수 있다.
 
-`v0.1.3`은 [Aside 자동 수집](docs/aside-collection.md)을 추가한다. 첫 출처는 Hacker News이며,
-Mac의 Aside에서 15분마다 읽어 SSH로 VM에 전달하고 비공개로 저장한다. Mac이 꺼져 있으면
-Aside 수집만 대기하며, GitHub·RSS는 독립적으로 계속 수집한다.
+`v0.1.3`에서 추가한 Mac Aside 브라우저 수집은 제거했다([D-011](docs/decisions.md)).
+모든 수집은 VM에서 공식 피드·API로 수행한다.
 질문·관리자 답변 처리 중에는 Discord의 ‘입력 중’ 표시를 갱신한다.
 검증 기록: [typing indicator evidence](docs/evidence/typing-indicator-20260928.md).
 역할 등록, 라피 질문·관리 채널, 고정 interaction 진입점과 17개 slash 명령을 적용했고,

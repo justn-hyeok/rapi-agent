@@ -285,11 +285,3 @@ export class FeedSourceAdapter {
     };
   }
 }
-
-export interface AsideResearchJob {
-  sourceId: string;
-  locator: string;
-  purpose: string;
-  schedule: string;
-  visibility: "private" | "unlisted";
-}

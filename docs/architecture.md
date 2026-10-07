@@ -16,7 +16,7 @@ ZeroClaw, OMP는 모두 포트 뒤의 어댑터다.
 | `core/domain` | 엔티티, 상태 전이, 정책, 오류 정의 |
 | `core/application` | 수집·처리·발송·승인 유스케이스 |
 | `core/ports` | DB, 큐, 모델, 채널, 실행기의 인터페이스 |
-| `adapters/ingest` | 웹훅, GitHub, 피드, 사이트, Aside 입력 |
+| `adapters/ingest` | 웹훅, GitHub, 피드, 사이트 입력 |
 | `adapters/delivery` | Discord, 이메일, MDX 출력 |
 | `adapters/execution` | OpenClaw/ZeroClaw 런타임과 OMP 연결 |
 | `workers` | 예약 수집, 정규화, 요약, 발송, 재시도 |

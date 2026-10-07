@@ -5,5 +5,4 @@ export * from "./webhook-manager.js";
 export * from "./discord-layout.js";
 export * from "./discord-layout-manager.js";
 export * from "./public-community.js";
-export * from "./aside-collector.js";
 export * from "./crawler-collector.js";
