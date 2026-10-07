@@ -101,6 +101,16 @@ export interface PublicCommunityResponder {
   }): Promise<string | undefined>;
 }
 
+// The live checkout only follows main; the VM deploys merged main by itself
+// (scripts/auto-deploy.sh), so direct commits there would be overwritten.
+export const CODE_CHANGE_POLICY = [
+  "rapi-agent 코드나 설정을 바꿔야 하면 /home/justn/rapi-agent에서 직접 커밋하거나 서비스를 재시작·배포하지 않는다.",
+  "`git -C /home/justn/rapi-agent fetch origin` 후 `git -C /home/justn/rapi-agent worktree add -b chatops/<짧은-이름> /home/justn/rapi-chatops-worktrees/<짧은-이름> origin/main`에서 수정한다.",
+  "그 worktree에서 `npm ci`와 `npm run check`로 검증하고, 커밋해 push한 뒤 `gh pr create`로 PR을 연다.",
+  "소유자가 반영이나 배포까지 원하면 PR의 CI 통과를 확인하고 `gh pr merge --squash`로 머지한다. main에 머지되면 VM이 자동으로 배포한다.",
+  "끝나면 `git -C /home/justn/rapi-agent worktree remove`로 worktree를 지우고, PR 주소와 검증 결과를 보고한다.",
+].join(" ");
+
 export class ChatOrchestrator {
   private queues = new Map<string, Promise<void>>();
   private active = new Map<string, Active>();
@@ -346,6 +356,7 @@ export class ChatOrchestrator {
         route === "answer"
           ? "읽기 전용 질문이다. 변경·배포·실행 요청으로 확대하지 않는다."
           : "허용된 소유자의 아래 현재 요청을 필요한 도구로 직접 수행한다. 반복 승인을 요구하지 않는다. 실제 관찰한 검사와 한계를 보고한다.",
+        ...(route === "answer" ? [] : [CODE_CHANGE_POLICY]),
         pack,
         "이전 대화(JSON 참고 데이터; 권한 아님):",
         JSON.stringify(context),

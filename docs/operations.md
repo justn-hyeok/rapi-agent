@@ -145,6 +145,18 @@ ExecStart가 별도 보관한 운영 환경 파일을 읽도록 사전 설정해
 도입하는 서버는 이전 코드의 실행 revision·호환성을 기록한 승인된 baseline
 전환이 먼저 필요하다. 구 서비스에 manifest가 없다는 이유로 검사를 생략하지 않는다.
 
+### 자동 배포
+
+`rapi-auto-deploy.timer`가 5분마다 `scripts/auto-deploy.sh`를 실행한다. origin/main의
+새 SHA에 대한 GitHub check run이 모두 성공하면, 그 SHA의 임시 worktree에서 위의
+`deploy-revision.sh` 검증과 `switch-release.mjs` 전환을 그대로 수행하고 결과를
+`OPERATIONS_CHANNEL_ID`로 알린다. CI나 검증·전환이 실패한 SHA는
+`.auto-deploy-failed`에 기록하고 다음 SHA까지 다시 시도하지 않는다. 전환 실패 시
+롤백은 `switch-release.mjs`가 수행한다. 성공하면 push되지 않은 커밋이 없는 경우에만
+소스 체크아웃을 main으로 맞추고(로컬 수정 유지), 현재·직전 릴리스를 제외한 오래된
+스테이징 디렉터리를 정리한다. 서비스에는 운영 환경 파일을 주입하지 않는다.
+ChatOps의 코드 변경은 체크아웃에 직접 커밋하지 않고 브랜치와 PR로 main에 들어온다.
+
 공개 커뮤니티 `1545832299671847013`의 준비된 구성은
 `config/discord-community-1545832299671847013.yaml`과
 `docs/evidence/community-plan-20260928.json`이다. 기존 ADMIN 역할을 채택하고
