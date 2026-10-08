@@ -16,6 +16,7 @@ import {
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
 import {
+  createCommunityFeeds,
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
   RapiAgent,
@@ -93,6 +94,19 @@ const crawler =
         ),
       )
     : undefined;
+// The owner's curation channels: projects, setup and stars, AI blogs, free tokens.
+const communityFeeds = config.COMMUNITY_GUILD_ID
+  ? await createCommunityFeeds({
+      store,
+      summarizer,
+      guildId: config.COMMUNITY_GUILD_ID,
+      botToken: config.DISCORD_BOT_TOKEN,
+      root: process.cwd(),
+      ...(config.GITHUB_READ_TOKEN
+        ? { githubToken: config.GITHUB_READ_TOKEN }
+        : {}),
+    })
+  : undefined;
 const feed = new FeedSourceAdapter();
 const github = new GitHubSourceAdapter(config.GITHUB_READ_TOKEN);
 const stars = new GitHubStarRecommender(config.GITHUB_READ_TOKEN);
@@ -158,6 +172,9 @@ async function collect(): Promise<void> {
       "Delegated sources require CRAWLER_ENDPOINT and CRAWLER_CALLER_TOKEN",
     );
   await crawler?.runOnce();
+  const posted = await communityFeeds?.runOnce();
+  if (posted?.length)
+    process.stderr.write(`Curation feeds failed: ${posted.join("; ")}\n`);
   const collected = await agent.collectEvents();
   if (collected.failures.length)
     process.stderr.write(

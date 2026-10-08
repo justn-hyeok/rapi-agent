@@ -1,0 +1,18 @@
+{
+  "autoPost": {
+    "projects": false,
+    "setup": false,
+    "stars": false,
+    "ai-blogs": true,
+    "free-tokens": true
+  },
+  "projects": [
+    "rapi-agent",
+    "gh-star",
+    "ily-sexy-ghostty",
+    "brgr",
+    "meter",
+    "agent-config-one-shot",
+    "connect-my-world-in-herdr"
+  ]
+}

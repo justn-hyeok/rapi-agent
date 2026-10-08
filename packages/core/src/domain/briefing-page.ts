@@ -69,12 +69,22 @@ export interface BriefingPageEvent {
   daysUntil: number;
 }
 
+export interface BriefingPageDraft {
+  key: string;
+  feed: string;
+  label: string;
+  title: string;
+  preview: string;
+}
+
 export interface BriefingPageView {
   batchId: string;
   token: string;
   dateLabel: string;
   entries: BriefingPageEntry[];
   events?: BriefingPageEvent[];
+  /** Curation drafts; only present on a curator's page. */
+  curation?: BriefingPageDraft[];
 }
 
 function escape(value: string): string {
@@ -150,6 +160,7 @@ section h2{font-size:.8rem;letter-spacing:.06em;color:var(--muted);font-weight:6
 .ev .act{grid-column:2;grid-row:1 / span 3;align-self:center}
 .dday{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid currentColor;color:var(--muted);margin-left:6px;vertical-align:1px}
 .dday.soon{color:var(--urgent)}
+.draft-actions{grid-column:1 / -1;display:flex;gap:8px;margin-top:6px}
 .detail{margin:4px 0 0;padding:10px 12px;border-left:2px solid var(--accent);background:var(--surface);border-radius:0 6px 6px 0;font-size:.92rem}
 .detail ul{margin:0;padding-left:1.1em;display:grid;gap:4px}
 .detail .src-link{display:inline-block;margin-top:8px;font-size:.82rem}
@@ -187,9 +198,11 @@ async function send(item,kind,on){
 function savedCount(){document.getElementById("saved-n").textContent=document.querySelectorAll('.act[data-k="save"][aria-pressed="true"]').length;}
 function applyView(){
   const tab=document.querySelector('[role="tab"][aria-selected="true"]').id;
+  const cur=document.getElementById("p-cur");
   document.getElementById("p-sched").hidden=tab!=="t-sched";
-  document.getElementById("p-brief").hidden=tab==="t-sched";
-  if(tab==="t-sched")return;
+  if(cur)cur.hidden=tab!=="t-cur";
+  document.getElementById("p-brief").hidden=tab==="t-sched"||tab==="t-cur";
+  if(tab==="t-sched"||tab==="t-cur")return;
   const chip=document.querySelector('.chip[aria-pressed="true"]').dataset.section;
   document.querySelectorAll("section[data-section]").forEach(s=>{
     let shown=0;
@@ -252,6 +265,21 @@ document.getElementById("add-form").addEventListener("submit",async e=>{
   else{document.getElementById("preview").hidden=true;msg.textContent=b.message;}
 });
 renderEvents();
+let drafts=JSON.parse(document.getElementById("curation-data").textContent);
+function renderDrafts(){
+  const box=document.getElementById("drafts");if(!box||!drafts)return;
+  document.getElementById("cur-n").textContent=drafts.length;
+  box.innerHTML=drafts.length?drafts.map(d=>'<div class="ev" data-key="'+esc(d.key)+'"><span class="when">'+esc(d.label)+'</span><h3>'+esc(d.title)+'</h3><span class="k">'+esc(d.preview)+'</span><span class="draft-actions"><button class="btn" data-send="'+esc(d.key)+'">보내기</button><button class="btn ghost" data-discard="'+esc(d.key)+'">버리기</button></span></div>').join(""):'<p class="empty">보낼 초안이 없습니다.</p>';
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-send],[data-discard]");if(!b)return;
+  const send=b.hasAttribute("data-send");b.disabled=true;
+  const r=await fetch("/b/"+batch+"/curation",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({t:token,action:send?"send":"discard",key:send?b.dataset.send:b.dataset.discard})});
+  const body=await r.json().catch(()=>({ok:false,message:"응답을 읽지 못했습니다."}));
+  if(body.drafts){drafts=body.drafts;renderDrafts();}
+  note.textContent=body.message||"";note.hidden=!body.message;b.disabled=false;
+});
+renderDrafts();
 savedCount();applyView();
 `;
 
@@ -294,11 +322,12 @@ ${actions(entry)}
   const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex"><meta name="referrer" content="no-referrer"><title>라피 브리핑 · ${escape(view.dateLabel)}</title><style nonce="${nonce}">${STYLE}</style></head><body>
 <div class="wrap" id="app" data-batch="${escape(view.batchId)}" data-token="${escape(view.token)}">
 <header class="top"><span class="date">${escape(view.dateLabel)}</span><h1>오늘 볼 것 ${view.entries.length}건</h1></header>
-<nav class="tabs" role="tablist" aria-label="보기 전환"><button role="tab" id="t-brief" aria-selected="true">브리핑<span class="n">${view.entries.length}</span></button><button role="tab" id="t-sched" aria-selected="false">일정·마감<span class="n" id="sched-n">${(view.events ?? []).length}</span></button><button role="tab" id="t-saved" aria-selected="false">저장<span class="n" id="saved-n">0</span></button></nav>
+<nav class="tabs" role="tablist" aria-label="보기 전환"><button role="tab" id="t-brief" aria-selected="true">브리핑<span class="n">${view.entries.length}</span></button><button role="tab" id="t-sched" aria-selected="false">일정·마감<span class="n" id="sched-n">${(view.events ?? []).length}</span></button><button role="tab" id="t-saved" aria-selected="false">저장<span class="n" id="saved-n">0</span></button>${view.curation ? `<button role="tab" id="t-cur" aria-selected="false">큐레이션<span class="n" id="cur-n">${view.curation.length}</span></button>` : ""}</nav>
 <main><p class="note" id="note" role="alert" hidden></p>
 <div id="p-brief"><div class="filters" aria-label="분류">${chips}</div>
 ${sections}
 <p class="empty" id="empty" hidden>여기에 보일 항목이 없습니다. 저장을 누른 항목은 저장 탭에 모입니다.</p></div>
+${view.curation ? `<div id="p-cur" hidden><p class="hint">라피가 만든 초안입니다. 보내기를 눌러야 채널에 올라갑니다.</p><div id="drafts"></div></div>` : ""}
 <div id="p-sched" hidden>
 <form class="add" id="add-form"><input id="add-input" autocomplete="off" placeholder="예: 금요일 오후 3시 면담, 10/20 해커톤 마감" aria-label="일정 추가"><button class="btn" type="submit">추가</button></form>
 <p class="hint">문장으로 쓰면 날짜와 시간을 나눠서 먼저 보여 드립니다. Discord에서 <span class="nb">/일정</span> 명령으로 추가해도 같은 곳에 저장됩니다.</p>
@@ -306,6 +335,6 @@ ${sections}
 <p class="hint" id="sched-msg" role="status"></p>
 <div id="events"></div>
 </div>
-</main></div><script type="application/json" id="events-data">${JSON.stringify(view.events ?? []).replace(/</g, "\\u003c")}</script><script nonce="${nonce}">${SCRIPT}</script></body></html>`;
+</main></div><script type="application/json" id="curation-data">${JSON.stringify(view.curation ?? null).replace(/</g, "\\u003c")}</script><script type="application/json" id="events-data">${JSON.stringify(view.events ?? []).replace(/</g, "\\u003c")}</script><script nonce="${nonce}">${SCRIPT}</script></body></html>`;
   return { html, nonce };
 }

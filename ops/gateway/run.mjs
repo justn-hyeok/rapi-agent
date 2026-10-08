@@ -88,7 +88,7 @@ const server = createServer(async (incoming, outgoing) => {
     /^\/b\/[0-9a-f-]{36}$/.test(path);
   const briefingFeedback =
     incoming.method === "POST" &&
-    /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail)$/.test(path);
+    /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail|curation)$/.test(path);
   if (
     !briefingPage &&
     !briefingFeedback &&
