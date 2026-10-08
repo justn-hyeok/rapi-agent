@@ -130,10 +130,14 @@ type LoopState = {
   lastError?: string;
   deliveryOutcome?: "delivered" | "idle";
 };
-const loops: Record<"collection" | "delivery" | "webhook", LoopState> = {
+const loops: Record<
+  "collection" | "delivery" | "webhook" | "curation",
+  LoopState
+> = {
   collection: {},
   delivery: {},
   webhook: {},
+  curation: {},
 };
 
 async function runLoop(
@@ -172,9 +176,6 @@ async function collect(): Promise<void> {
       "Delegated sources require CRAWLER_ENDPOINT and CRAWLER_CALLER_TOKEN",
     );
   await crawler?.runOnce();
-  const posted = await communityFeeds?.runOnce();
-  if (posted?.length)
-    process.stderr.write(`Curation feeds failed: ${posted.join("; ")}\n`);
   const collected = await agent.collectEvents();
   if (collected.failures.length)
     process.stderr.write(
@@ -222,6 +223,17 @@ function report(error: unknown): void {
     `${error instanceof Error ? error.message : "Worker failed"}\n`,
   );
 }
+
+// Curation calls the model and can take minutes; it never delays startup
+// readiness or the collection loop.
+async function curate(): Promise<void> {
+  const failures = await communityFeeds?.runOnce();
+  if (failures?.length)
+    throw new Error(`Curation feeds failed: ${failures.join("; ")}`);
+}
+const curationTimer = communityFeeds
+  ? setInterval(() => void runLoop("curation", curate), 5 * 60_000)
+  : undefined;
 
 await runLoop("collection", collect);
 if (shouldRunDelivery(config.DELIVERY_ENABLED))
@@ -312,7 +324,10 @@ const healthServer = createLocalHealthServer(
             name,
             status: readiness?.status ?? (state.lastError ? "failed" : "ok"),
             checkedAt: state.lastStartedAt ?? now.toISOString(),
-            required: !disabled && (name !== "webhook" || !!webhookWorker),
+            required:
+              !disabled &&
+              name !== "curation" &&
+              (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
               ? { lastSuccessAt: state.lastSuccessAt }
@@ -334,6 +349,7 @@ const healthServer = createLocalHealthServer(
 
 const shutdown = (): void => {
   clearInterval(collectionTimer);
+  if (curationTimer) clearInterval(curationTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();
