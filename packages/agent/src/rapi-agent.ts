@@ -24,6 +24,8 @@ import {
   renderMdx,
   repositoryKey,
   BRIEFING_SECTIONS,
+  learnPreferences,
+  preferenceScore,
   formatScheduleWhen,
   parseScheduleText,
   scheduleDaysUntil,
@@ -40,6 +42,8 @@ import {
   GitHubStarRecommender,
   fetchCollectedEvents,
   SUMMARY_PROMPT_VERSION,
+  DETAIL_PROMPT_VERSION,
+  readSource,
   plainText,
   repositoryContext,
   type ItemSummarizer,
@@ -118,6 +122,9 @@ export class RapiAgent {
     if (!batch) return undefined;
     const entries: BriefingPageEntry[] = [];
     const groups = new Map<string, BriefingPageEntry & { count: number }>();
+    const preferences = learnPreferences(
+      await this.store.feedbackSignals(batch.ownerId),
+    );
     const sections = new Set<string>(BRIEFING_SECTIONS.map((s) => s.id));
     for (const row of batch.rows) {
       const group =
@@ -164,7 +171,14 @@ export class RapiAgent {
           : (group ?? row.title),
         url: row.url,
         summary,
-        ...(why ? { why } : {}),
+        ...(why
+          ? { why }
+          : ((reason) => (reason ? { why: reason } : {}))(
+              preferenceScore(
+                { sourceId: row.source_id, title: row.title },
+                preferences,
+              ).reason,
+            )),
         source:
           row.source_label ??
           (stars ? "GitHub 추천" : group ? "팔로우 활동" : host),
@@ -295,6 +309,77 @@ export class RapiAgent {
       status: result.ok ? 200 : 400,
       body: { ...result, events: await this.upcomingEvents(batch.ownerId) },
     };
+  }
+
+  /** Key points of one briefing item, read from the original page once and cached. */
+  async briefingDetail(
+    batchId: string,
+    token: string,
+    itemId: unknown,
+  ): Promise<{ status: number; body: unknown }> {
+    if (!this.briefingTokenValid(batchId, token))
+      return {
+        status: 403,
+        body: { ok: false, message: "링크가 만료됐습니다." },
+      };
+    if (typeof itemId !== "string" || !/^[0-9a-f-]{36}$/.test(itemId))
+      return {
+        status: 400,
+        body: { ok: false, message: "항목을 찾지 못했습니다." },
+      };
+    const item = await this.store.itemInBatch(batchId, itemId);
+    if (!item)
+      return {
+        status: 404,
+        body: { ok: false, message: "항목을 찾지 못했습니다." },
+      };
+    const summarizer = this.summarizer;
+    if (!summarizer?.detail)
+      return {
+        status: 503,
+        body: { ok: false, message: "정리 기능이 꺼져 있습니다." },
+      };
+    const cached = await this.store.itemDetail(itemId, summarizer.policy);
+    if (cached)
+      return {
+        status: 200,
+        body: { ok: true, points: JSON.parse(cached) as string[] },
+      };
+    let text = item.body;
+    try {
+      const { body } = await readSource(
+        item.url,
+        {
+          "User-Agent": "rapi-agent",
+          Accept: "text/html,application/xhtml+xml",
+        },
+        { timeoutMs: 15_000, maxBodyBytes: 2_000_000 },
+      );
+      if (body.length > text.length) text = body;
+    } catch {
+      // Paywalled or blocked pages fall back to the collected text.
+    }
+    const points = await summarizer.detail({
+      title: item.title,
+      url: item.url,
+      text,
+    });
+    if (!points.length)
+      return {
+        status: 502,
+        body: {
+          ok: false,
+          message: "정리하지 못했습니다. 원문을 열어 주세요.",
+        },
+      };
+    await this.store.saveItemDetail(
+      itemId,
+      summarizer.policy,
+      DETAIL_PROMPT_VERSION,
+      JSON.stringify(points),
+    );
+    await this.store.setItemFeedback(batchId, itemId, "open", true);
+    return { status: 200, body: { ok: true, points } };
   }
 
   async recordBriefingFeedback(

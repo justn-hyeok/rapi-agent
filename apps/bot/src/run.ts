@@ -7,6 +7,7 @@ import type {
 import {
   DiscordDeliveryAdapter,
   OmpHttpAdapter,
+  CodexSummarizer,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
 import {
@@ -15,6 +16,7 @@ import {
   DiscordCommandService,
   PublicCommunityService,
   RapiAgent,
+  DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
 import { PublicAgentClient } from "@rapi/adapters";
@@ -93,7 +95,9 @@ const agent = new RapiAgent(
   config.OMP_ENDPOINT
     ? new OmpHttpAdapter(config.OMP_ENDPOINT)
     : new DisabledOmpAdapter(),
-  undefined,
+  process.env.SUMMARY_MODEL === "off"
+    ? undefined
+    : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL),
   undefined,
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
     ? {
@@ -289,6 +293,8 @@ const server = createDiscordInteractionServer(
         agent.recordBriefingFeedback(batchId, token, input),
       schedule: (batchId, token, input) =>
         agent.briefingSchedule(batchId, token, input),
+      detail: (batchId, token, itemId) =>
+        agent.briefingDetail(batchId, token, itemId),
     },
     component: async (identity, customId) => {
       if (!identity.guildId)

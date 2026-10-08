@@ -378,6 +378,11 @@ export function createDiscordInteractionServer(
         token: string,
         input: unknown,
       ): Promise<{ status: number; body: unknown }>;
+      detail(
+        batchId: string,
+        token: string,
+        itemId: unknown,
+      ): Promise<{ status: number; body: unknown }>;
     };
     component?: (
       identity: {
@@ -411,7 +416,7 @@ export function createDiscordInteractionServer(
         });
       }
       const briefing =
-        /^\/b\/([0-9a-f-]{36})(\/feedback|\/events)?(?:\?|$)/.exec(
+        /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail)?(?:\?|$)/.exec(
           request.url ?? "",
         );
       if (briefing && integrations?.briefing) {
@@ -449,6 +454,14 @@ export function createDiscordInteractionServer(
             input = JSON.parse(raw.toString("utf8")) as typeof input;
           } catch {
             return json(response, 400, { error: "invalid json" });
+          }
+          if (briefing[2] === "/detail") {
+            const detail = await integrations.briefing.detail(
+              batchId,
+              typeof input.t === "string" ? input.t : "",
+              input.itemId,
+            );
+            return json(response, detail.status, detail.body);
           }
           if (briefing[2] === "/events") {
             const scheduled = await integrations.briefing.schedule(
