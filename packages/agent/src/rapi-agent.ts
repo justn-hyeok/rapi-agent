@@ -24,6 +24,9 @@ import {
   renderMdx,
   repositoryKey,
   BRIEFING_SECTIONS,
+  formatScheduleWhen,
+  parseScheduleText,
+  scheduleDaysUntil,
   renderBriefingPage,
   signBriefingToken,
   verifyBriefingToken,
@@ -35,6 +38,7 @@ import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
+  fetchCollectedEvents,
   SUMMARY_PROMPT_VERSION,
   plainText,
   repositoryContext,
@@ -192,7 +196,105 @@ export class RapiAgent {
       day: "numeric",
       weekday: "long",
     }).format(batch.periodEnd);
-    return renderBriefingPage({ batchId, token, dateLabel, entries });
+    return renderBriefingPage({
+      batchId,
+      token,
+      dateLabel,
+      entries,
+      events: await this.upcomingEvents(batch.ownerId),
+    });
+  }
+
+  /** Collected deadlines refresh at most every 6 hours. */
+  async collectEvents(
+    now = new Date(),
+  ): Promise<{ saved: number; failures: string[] }> {
+    const last = await this.store.lastCollectedEventAt();
+    if (last && now.getTime() - last.getTime() < 6 * 3_600_000)
+      return { saved: 0, failures: [] };
+    const { events, failures } = await fetchCollectedEvents(now);
+    for (const event of events) await this.store.upsertCollectedEvent(event);
+    return { saved: events.length, failures };
+  }
+
+  async upcomingEvents(ownerId: string, days = 30, now = new Date()) {
+    const rows = await this.store.listEvents(
+      ownerId,
+      new Date(now.getTime() - 12 * 3_600_000),
+      new Date(now.getTime() + days * 86_400_000),
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      url: row.url,
+      kind: row.kind,
+      source: row.source,
+      when: formatScheduleWhen(row.starts_at, row.all_day),
+      daysUntil: scheduleDaysUntil(row.starts_at, now),
+    }));
+  }
+
+  /** Schedule commands shared by the briefing page and Discord. */
+  async scheduleCommand(
+    ownerId: string,
+    input: { action?: unknown; text?: unknown; id?: unknown },
+    now = new Date(),
+  ): Promise<
+    | { ok: true; message: string; preview?: { title: string; when: string } }
+    | { ok: false; message: string }
+  > {
+    if (input.action === "preview" || input.action === "add") {
+      if (typeof input.text !== "string" || !input.text.trim())
+        return { ok: false, message: "일정 내용을 적어 주세요." };
+      const parsed = parseScheduleText(input.text, now);
+      if ("error" in parsed) return { ok: false, message: parsed.error };
+      const when = formatScheduleWhen(parsed.startsAt, parsed.allDay);
+      if (input.action === "preview")
+        return {
+          ok: true,
+          message: `${when} · ${parsed.title}`,
+          preview: { title: parsed.title, when },
+        };
+      await this.store.addEvent(ownerId, parsed);
+      return {
+        ok: true,
+        message: `일정을 추가했습니다: ${when} · ${parsed.title}`,
+      };
+    }
+    if (input.action === "delete") {
+      if (typeof input.id !== "string" || !/^[0-9a-f-]{36}$/.test(input.id))
+        return { ok: false, message: "삭제할 일정을 찾지 못했습니다." };
+      return (await this.store.removeEvent(ownerId, input.id))
+        ? { ok: true, message: "일정을 지웠습니다." }
+        : { ok: false, message: "삭제할 일정을 찾지 못했습니다." };
+    }
+    return { ok: false, message: "알 수 없는 일정 명령입니다." };
+  }
+
+  async briefingSchedule(
+    batchId: string,
+    token: string,
+    input: unknown,
+  ): Promise<{ status: number; body: unknown }> {
+    if (!this.briefingTokenValid(batchId, token))
+      return {
+        status: 403,
+        body: { ok: false, message: "링크가 만료됐습니다." },
+      };
+    const batch = await this.store.briefingRows(batchId);
+    if (!batch)
+      return {
+        status: 404,
+        body: { ok: false, message: "브리핑을 찾지 못했습니다." },
+      };
+    const result = await this.scheduleCommand(
+      batch.ownerId,
+      (input ?? {}) as Record<string, unknown>,
+    );
+    return {
+      status: result.ok ? 200 : 400,
+      body: { ...result, events: await this.upcomingEvents(batch.ownerId) },
+    };
   }
 
   async recordBriefingFeedback(
@@ -574,8 +676,18 @@ export class RapiAgent {
         ? "delivered"
         : batch.state;
     const link = this.briefingLink(batch.id);
+    const ownerId = await this.store.batchOwner(batch.id);
+    const upcoming = ownerId
+      ? (await this.upcomingEvents(ownerId, 7))
+          .filter((event) => event.daysUntil >= 0)
+          .slice(0, 3)
+      : [];
     const payload = renderBriefing("Rapi daily briefing", batch.items, {
       ...(link ? { link } : {}),
+      upcoming: upcoming.map(
+        (event) =>
+          `${event.daysUntil === 0 ? "오늘" : `D-${event.daysUntil}`} · ${event.when} · ${event.title}`,
+      ),
       dateLabel: new Intl.DateTimeFormat("ko-KR", {
         timeZone: "Asia/Seoul",
         month: "long",

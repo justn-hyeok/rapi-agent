@@ -116,7 +116,7 @@ function clip(value: string, limit: number): string {
 export function renderBriefing(
   title: string,
   items: BriefingItem[],
-  options: { link?: string; dateLabel?: string } = {},
+  options: { link?: string; dateLabel?: string; upcoming?: string[] } = {},
 ): DeliveryPayload {
   const entries = briefingEntries(items);
   const textLines = [
@@ -158,6 +158,18 @@ export function renderBriefing(
                       `**${"①②③"[index]} [${clip(item.title, 90).replace(/[[\]]/g, "")}](${item.canonicalUrl})**\n${clip(item.summary, 150)}`,
                   )
                   .join("\n\n"),
+                ...(options.upcoming?.length
+                  ? {
+                      fields: [
+                        {
+                          name: "다가오는 일정",
+                          value: options.upcoming
+                            .map((line) => clip(line, 100))
+                            .join("\n"),
+                        },
+                      ],
+                    }
+                  : {}),
                 ...(options.dateLabel
                   ? { footer: { text: options.dateLabel } }
                   : {}),

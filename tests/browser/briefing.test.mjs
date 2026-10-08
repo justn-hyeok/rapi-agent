@@ -80,6 +80,17 @@ test(
   async () => {
     const posts = [];
     let failNext = false;
+    const schedule = [
+      {
+        id: "88888888-8888-4888-8888-888888888888",
+        title: "[해커톤] Multimodal AI Hackathon 2026 제출 마감",
+        url: "https://devpost.com",
+        kind: "deadline",
+        source: "devpost",
+        when: "10/14 (수)",
+        daysUntil: 6,
+      },
+    ];
     const server = createServer((request, response) => {
       if (request.method === "GET" && request.url.startsWith(`/b/${batchId}`)) {
         const page = renderBriefingPage({
@@ -87,12 +98,42 @@ test(
           token: "1.t",
           dateLabel: "2026년 10월 8일 수요일",
           entries,
+          events: schedule,
         });
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",
           "content-security-policy": `default-src 'none'; style-src 'nonce-${page.nonce}'; script-src 'nonce-${page.nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
         });
         return response.end(page.html);
+      }
+      if (request.method === "POST" && request.url === `/b/${batchId}/events`) {
+        let body = "";
+        request.on("data", (chunk) => (body += chunk));
+        request.on("end", () => {
+          const input = JSON.parse(body);
+          if (input.action === "add")
+            schedule.unshift({
+              id: "99999999-9999-4999-8999-999999999999",
+              title: "면담",
+              url: null,
+              kind: "personal",
+              source: "manual",
+              when: "10/9 (금) 15:00",
+              daysUntil: 1,
+            });
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              ok: true,
+              message:
+                input.action === "preview"
+                  ? "10/9 (금) 15:00 · 면담"
+                  : "일정을 추가했습니다: 10/9 (금) 15:00 · 면담",
+              events: schedule,
+            }),
+          );
+        });
+        return;
       }
       if (
         request.method === "POST" &&
@@ -140,7 +181,7 @@ test(
             `horizontal overflow ${overflow}px at ${width}`,
           );
           for (const box of await page
-            .locator(".act")
+            .locator("#p-brief .act")
             .evaluateAll((nodes) =>
               nodes.map((n) => n.getBoundingClientRect().height),
             ))
@@ -193,6 +234,37 @@ test(
       await page.locator('.chip[data-section="github"]').click();
       assert.equal(await page.locator(".item:not([hidden])").count(), 2);
       await page.locator('.chip[data-section="all"]').click();
+
+      await page.locator("#t-sched").click();
+      assert.equal(await page.locator("#p-brief").isHidden(), true);
+      assert.equal(await page.locator(".ev").count(), 1);
+      assert.match(await page.locator(".ev .dday").textContent(), /D-6/);
+      await page.locator("#add-input").fill("금요일 오후 3시 면담");
+      await page.locator("#add-form button[type=submit]").click();
+      await page.locator("#preview:not([hidden])").waitFor();
+      assert.equal(
+        await page.locator("#preview-text").textContent(),
+        "10/9 (금) 15:00 · 면담",
+      );
+      await page.locator("#confirm").click();
+      await page.waitForFunction(
+        () => document.querySelectorAll(".ev").length === 2,
+      );
+      assert.equal(await page.locator("#preview").isHidden(), true);
+      assert.match(
+        await page.locator("#sched-msg").textContent(),
+        /일정을 추가했습니다/,
+      );
+      assert.equal(await page.locator("#sched-n").textContent(), "2");
+      if (process.env.RAPI_SCREENSHOT_DIR)
+        await page.screenshot({
+          path: join(
+            process.env.RAPI_SCREENSHOT_DIR,
+            "briefing-schedule-390.png",
+          ),
+          fullPage: true,
+        });
+      await page.locator("#t-brief").click();
 
       failNext = true;
       const second = page.locator(".item").nth(1);
