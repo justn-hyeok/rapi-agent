@@ -8,7 +8,14 @@ import type {
   SubscriptionInput,
   Visibility,
 } from "@rapi/core";
-import { capItemsPerSource, repositoryKey, usageWindow } from "@rapi/core";
+import {
+  capItemsPerSource,
+  learnPreferences,
+  rankByPreference,
+  repositoryKey,
+  usageWindow,
+  type FeedbackSignal,
+} from "@rapi/core";
 
 interface RawEventResult {
   id: string;
@@ -487,8 +494,14 @@ export class PostgresStore {
            GROUP BY si.id,s.id ORDER BY COALESCE(si.published_at,si.collected_at) DESC`,
           [periodStart, periodEnd],
         );
+        const preferences = learnPreferences(
+          await this.feedbackSignals(sub.owner_id, client),
+        );
         const matches = capItemsPerSource(
-          rows.rows
+          rankByPreference(rows.rows, preferences, (row) => ({
+            sourceId: row.source_id,
+            title: row.title,
+          }))
             .map((row) => ({
               ...row,
               group_key:
@@ -657,6 +670,7 @@ export class PostgresStore {
       metadata: Record<string, unknown>;
       source_kind: string;
       source_locator: string;
+      source_id: string;
       source_label: string | null;
       source_section: string | null;
       group_by: string | null;
@@ -673,7 +687,7 @@ export class PostgresStore {
       `SELECT si.id,si.title,si.canonical_url AS url,si.published_at,si.metadata,
        COALESCE((SELECT CASE WHEN sm.model_policy_version='rules-v1' AND src.kind<>'github_stars' THEN '[발췌] '||sm.content ELSE sm.content END
          FROM summaries sm WHERE si.id=ANY(sm.evidence_item_ids) AND sm.purpose='item' ORDER BY sm.created_at DESC LIMIT 1),si.body) AS summary,
-       src.kind AS source_kind,src.locator AS source_locator,
+       src.kind AS source_kind,src.locator AS source_locator,src.id::text AS source_id,
        src.collection_policy->>'label' AS source_label,src.collection_policy->>'section' AS source_section,
        src.collection_policy->>'groupBy' AS group_by,
        COALESCE((SELECT array_agg(f.kind) FROM item_feedback f WHERE f.item_id=si.id AND f.owner_id=$2 AND f.active),'{}') AS feedback
@@ -716,6 +730,66 @@ export class PostgresStore {
       );
       return true;
     });
+  }
+
+  /** The owner's recent reactions, the input for personal ranking. */
+  async feedbackSignals(
+    ownerId: string,
+    client?: PoolClient,
+  ): Promise<FeedbackSignal[]> {
+    const result = await (client ?? this.pool).query<FeedbackSignal>(
+      `SELECT re.source_id::text AS "sourceId",si.title,f.kind
+       FROM item_feedback f JOIN source_items si ON si.id=f.item_id JOIN raw_events re ON re.id=si.raw_event_id
+       WHERE f.owner_id=$1 AND f.active AND f.updated_at>now()-interval '90 days'
+       ORDER BY f.updated_at DESC LIMIT 2000`,
+      [ownerId],
+    );
+    return result.rows;
+  }
+
+  async itemInBatch(
+    batchId: string,
+    itemId: string,
+  ): Promise<{ title: string; body: string; url: string } | null> {
+    const result = await this.pool.query<{
+      title: string;
+      body: string;
+      url: string;
+    }>(
+      `SELECT si.title,si.body,si.canonical_url AS url FROM delivery_batch_items bi
+       JOIN source_items si ON si.id=bi.source_item_id WHERE bi.batch_id=$1 AND bi.source_item_id=$2`,
+      [batchId, itemId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async itemDetail(itemId: string, policy: string): Promise<string | null> {
+    const result = await this.pool.query<{ content: string }>(
+      `SELECT content FROM summaries WHERE purpose='detail' AND model_policy_version=$2 AND $1=ANY(evidence_item_ids)
+       ORDER BY created_at DESC LIMIT 1`,
+      [itemId, policy],
+    );
+    return result.rows[0]?.content ?? null;
+  }
+
+  async saveItemDetail(
+    itemId: string,
+    policy: string,
+    promptVersion: string,
+    content: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO summaries (id,purpose,cache_key,model_policy_version,prompt_version,content,evidence_item_ids)
+       VALUES ($1,'detail',$2,$3,$4,$5,$6::uuid[]) ON CONFLICT (cache_key) DO NOTHING`,
+      [
+        randomUUID(),
+        `${itemId}:detail:${policy}:${promptVersion}`,
+        policy,
+        promptVersion,
+        content,
+        [itemId],
+      ],
+    );
   }
 
   async batchOwner(batchId: string): Promise<string | null> {

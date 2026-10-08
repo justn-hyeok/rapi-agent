@@ -150,6 +150,9 @@ section h2{font-size:.8rem;letter-spacing:.06em;color:var(--muted);font-weight:6
 .ev .act{grid-column:2;grid-row:1 / span 3;align-self:center}
 .dday{display:inline-block;font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid currentColor;color:var(--muted);margin-left:6px;vertical-align:1px}
 .dday.soon{color:var(--urgent)}
+.detail{margin:4px 0 0;padding:10px 12px;border-left:2px solid var(--accent);background:var(--surface);border-radius:0 6px 6px 0;font-size:.92rem}
+.detail ul{margin:0;padding-left:1.1em;display:grid;gap:4px}
+.detail .src-link{display:inline-block;margin-top:8px;font-size:.82rem}
 .note[role="alert"]{color:var(--urgent)}
 @media (prefers-reduced-motion:no-preference){.act{transition:background .12s,color .12s}}
 `;
@@ -212,8 +215,23 @@ document.addEventListener("click",async e=>{
     }
     applyView();return;
   }
-  const open=e.target.closest(".act.more");
-  if(open){send(open.closest(".item").dataset.item,"open",true).catch(()=>{});return;}
+  const open=e.target.closest("[data-detail]");
+  if(open){
+    const item=open.closest(".item"),panel=item.querySelector(".detail");
+    const expanded=open.getAttribute("aria-expanded")==="true";
+    open.setAttribute("aria-expanded",String(!expanded));panel.hidden=expanded;
+    if(expanded||panel.dataset.loaded)return;
+    const link=item.querySelector("h3 a").href;
+    panel.innerHTML='<p class="hint">원문을 읽고 정리하는 중입니다. 20초 정도 걸립니다.</p>';
+    try{
+      const r=await fetch("/b/"+batch+"/detail",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({t:token,itemId:item.dataset.item})});
+      const b=await r.json();
+      if(!b.ok)throw new Error(b.message||"정리하지 못했습니다.");
+      panel.innerHTML="<ul>"+b.points.map(p=>"<li>"+esc(p)+"</li>").join("")+'</ul><a class="src-link" target="_blank" rel="noopener noreferrer" href="'+esc(link)+'">원문 열기</a>';
+      panel.dataset.loaded="1";
+    }catch(err){panel.innerHTML='<p class="hint">'+esc(err.message||"정리하지 못했습니다.")+' <a target="_blank" rel="noopener noreferrer" href="'+esc(link)+'">원문 열기</a></p>';}
+    return;
+  }
   const chip=e.target.closest(".chip");
   if(chip){document.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed",String(c===chip)));applyView();return;}
   const tab=e.target.closest('[role="tab"]');
@@ -240,7 +258,7 @@ savedCount();applyView();
 function actions(entry: BriefingPageEntry): string {
   const button = (kind: "up" | "down" | "save", label: string) =>
     `<button class="act" data-k="${kind}" aria-pressed="${entry.feedback[kind]}">${ICONS[kind]}<span>${label}</span></button>`;
-  return `<div class="actions">${button("up", "좋아요")}${button("down", "별로")}${button("save", "저장")}<a class="act more" href="${escape(entry.url)}" target="_blank" rel="noopener noreferrer">${ICONS.open}<span>자세히</span></a></div>`;
+  return `<div class="actions">${button("up", "좋아요")}${button("down", "별로")}${button("save", "저장")}<button class="act more" data-detail aria-expanded="false">${ICONS.open}<span>자세히</span></button></div><div class="detail" hidden></div>`;
 }
 
 export function renderBriefingPage(

@@ -192,6 +192,102 @@ describe("briefing page", () => {
       const after = await agent.briefingPage(batch.id, token);
       assert.match(after!.html, /data-k="down" aria-pressed="true"/);
       assert.match(after!.html, /data-k="save" aria-pressed="true"/);
+      // After a like, the liked source and its terms outrank a newer unrelated item.
+      assert.equal(
+        await agent.recordBriefingFeedback(batch.id, token, {
+          itemId,
+          kind: "up",
+          on: true,
+        }),
+        "ok",
+      );
+      const other = await agent.createSource(
+        "rss",
+        "https://other.example/feed",
+        "public",
+      );
+      for (const [sourceId, externalId, title] of [
+        [other, "o-1", "Crypto market weekly"],
+        [source, "n-2", "Agents ship faster"],
+      ] as const)
+        await agent.ingestExternalItem(
+          sourceId,
+          {
+            externalId,
+            url: `https://x.example/${externalId}`,
+            title,
+            body: "body",
+            author: null,
+            publishedAt:
+              externalId === "o-1"
+                ? "2026-09-09T05:00:00Z"
+                : "2026-09-09T01:00:00Z",
+            metadata: {},
+          },
+          new Date("2026-09-09T06:00:00Z"),
+        );
+      const subscription2 = await agent.createSubscription({
+        ownerId: "owner-1",
+        name: "daily-2",
+        sourceIds: [],
+        categories: [],
+        includeKeywords: [],
+        excludeKeywords: [],
+        cadence: "daily",
+        timezone: "UTC",
+        channels: [{ channel: "discord_dm", recipientId: "owner-1" }],
+        maxItems: 20,
+      });
+      const ranked = await agent.freezeBatch(
+        subscription2,
+        new Date("2026-09-09T00:00:00Z"),
+        new Date("2026-09-10T00:00:00Z"),
+      );
+      assert.deepEqual(
+        ranked.items.map((i) => i.title),
+        ["Agents ship faster", "Crypto market weekly"],
+      );
+
+      const detailAgent = new RapiAgent(
+        store,
+        new RecordingDeliveryAdapter(),
+        new RecordingOmpAdapter(),
+        {
+          policy: "test:model",
+          summarize: async () => new Map(),
+          detail: async () => ["핵심 하나", "핵심 둘"],
+        },
+        undefined,
+        {
+          key: briefingLinkKey("k".repeat(32)),
+          baseUrl: "https://rapi.example",
+        },
+      );
+      const detail = await detailAgent.briefingDetail(batch.id, token, itemId);
+      assert.deepEqual(detail, {
+        status: 200,
+        body: { ok: true, points: ["핵심 하나", "핵심 둘"] },
+      });
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM summaries WHERE purpose='detail'",
+          )
+        ).rowCount,
+        1,
+      );
+      assert.equal(
+        (
+          await store.pool.query(
+            "SELECT 1 FROM item_feedback WHERE kind='open' AND active",
+          )
+        ).rowCount,
+        1,
+      );
+      assert.equal(
+        (await detailAgent.briefingDetail(batch.id, "1.bad", itemId)).status,
+        403,
+      );
     } finally {
       await store.close();
     }

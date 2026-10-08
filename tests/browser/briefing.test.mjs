@@ -135,6 +135,19 @@ test(
         });
         return;
       }
+      if (request.method === "POST" && request.url === `/b/${batchId}/detail`) {
+        request.resume();
+        request.on("end", () => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              ok: true,
+              points: ["첫 번째 핵심", "<b>두 번째</b> 핵심"],
+            }),
+          );
+        });
+        return;
+      }
       if (
         request.method === "POST" &&
         request.url === `/b/${batchId}/feedback`
@@ -265,6 +278,15 @@ test(
           fullPage: true,
         });
       await page.locator("#t-brief").click();
+
+      await first.locator("[data-detail]").click();
+      await first.locator(".detail li").first().waitFor();
+      assert.equal(await first.locator(".detail li").count(), 2);
+      assert.equal(await first.locator(".detail b").count(), 0);
+      assert.equal(
+        await first.locator("[data-detail]").getAttribute("aria-expanded"),
+        "true",
+      );
 
       failNext = true;
       const second = page.locator(".item").nth(1);
