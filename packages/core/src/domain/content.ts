@@ -76,21 +76,19 @@ function escapeHtml(value: string): string {
   });
 }
 
-export function renderBriefing(
-  title: string,
+/** One briefing entry per item, except that a repository group becomes one entry. */
+export function briefingEntries(
   items: BriefingItem[],
-): DeliveryPayload {
-  const textLines = [title, ""];
-  const htmlItems: string[] = [];
+): Array<BriefingItem & { count: number }> {
   const groupCounts = new Map<string, number>();
   for (const item of items)
     if (item.groupKey)
       groupCounts.set(item.groupKey, (groupCounts.get(item.groupKey) ?? 0) + 1);
   const rendered = new Set<string>();
-  const entries: BriefingItem[] = [];
+  const entries: Array<BriefingItem & { count: number }> = [];
   for (const item of items) {
     if (!item.groupKey) {
-      entries.push(item);
+      entries.push({ ...item, count: 1 });
       continue;
     }
     if (rendered.has(item.groupKey)) continue;
@@ -100,12 +98,33 @@ export function renderBriefing(
       count > 1
         ? {
             ...item,
+            count,
             title: `${item.groupKey} · GitHub 활동 ${count}건`,
             canonicalUrl: `https://github.com/${item.groupKey}`,
           }
-        : item,
+        : { ...item, count },
     );
   }
+  return entries;
+}
+
+function clip(value: string, limit: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+}
+
+export function renderBriefing(
+  title: string,
+  items: BriefingItem[],
+  options: { link?: string; dateLabel?: string } = {},
+): DeliveryPayload {
+  const entries = briefingEntries(items);
+  const textLines = [
+    title,
+    ...(options.link ? [`전체 보기: ${options.link}`] : []),
+    "",
+  ];
+  const htmlItems: string[] = [];
   for (const item of entries) {
     textLines.push(
       `- ${item.title}`,
@@ -117,11 +136,45 @@ export function renderBriefing(
       `<li><a href="${escapeHtml(item.canonicalUrl)}">${escapeHtml(item.title)}</a><p>${escapeHtml(item.summary)}</p></li>`,
     );
   }
+  const link = options.link
+    ? `<p><a href="${escapeHtml(options.link)}">전체 보기</a></p>`
+    : "";
   return {
     subject: title,
     text: textLines.join("\n").trimEnd(),
-    html: `<!doctype html><html><body><h1>${escapeHtml(title)}</h1><ul>${htmlItems.join("")}</ul></body></html>`,
+    html: `<!doctype html><html><body><h1>${escapeHtml(title)}</h1>${link}<ul>${htmlItems.join("")}</ul></body></html>`,
     itemIds: items.map((item) => item.id),
+    ...(options.link
+      ? {
+          discord: {
+            embeds: [
+              {
+                title: `오늘 볼 것 ${entries.length}건`,
+                url: options.link,
+                description: entries
+                  .slice(0, 3)
+                  .map(
+                    (item, index) =>
+                      `**${"①②③"[index]} [${clip(item.title, 90).replace(/[[\]]/g, "")}](${item.canonicalUrl})**\n${clip(item.summary, 150)}`,
+                  )
+                  .join("\n\n"),
+                ...(options.dateLabel
+                  ? { footer: { text: options.dateLabel } }
+                  : {}),
+                color: 0x365d46,
+              },
+            ],
+            components: [
+              {
+                type: 1,
+                components: [
+                  { type: 2, style: 5, label: "전체 보기", url: options.link },
+                ],
+              },
+            ],
+          },
+        }
+      : {}),
   };
 }
 

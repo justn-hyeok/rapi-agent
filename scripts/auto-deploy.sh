@@ -75,7 +75,7 @@ RAPI_RELEASE_SHA="$SHA" RAPI_RELEASE_ROOT="$ROOT" ./scripts/deploy-revision.sh <
 candidate=$(ls -td "$ROOT"/rapi-"${SHA:0:12}"-* | head -1)
 receipt="$ROOT/switch-$SHORT-$(date -u +%Y%m%d%H%M).json"
 # shellcheck disable=SC2024 # the log is intentionally written as this user
-sudo -n env RAPI_SWITCH_APPROVED=true RAPI_CURRENT_RELEASE="$ROOT/current" \
+sudo -n env RAPI_SWITCH_APPROVED=true RAPI_SWITCH_APPLY_MIGRATIONS=true RAPI_CURRENT_RELEASE="$ROOT/current" \
   RAPI_CANDIDATE_RELEASE="$candidate" RAPI_RELEASE_SHA="$SHA" \
   RAPI_SWITCH_RECEIPT="$receipt" RAPI_SERVICE_ENV_FILE="$ENV_FILE" \
   RAPI_SWITCH_SERVICES=bot,chat,omp,monitor,worker \

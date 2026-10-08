@@ -23,6 +23,12 @@ import {
   renderBriefing,
   renderMdx,
   repositoryKey,
+  BRIEFING_SECTIONS,
+  renderBriefingPage,
+  signBriefingToken,
+  verifyBriefingToken,
+  type BriefingPageEntry,
+  type BriefingSection,
   summarize,
 } from "@rapi/core";
 import {
@@ -77,7 +83,141 @@ export class RapiAgent {
     private readonly omp: OmpAdapter,
     private readonly summarizer?: ItemSummarizer,
     private readonly repositories?: RepositoryDescriber,
+    private readonly briefingLinks?: { key: Buffer; baseUrl: string },
   ) {}
+
+  briefingLink(batchId: string, now = new Date()): string | undefined {
+    if (!this.briefingLinks) return undefined;
+    const url = new URL(`/b/${batchId}`, this.briefingLinks.baseUrl);
+    url.searchParams.set(
+      "t",
+      signBriefingToken(this.briefingLinks.key, batchId, now),
+    );
+    return url.href;
+  }
+
+  private briefingTokenValid(batchId: string, token: string): boolean {
+    return (
+      !!this.briefingLinks &&
+      /^[0-9a-f-]{36}$/.test(batchId) &&
+      verifyBriefingToken(this.briefingLinks.key, batchId, token)
+    );
+  }
+
+  /** The owner's briefing page, or undefined for an invalid or expired link. */
+  async briefingPage(
+    batchId: string,
+    token: string,
+  ): Promise<{ html: string; nonce: string } | undefined> {
+    if (!this.briefingTokenValid(batchId, token)) return undefined;
+    const batch = await this.store.briefingRows(batchId);
+    if (!batch) return undefined;
+    const entries: BriefingPageEntry[] = [];
+    const groups = new Map<string, BriefingPageEntry & { count: number }>();
+    const sections = new Set<string>(BRIEFING_SECTIONS.map((s) => s.id));
+    for (const row of batch.rows) {
+      const group =
+        row.group_by === "repository" ? repositoryKey(row.url) : null;
+      const existing = group ? groups.get(group) : undefined;
+      if (existing) {
+        existing.count += 1;
+        existing.meta = `활동 ${existing.count}건`;
+        existing.url = `https://github.com/${group}`;
+        continue;
+      }
+      const stars = row.source_kind === "github_stars";
+      let summary = row.summary;
+      let why: string | undefined;
+      if (stars) {
+        const parts = row.summary.split(" · ");
+        const at = parts.findIndex((part) => part.startsWith("★"));
+        if (at > 0) {
+          why = parts.slice(0, at).join(" · ");
+          summary = parts.slice(at + 1).join(" · ") || parts[at]!;
+        }
+      }
+      const section = (
+        row.source_section && sections.has(row.source_section)
+          ? row.source_section
+          : stars || group || row.source_kind === "github"
+            ? "github"
+            : row.source_kind === "aside"
+              ? "tools"
+              : "industry"
+      ) as BriefingSection;
+      let host: string;
+      try {
+        host = new URL(row.source_locator).hostname.replace(/^www\./, "");
+      } catch {
+        host = "GitHub";
+      }
+      const entry = {
+        id: row.id,
+        title: stars
+          ? typeof row.metadata.repository === "string"
+            ? row.metadata.repository
+            : row.title
+          : (group ?? row.title),
+        url: row.url,
+        summary,
+        ...(why ? { why } : {}),
+        source:
+          row.source_label ??
+          (stars ? "GitHub 추천" : group ? "팔로우 활동" : host),
+        section,
+        meta: stars
+          ? `★${Number(row.metadata.stars ?? 0).toLocaleString("en-US")}`
+          : row.published_at
+            ? new Intl.DateTimeFormat("ko-KR", {
+                timeZone: "Asia/Seoul",
+                month: "long",
+                day: "numeric",
+              }).format(row.published_at)
+            : "",
+        repository: stars || !!group,
+        feedback: {
+          up: row.feedback.includes("up"),
+          down: row.feedback.includes("down"),
+          save: row.feedback.includes("save"),
+        },
+        count: 1,
+      };
+      if (group) groups.set(group, entry);
+      entries.push(entry);
+    }
+    const dateLabel = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "long",
+    }).format(batch.periodEnd);
+    return renderBriefingPage({ batchId, token, dateLabel, entries });
+  }
+
+  async recordBriefingFeedback(
+    batchId: string,
+    token: string,
+    input: unknown,
+  ): Promise<"ok" | "forbidden" | "invalid"> {
+    if (!this.briefingTokenValid(batchId, token)) return "forbidden";
+    const { itemId, kind, on } = (input ?? {}) as Record<string, unknown>;
+    if (
+      typeof itemId !== "string" ||
+      !/^[0-9a-f-]{36}$/.test(itemId) ||
+      !["up", "down", "save", "open"].includes(kind as string) ||
+      typeof on !== "boolean"
+    )
+      return "invalid";
+    return (await this.store.setItemFeedback(
+      batchId,
+      itemId,
+      kind as "up" | "down" | "save" | "open",
+      on,
+    ))
+      ? "ok"
+      : "invalid";
+  }
 
   // Model summaries are written once per item and reused by every retry, so
   // a delivered briefing never changes between attempts.
@@ -433,7 +573,16 @@ export class RapiAgent {
       return (await this.store.markEmptyBatchDelivered(batch.id))
         ? "delivered"
         : batch.state;
-    const payload = renderBriefing("Rapi daily briefing", batch.items);
+    const link = this.briefingLink(batch.id);
+    const payload = renderBriefing("Rapi daily briefing", batch.items, {
+      ...(link ? { link } : {}),
+      dateLabel: new Intl.DateTimeFormat("ko-KR", {
+        timeZone: "Asia/Seoul",
+        month: "long",
+        day: "numeric",
+        weekday: "short",
+      }).format(batch.periodEnd),
+    });
     for (const target of batch.targets) {
       const attempt = await this.store.beginDelivery(
         batch.id,

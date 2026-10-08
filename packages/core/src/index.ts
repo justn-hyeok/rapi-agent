@@ -3,6 +3,7 @@ export * from "./domain/models.js";
 export * from "./domain/content.js";
 export * from "./domain/delivery-period.js";
 export * from "./domain/delivery-selection.js";
+export * from "./domain/briefing-page.js";
 export * from "./domain/access.js";
 export * from "./domain/health.js";
 export * from "./domain/usage.js";

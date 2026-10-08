@@ -82,7 +82,17 @@ const server = createServer(async (incoming, outgoing) => {
     }
     return;
   }
-  if (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path))) {
+  // The owner's briefing page and its reactions; the bot verifies the signed link.
+  const briefingPage =
+    ["GET", "HEAD"].includes(incoming.method) &&
+    /^\/b\/[0-9a-f-]{36}$/.test(path);
+  const briefingFeedback =
+    incoming.method === "POST" && /^\/b\/[0-9a-f-]{36}\/feedback$/.test(path);
+  if (
+    !briefingPage &&
+    !briefingFeedback &&
+    (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path)))
+  ) {
     incoming.resume();
     respond(outgoing, 404, { error: "not_found" });
     return;
@@ -95,7 +105,7 @@ const server = createServer(async (incoming, outgoing) => {
     {
       host: "127.0.0.1",
       port: targetPort,
-      method: "POST",
+      method: incoming.method,
       path: incoming.url,
       headers: { ...headers, host: `127.0.0.1:${targetPort}` },
       timeout: 65_000,

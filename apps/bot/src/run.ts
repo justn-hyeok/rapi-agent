@@ -18,7 +18,7 @@ import {
   WebhookManager,
 } from "@rapi/agent";
 import { PublicAgentClient } from "@rapi/adapters";
-import { summarizeReadiness } from "@rapi/core";
+import { briefingLinkKey, summarizeReadiness } from "@rapi/core";
 import { loadEnvironment } from "@rapi/config";
 import {
   compareMigrationNames,
@@ -93,6 +93,14 @@ const agent = new RapiAgent(
   config.OMP_ENDPOINT
     ? new OmpHttpAdapter(config.OMP_ENDPOINT)
     : new DisabledOmpAdapter(),
+  undefined,
+  undefined,
+  config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
+    ? {
+        key: briefingLinkKey(config.WEBHOOK_ENCRYPTION_KEY),
+        baseUrl: config.RAPI_PUBLIC_BASE_URL,
+      }
+    : undefined,
 );
 const webhookManager =
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
@@ -275,6 +283,11 @@ const server = createDiscordInteractionServer(
       ? { omp: { agent, secret: config.OMP_CALLBACK_SECRET } }
       : {}),
     ...(webhookManager ? { managedWebhook: webhookManager } : {}),
+    briefing: {
+      page: (batchId, token) => agent.briefingPage(batchId, token),
+      feedback: (batchId, token, input) =>
+        agent.recordBriefingFeedback(batchId, token, input),
+    },
     component: async (identity, customId) => {
       if (!identity.guildId)
         throw new Error("서버에서만 사용할 수 있는 버튼입니다.");

@@ -48,6 +48,13 @@ export class DiscordDeliveryAdapter implements DeliveryAdapter {
       throw new Error("Discord adapter received a non-Discord target");
     }
     let providerId = "";
+    if (payload.discord) {
+      const message = await this.request(`/channels/${channelId}/messages`, {
+        ...payload.discord,
+        allowed_mentions: { parse: [] },
+      });
+      return { providerId: String(message.id) };
+    }
     for (const content of splitDiscordMessage(payload.text)) {
       try {
         const message = await this.request(`/channels/${channelId}/messages`, {
