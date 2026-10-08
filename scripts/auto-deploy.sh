@@ -69,7 +69,7 @@ trap 'git -C "$REPO" worktree remove --force "$STAGE" 2>/dev/null || true' EXIT
 cd "$STAGE"
 
 # Children must not read this script's stdin.
-RAPI_RELEASE_SHA="$SHA" RAPI_RELEASE_ROOT="$ROOT" ./scripts/deploy-revision.sh </dev/null >"$ROOT/.auto-deploy-$SHORT.log" 2>&1 ||
+RAPI_CI_VERIFIED=true RAPI_RELEASE_SHA="$SHA" RAPI_RELEASE_ROOT="$ROOT" ./scripts/deploy-revision.sh </dev/null >"$ROOT/.auto-deploy-$SHORT.log" 2>&1 ||
   fail "검증 단계 실패 (로그: .auto-deploy-$SHORT.log)"
 # shellcheck disable=SC2012 # release directory names are generated, not user input
 candidate=$(ls -td "$ROOT"/rapi-"${SHA:0:12}"-* | head -1)

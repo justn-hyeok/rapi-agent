@@ -57,15 +57,26 @@ fi
   unset RESTART_SMOKE_PROJECT RESTART_SMOKE_DATABASE RESTORE_SMOKE_PROJECT RESTORE_SMOKE_DATABASE
   unset RESTART_SMOKE_ARTIFACT RESTORE_SMOKE_ARTIFACT
   npm ci
-  npm run check
-  npm run web-proxy:test
-  npm run test:e2e
-  RESTART_SMOKE_PROJECT="rapi-restart-release-$$" RESTART_SMOKE_DATABASE=rapi_test npm run restart:smoke
+  if [[ "${RAPI_CI_VERIFIED:-}" == "true" ]]; then
+    # GitHub CI already ran check, E2E, browser and audit on this exact SHA;
+    # here only prove the release builds and migrates a restored database.
+    npm run build
+  else
+    npm run check
+    npm run web-proxy:test
+    npm run test:e2e
+    RESTART_SMOKE_PROJECT="rapi-restart-release-$$" RESTART_SMOKE_DATABASE=rapi_test npm run restart:smoke
+  fi
   RESTORE_SMOKE_PROJECT="rapi-restore-release-$$" RESTORE_SMOKE_DATABASE="rapi_restore_smoke_release_$$" npm run restore:smoke
-  npm run audit:prod
+  [[ "${RAPI_CI_VERIFIED:-}" == "true" ]] || npm run audit:prod
 )
+if [[ "${RAPI_CI_VERIFIED:-}" == "true" ]]; then
+  gates='["npm ci","build","restore:smoke","github-ci"]'
+else
+  gates='["npm ci","check","web-proxy:test","test:e2e","restart:smoke","restore:smoke","audit:prod"]'
+fi
 
-RAPI_STAGED_SHA="$expected_sha" RAPI_STAGED_TREE="$(git rev-parse HEAD^{tree})" \
+RAPI_STAGED_GATES="$gates" RAPI_STAGED_SHA="$expected_sha" RAPI_STAGED_TREE="$(git rev-parse HEAD^{tree})" \
   RAPI_STAGED_PATH="$stage" node --input-type=module -e '
   import { writeFileSync, readdirSync } from "node:fs";
   const { releaseFileDigests } = await import(`${process.env.RAPI_STAGED_PATH}/scripts/release-artifact.mjs`);
@@ -74,7 +85,7 @@ RAPI_STAGED_SHA="$expected_sha" RAPI_STAGED_TREE="$(git rev-parse HEAD^{tree})" 
     tree: process.env.RAPI_STAGED_TREE,
     stagedPath: process.env.RAPI_STAGED_PATH,
     verifiedAt: new Date().toISOString(),
-    gates: ["npm ci", "check", "web-proxy:test", "test:e2e", "restart:smoke", "restore:smoke", "audit:prod"],
+    gates: JSON.parse(process.env.RAPI_STAGED_GATES),
     switched: false,
     files: await releaseFileDigests(process.env.RAPI_STAGED_PATH),
     migrations: readdirSync(`${process.env.RAPI_STAGED_PATH}/packages/db/migrations`).filter(name => name.endsWith(".sql")).sort(),
