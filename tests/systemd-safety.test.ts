@@ -61,3 +61,13 @@ test("auto deploy runs CI-verified main without production secrets", async () =>
   assert.match(script, /switch-release\.mjs <\/dev\/null/);
   assert.match(script, /check-runs/);
 });
+
+test("Codex-backed services can write Codex state under a read-only home", async () => {
+  for (const name of ["rapi-worker", "rapi-bot"]) {
+    assert.match(await unit(`${name}.service`), /^ProtectHome=read-only$/m);
+    assert.match(
+      await unit(`${name}.service.d/30-codex.conf`),
+      /^ReadWritePaths=\/home\/justn\/\.codex$/m,
+    );
+  }
+});
