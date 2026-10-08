@@ -645,6 +645,79 @@ export class PostgresStore {
     );
   }
 
+  async briefingRows(batchId: string): Promise<{
+    ownerId: string;
+    periodEnd: Date;
+    rows: Array<{
+      id: string;
+      title: string;
+      url: string;
+      summary: string;
+      published_at: Date | null;
+      metadata: Record<string, unknown>;
+      source_kind: string;
+      source_locator: string;
+      source_label: string | null;
+      source_section: string | null;
+      group_by: string | null;
+      feedback: string[];
+    }>;
+  } | null> {
+    const batch = await this.pool.query<{ owner_id: string; period_end: Date }>(
+      `SELECT s.owner_id,b.period_end FROM delivery_batches b JOIN subscriptions s ON s.id=b.subscription_id WHERE b.id=$1`,
+      [batchId],
+    );
+    const head = batch.rows[0];
+    if (!head) return null;
+    const rows = await this.pool.query(
+      `SELECT si.id,si.title,si.canonical_url AS url,si.published_at,si.metadata,
+       COALESCE((SELECT CASE WHEN sm.model_policy_version='rules-v1' AND src.kind<>'github_stars' THEN '[발췌] '||sm.content ELSE sm.content END
+         FROM summaries sm WHERE si.id=ANY(sm.evidence_item_ids) AND sm.purpose='item' ORDER BY sm.created_at DESC LIMIT 1),si.body) AS summary,
+       src.kind AS source_kind,src.locator AS source_locator,
+       src.collection_policy->>'label' AS source_label,src.collection_policy->>'section' AS source_section,
+       src.collection_policy->>'groupBy' AS group_by,
+       COALESCE((SELECT array_agg(f.kind) FROM item_feedback f WHERE f.item_id=si.id AND f.owner_id=$2 AND f.active),'{}') AS feedback
+       FROM delivery_batch_items bi JOIN source_items si ON si.id=bi.source_item_id
+       JOIN raw_events re ON re.id=si.raw_event_id JOIN sources src ON src.id=re.source_id
+       WHERE bi.batch_id=$1 AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true' ORDER BY bi.position`,
+      [batchId, head.owner_id],
+    );
+    return {
+      ownerId: head.owner_id,
+      periodEnd: head.period_end,
+      rows: rows.rows as never,
+    };
+  }
+
+  /** Records one reaction; like and dislike exclude each other. */
+  async setItemFeedback(
+    batchId: string,
+    itemId: string,
+    kind: "up" | "down" | "save" | "open",
+    on: boolean,
+  ): Promise<boolean> {
+    return this.transaction(async (client) => {
+      const owner = await client.query<{ owner_id: string }>(
+        `SELECT s.owner_id FROM delivery_batch_items bi JOIN delivery_batches b ON b.id=bi.batch_id
+         JOIN subscriptions s ON s.id=b.subscription_id WHERE bi.batch_id=$1 AND bi.source_item_id=$2`,
+        [batchId, itemId],
+      );
+      const ownerId = owner.rows[0]?.owner_id;
+      if (!ownerId) return false;
+      if (on && (kind === "up" || kind === "down"))
+        await client.query(
+          "UPDATE item_feedback SET active=false,updated_at=now() WHERE item_id=$1 AND owner_id=$2 AND kind=$3",
+          [itemId, ownerId, kind === "up" ? "down" : "up"],
+        );
+      await client.query(
+        `INSERT INTO item_feedback(item_id,owner_id,kind,batch_id,active) VALUES($1,$2,$3,$4,$5)
+         ON CONFLICT (item_id,owner_id,kind) DO UPDATE SET active=EXCLUDED.active,batch_id=EXCLUDED.batch_id,updated_at=now()`,
+        [itemId, ownerId, kind, batchId, on],
+      );
+      return true;
+    });
+  }
+
   async getBatch(batchId: string): Promise<FrozenBatch> {
     const client = await this.pool.connect();
     try {

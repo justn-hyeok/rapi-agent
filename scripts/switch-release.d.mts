@@ -25,3 +25,22 @@ export function switchRelease(options: {
     rollback(): Promise<void>;
   };
 }): Promise<{ status: string; rollback: string | null }>;
+export function additiveSchemaMigration(options: {
+  currentPath: string;
+  candidatePath: string;
+  connectionString?: string;
+  connect?: () => Promise<{
+    query(
+      sql: string,
+      values?: unknown[],
+    ): Promise<{ rows: { name: string }[] }>;
+    end(): Promise<void>;
+  }>;
+}): Promise<
+  | {
+      namesAdded: string[];
+      upgrade(): Promise<void>;
+      rollback(): Promise<void>;
+    }
+  | undefined
+>;

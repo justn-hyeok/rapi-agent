@@ -332,6 +332,17 @@ export function createDiscordInteractionServer(
     managedWebhook?: WebhookManager;
     omp?: { agent: RapiAgent; secret: string };
     readiness?: () => Promise<unknown>;
+    briefing?: {
+      page(
+        batchId: string,
+        token: string,
+      ): Promise<{ html: string; nonce: string } | undefined>;
+      feedback(
+        batchId: string,
+        token: string,
+        input: unknown,
+      ): Promise<"ok" | "forbidden" | "invalid">;
+    };
     component?: (
       identity: {
         userId: string;
@@ -362,6 +373,57 @@ export function createDiscordInteractionServer(
           ...(ready && typeof ready === "object" ? ready : {}),
           revision: runtimeRevision,
         });
+      }
+      const briefing = /^\/b\/([0-9a-f-]{36})(\/feedback)?(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (briefing && integrations?.briefing) {
+        const batchId = briefing[1]!;
+        if (request.method === "GET" && !briefing[2]) {
+          const token =
+            new URL(request.url!, "http://local").searchParams.get("t") ?? "";
+          const page = await integrations.briefing.page(batchId, token);
+          if (!page) {
+            response.writeHead(404, {
+              "content-type": "text/plain; charset=utf-8",
+              "cache-control": "no-store",
+              "referrer-policy": "no-referrer",
+            });
+            return response.end(
+              "링크가 만료됐거나 올바르지 않습니다. 최신 DM의 링크를 열어 주세요.",
+            );
+          }
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+            "x-content-type-options": "nosniff",
+            "x-robots-tag": "noindex",
+            "content-security-policy": `default-src 'none'; style-src 'nonce-${page.nonce}'; script-src 'nonce-${page.nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+          });
+          return response.end(page.html);
+        }
+        if (request.method === "POST" && briefing[2]) {
+          let input: { t?: unknown } & Record<string, unknown>;
+          try {
+            const raw = await readBody(request);
+            if (raw.length > 4096)
+              return json(response, 413, { error: "too large" });
+            input = JSON.parse(raw.toString("utf8")) as typeof input;
+          } catch {
+            return json(response, 400, { error: "invalid json" });
+          }
+          const result = await integrations.briefing.feedback(
+            batchId,
+            typeof input.t === "string" ? input.t : "",
+            input,
+          );
+          return json(
+            response,
+            result === "ok" ? 200 : result === "forbidden" ? 403 : 400,
+            { result },
+          );
+        }
       }
       if (request.method !== "POST")
         return json(response, 404, { error: "not found" });

@@ -1,4 +1,5 @@
 import {
+  briefingLinkKey,
   createLocalHealthServer,
   summarizeReadiness,
   type DeliveryAdapter,
@@ -75,6 +76,12 @@ const agent = new RapiAgent(
   omp,
   summarizer,
   new GitHubRepositoryInfo(config.GITHUB_READ_TOKEN),
+  config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
+    ? {
+        key: briefingLinkKey(config.WEBHOOK_ENCRYPTION_KEY),
+        baseUrl: config.RAPI_PUBLIC_BASE_URL,
+      }
+    : undefined,
 );
 const crawler =
   process.env.CRAWLER_ENDPOINT && process.env.CRAWLER_CALLER_TOKEN

@@ -43,7 +43,7 @@
     "lint": "eslint .",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "./scripts/test-e2e.sh",
-    "test:blog": "npm run build && node --test tests/browser/blog.test.mjs",
+    "test:blog": "npm run build && node --test tests/browser/blog.test.mjs tests/browser/briefing.test.mjs",
     "typecheck": "tsc -b --pretty false && node scripts/build-blog.mjs",
     "check": "npm run format:check && npm run typecheck && npm run lint && npm test",
     "audit:prod": "npm audit --omit=dev --audit-level=high"

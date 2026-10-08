@@ -11,6 +11,7 @@ import {
   readFile,
 } from "node:fs/promises";
 import { dirname, resolve, join } from "node:path";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { verifyRelease } from "./release-artifact.mjs";
@@ -256,6 +257,97 @@ export function systemdDriver(
   };
 }
 
+// Applies the candidate's new migrations during a switch. Every added
+// migration must ship packages/db/rollbacks/<same name>, so a failed switch
+// can restore the exact schema the previous release's readiness expects.
+export async function additiveSchemaMigration({
+  currentPath,
+  candidatePath,
+  connectionString,
+  connect,
+}) {
+  const candidate = await verifyRelease(candidatePath);
+  const previous = await verifyRelease(await realpath(currentPath));
+  const added = candidate.migrations.filter(
+    (name) => !previous.migrations.includes(name),
+  );
+  if (!added.length) return undefined;
+  const rollbacks = new Map();
+  for (const name of added) {
+    try {
+      rollbacks.set(
+        name,
+        await readFile(
+          join(candidatePath, "packages/db/rollbacks", name),
+          "utf8",
+        ),
+      );
+    } catch {
+      throw new Error(`Migration ${name} has no rollback; refusing to switch`);
+    }
+  }
+  if (!connectionString)
+    throw new Error("A database URL is required to apply migrations");
+  const open =
+    connect ??
+    (async () => {
+      const pg = createRequire(join(candidatePath, "package.json"))("pg");
+      const client = new pg.Client({
+        connectionString,
+        connectionTimeoutMillis: 10_000,
+      });
+      await client.connect();
+      return client;
+    });
+  const withClient = async (work) => {
+    const client = await open();
+    try {
+      await client.query("SELECT pg_advisory_lock(731904227)");
+      await work(client);
+    } finally {
+      await client
+        .query("SELECT pg_advisory_unlock(731904227)")
+        .catch(() => undefined);
+      await client.end();
+    }
+  };
+  return {
+    namesAdded: added,
+    upgrade: () =>
+      withClient(async (client) => {
+        const applied = new Set(
+          (await client.query("SELECT name FROM schema_migrations")).rows.map(
+            (row) => row.name,
+          ),
+        );
+        for (const name of added)
+          if (!applied.has(name))
+            await client.query(
+              await readFile(
+                join(candidatePath, "packages/db/migrations", name),
+                "utf8",
+              ),
+            );
+      }),
+    rollback: () =>
+      withClient(async (client) => {
+        for (const name of [...added].reverse()) {
+          await client.query("BEGIN");
+          try {
+            await client.query(rollbacks.get(name));
+            await client.query("DELETE FROM schema_migrations WHERE name=$1", [
+              name,
+            ]);
+            await client.query("COMMIT");
+          } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+          }
+        }
+      }),
+  };
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href
@@ -283,16 +375,26 @@ if (
     throw new Error(
       "Explicit release paths, SHA, receipt, services and service environment file are required",
     );
+  const serviceEnvironment = parseEnv(
+    await readFile(RAPI_SERVICE_ENV_FILE, "utf8"),
+  );
+  const schemaMigration =
+    process.env.RAPI_SWITCH_APPLY_MIGRATIONS !== "false"
+      ? await additiveSchemaMigration({
+          currentPath: RAPI_CURRENT_RELEASE,
+          candidatePath: RAPI_CANDIDATE_RELEASE,
+          connectionString:
+            serviceEnvironment.MIGRATION_DATABASE_URL ??
+            serviceEnvironment.DATABASE_URL,
+        })
+      : undefined;
   await switchRelease({
+    schemaMigration,
     currentPath: RAPI_CURRENT_RELEASE,
     candidatePath: RAPI_CANDIDATE_RELEASE,
     expectedSha: RAPI_RELEASE_SHA,
     receiptPath: RAPI_SWITCH_RECEIPT,
     services: RAPI_SWITCH_SERVICES.split(","),
-    driver: systemdDriver(
-      configuredHealthPorts(
-        parseEnv(await readFile(RAPI_SERVICE_ENV_FILE, "utf8")),
-      ),
-    ),
+    driver: systemdDriver(configuredHealthPorts(serviceEnvironment)),
   });
 }

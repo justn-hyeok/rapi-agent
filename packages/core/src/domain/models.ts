@@ -75,6 +75,8 @@ export interface DeliveryPayload {
   text: string;
   html: string;
   itemIds: string[];
+  /** A Discord message (embeds and link buttons) replacing the text split. */
+  discord?: { embeds: unknown[]; components?: unknown[] };
 }
 
 export interface DeliveryResult {
