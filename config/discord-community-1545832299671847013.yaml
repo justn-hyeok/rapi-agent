@@ -37,6 +37,30 @@ categories:
         name: 라피-도움말
         type: text
         readOnly: true
+  - key: curation
+    name: 라피-큐레이션
+    audience: user
+    channels:
+      - key: curation_projects
+        name: 프로젝트-소식
+        type: text
+        readOnly: true
+        topic: justn이 만드는 프로젝트 소개와 릴리스 소식
+      - key: curation_setup
+        name: 세팅-추천레포
+        type: text
+        readOnly: true
+        topic: justn의 개발 세팅과 매주 star한 저장소
+      - key: curation_ai_blogs
+        name: ai-블로그
+        type: text
+        readOnly: true
+        topic: AI 도구 공식 블로그와 그 글을 다룬 곳을 묶어 매일 아침
+      - key: curation_free_tokens
+        name: 무료-토큰
+        type: text
+        readOnly: true
+        topic: 새로 무료가 된 AI 모델과 무료 크레딧 소식
   - key: operations
     name: 라피-운영
     audience: staff

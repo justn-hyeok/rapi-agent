@@ -6,6 +6,7 @@ export * from "./domain/delivery-selection.js";
 export * from "./domain/briefing-page.js";
 export * from "./domain/schedule.js";
 export * from "./domain/preference.js";
+export * from "./domain/curation.js";
 export * from "./domain/access.js";
 export * from "./domain/health.js";
 export * from "./domain/usage.js";

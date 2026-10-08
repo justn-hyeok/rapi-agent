@@ -16,6 +16,7 @@ import {
   DiscordCommandService,
   PublicCommunityService,
   RapiAgent,
+  createCommunityFeeds,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
@@ -106,6 +107,17 @@ const agent = new RapiAgent(
       }
     : undefined,
 );
+if (config.COMMUNITY_GUILD_ID)
+  agent.enableCuration(
+    await createCommunityFeeds({
+      store,
+      summarizer: undefined,
+      guildId: config.COMMUNITY_GUILD_ID,
+      botToken: config.DISCORD_BOT_TOKEN,
+      root: process.cwd(),
+    }),
+    config.DISCORD_SUPERADMIN_USER_IDS ?? [],
+  );
 const webhookManager =
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
     ? new WebhookManager(store, {
@@ -295,6 +307,8 @@ const server = createDiscordInteractionServer(
         agent.briefingSchedule(batchId, token, input),
       detail: (batchId, token, itemId) =>
         agent.briefingDetail(batchId, token, itemId),
+      curation: (batchId, token, input) =>
+        agent.briefingCuration(batchId, token, input),
     },
     component: async (identity, customId) => {
       if (!identity.guildId)

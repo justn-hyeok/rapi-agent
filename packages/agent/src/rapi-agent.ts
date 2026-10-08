@@ -33,6 +33,7 @@ import {
   signBriefingToken,
   verifyBriefingToken,
   type BriefingPageEntry,
+  type BriefingPageDraft,
   type BriefingSection,
   summarize,
 } from "@rapi/core";
@@ -93,6 +94,56 @@ export class RapiAgent {
     private readonly repositories?: RepositoryDescriber,
     private readonly briefingLinks?: { key: Buffer; baseUrl: string },
   ) {}
+
+  private curation?: {
+    feeds: {
+      drafts(): Promise<unknown[]>;
+      sendDraft(key: string): Promise<{ ok: boolean; message: string }>;
+      discardDraft(key: string): Promise<{ ok: boolean; message: string }>;
+    };
+    curators: string[];
+  };
+
+  /** Lets these Discord users review curation drafts on their briefing page. */
+  enableCuration(
+    feeds: NonNullable<RapiAgent["curation"]>["feeds"],
+    curators: string[],
+  ): void {
+    this.curation = { feeds, curators };
+  }
+
+  async briefingCuration(
+    batchId: string,
+    token: string,
+    input: { action?: unknown; key?: unknown },
+  ): Promise<{ status: number; body: unknown }> {
+    if (!this.briefingTokenValid(batchId, token))
+      return {
+        status: 403,
+        body: { ok: false, message: "링크가 만료됐습니다." },
+      };
+    const ownerId = await this.store.batchOwner(batchId);
+    if (!this.curation || !ownerId || !this.curation.curators.includes(ownerId))
+      return {
+        status: 403,
+        body: { ok: false, message: "큐레이션 권한이 없습니다." },
+      };
+    if (typeof input.key !== "string")
+      return {
+        status: 400,
+        body: { ok: false, message: "초안을 찾지 못했습니다." },
+      };
+    const result =
+      input.action === "send"
+        ? await this.curation.feeds.sendDraft(input.key)
+        : input.action === "discard"
+          ? await this.curation.feeds.discardDraft(input.key)
+          : { ok: false, message: "알 수 없는 동작입니다." };
+    return {
+      status: result.ok ? 200 : 400,
+      body: { ...result, drafts: await this.curation.feeds.drafts() },
+    };
+  }
 
   briefingLink(batchId: string, now = new Date()): string | undefined {
     if (!this.briefingLinks) return undefined;
@@ -216,6 +267,12 @@ export class RapiAgent {
       dateLabel,
       entries,
       events: await this.upcomingEvents(batch.ownerId),
+      ...(this.curation?.curators.includes(batch.ownerId)
+        ? {
+            curation:
+              (await this.curation.feeds.drafts()) as BriefingPageDraft[],
+          }
+        : {}),
     });
   }
 

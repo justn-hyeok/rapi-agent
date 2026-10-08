@@ -383,6 +383,11 @@ export function createDiscordInteractionServer(
         token: string,
         itemId: unknown,
       ): Promise<{ status: number; body: unknown }>;
+      curation(
+        batchId: string,
+        token: string,
+        input: { action?: unknown; key?: unknown },
+      ): Promise<{ status: number; body: unknown }>;
     };
     component?: (
       identity: {
@@ -416,7 +421,7 @@ export function createDiscordInteractionServer(
         });
       }
       const briefing =
-        /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail)?(?:\?|$)/.exec(
+        /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail|\/curation)?(?:\?|$)/.exec(
           request.url ?? "",
         );
       if (briefing && integrations?.briefing) {
@@ -454,6 +459,14 @@ export function createDiscordInteractionServer(
             input = JSON.parse(raw.toString("utf8")) as typeof input;
           } catch {
             return json(response, 400, { error: "invalid json" });
+          }
+          if (briefing[2] === "/curation") {
+            const curated = await integrations.briefing.curation(
+              batchId,
+              typeof input.t === "string" ? input.t : "",
+              input as { action?: unknown; key?: unknown },
+            );
+            return json(response, curated.status, curated.body);
           }
           if (briefing[2] === "/detail") {
             const detail = await integrations.briefing.detail(

@@ -288,6 +288,47 @@ describe("briefing page", () => {
         (await detailAgent.briefingDetail(batch.id, "1.bad", itemId)).status,
         403,
       );
+      const fakeFeeds = {
+        drafts: async () => [
+          {
+            key: "k1",
+            feed: "projects",
+            label: "프로젝트 소식",
+            title: "새 프로젝트 · x",
+            preview: "p",
+          },
+        ],
+        sendDraft: async () => ({ ok: true, message: "채널에 보냈습니다." }),
+        discardDraft: async () => ({ ok: true, message: "초안을 버렸습니다." }),
+      };
+      agent.enableCuration(fakeFeeds, ["someone-else"]);
+      assert.equal(
+        (
+          await agent.briefingCuration(batch.id, token, {
+            action: "send",
+            key: "k1",
+          })
+        ).status,
+        403,
+      );
+      assert.doesNotMatch(
+        (await agent.briefingPage(batch.id, token))!.html,
+        /id="t-cur"/,
+      );
+      agent.enableCuration(fakeFeeds, ["owner-1"]);
+      assert.equal(
+        (
+          await agent.briefingCuration(batch.id, token, {
+            action: "send",
+            key: "k1",
+          })
+        ).status,
+        200,
+      );
+      assert.match(
+        (await agent.briefingPage(batch.id, token))!.html,
+        /id="t-cur"/,
+      );
     } finally {
       await store.close();
     }
