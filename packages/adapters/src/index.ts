@@ -6,3 +6,4 @@ export * from "./managed-webhooks.js";
 export * from "./public-agent.js";
 export * from "./github-stars.js";
 export * from "./summarizer.js";
+export * from "./events.js";

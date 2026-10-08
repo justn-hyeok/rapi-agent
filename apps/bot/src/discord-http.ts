@@ -69,9 +69,40 @@ export const discordCommandAliases = {
   승인: "approve",
   취소: "cancel",
   데이터삭제: "privacy",
+  일정: "schedule",
 } as const satisfies Record<string, DiscordCommand["name"]>;
 
 export const slashCommandDefinitions = [
+  {
+    name: "일정",
+    description: "내 일정과 수집된 마감을 관리합니다",
+    type: 1,
+    options: [
+      {
+        type: 1,
+        name: "추가",
+        description: "문장으로 일정을 추가합니다 (예: 금요일 오후 3시 면담)",
+        options: [stringOption("내용", "날짜·시간과 할 일")],
+      },
+      {
+        type: 1,
+        name: "목록",
+        description: "앞으로 30일의 일정과 마감을 봅니다",
+      },
+      {
+        type: 1,
+        name: "삭제",
+        description: "목록 번호로 일정을 지우거나 수집된 마감을 숨깁니다",
+        options: [
+          {
+            ...integerOption("번호", "목록 번호"),
+            required: true,
+            min_value: 1,
+          },
+        ],
+      },
+    ],
+  },
   {
     name: "데이터삭제",
     description: "라피가 보관하는 본인 정보 또는 관리 대상의 삭제를 요청합니다",
@@ -342,6 +373,11 @@ export function createDiscordInteractionServer(
         token: string,
         input: unknown,
       ): Promise<"ok" | "forbidden" | "invalid">;
+      schedule(
+        batchId: string,
+        token: string,
+        input: unknown,
+      ): Promise<{ status: number; body: unknown }>;
     };
     component?: (
       identity: {
@@ -374,9 +410,10 @@ export function createDiscordInteractionServer(
           revision: runtimeRevision,
         });
       }
-      const briefing = /^\/b\/([0-9a-f-]{36})(\/feedback)?(?:\?|$)/.exec(
-        request.url ?? "",
-      );
+      const briefing =
+        /^\/b\/([0-9a-f-]{36})(\/feedback|\/events)?(?:\?|$)/.exec(
+          request.url ?? "",
+        );
       if (briefing && integrations?.briefing) {
         const batchId = briefing[1]!;
         if (request.method === "GET" && !briefing[2]) {
@@ -412,6 +449,14 @@ export function createDiscordInteractionServer(
             input = JSON.parse(raw.toString("utf8")) as typeof input;
           } catch {
             return json(response, 400, { error: "invalid json" });
+          }
+          if (briefing[2] === "/events") {
+            const scheduled = await integrations.briefing.schedule(
+              batchId,
+              typeof input.t === "string" ? input.t : "",
+              input,
+            );
+            return json(response, scheduled.status, scheduled.body);
           }
           const result = await integrations.briefing.feedback(
             batchId,
@@ -612,6 +657,7 @@ export function createDiscordInteractionServer(
         종류: "kind",
         대상: "target",
         요청id: "deletionId",
+        번호: "number",
         목적지종류: "destinationKind",
         목적지: "destinationId",
         이벤트: "events",

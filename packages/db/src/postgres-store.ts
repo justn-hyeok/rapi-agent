@@ -718,6 +718,100 @@ export class PostgresStore {
     });
   }
 
+  async batchOwner(batchId: string): Promise<string | null> {
+    const result = await this.pool.query<{ owner_id: string }>(
+      "SELECT s.owner_id FROM delivery_batches b JOIN subscriptions s ON s.id=b.subscription_id WHERE b.id=$1",
+      [batchId],
+    );
+    return result.rows[0]?.owner_id ?? null;
+  }
+
+  async listEvents(
+    ownerId: string,
+    from: Date,
+    until: Date,
+  ): Promise<
+    Array<{
+      id: string;
+      title: string;
+      starts_at: Date;
+      all_day: boolean;
+      kind: string;
+      source: string;
+      url: string | null;
+    }>
+  > {
+    const result = await this.pool.query(
+      `SELECT id,title,starts_at,all_day,kind,source,url FROM events
+       WHERE NOT hidden AND (owner_id=$1 OR owner_id IS NULL) AND starts_at>=$2 AND starts_at<$3
+       ORDER BY starts_at, title LIMIT 200`,
+      [ownerId, from, until],
+    );
+    return result.rows as never;
+  }
+
+  async addEvent(
+    ownerId: string,
+    input: { title: string; startsAt: Date; allDay: boolean },
+  ): Promise<string> {
+    const id = randomUUID();
+    await this.pool.query(
+      `INSERT INTO events(id,owner_id,title,starts_at,all_day,kind,source) VALUES($1,$2,$3,$4,$5,'personal','manual')`,
+      [id, ownerId, input.title, input.startsAt, input.allDay],
+    );
+    return id;
+  }
+
+  /** Deletes the owner's own entry, or hides a collected one. */
+  async removeEvent(ownerId: string, id: string): Promise<boolean> {
+    const own = await this.pool.query(
+      "DELETE FROM events WHERE id=$1 AND owner_id=$2",
+      [id, ownerId],
+    );
+    if (own.rowCount) return true;
+    const shared = await this.pool.query(
+      "UPDATE events SET hidden=true,updated_at=now() WHERE id=$1 AND owner_id IS NULL",
+      [id],
+    );
+    return (shared.rowCount ?? 0) > 0;
+  }
+
+  async upsertCollectedEvent(input: {
+    externalKey: string;
+    source: "dev-event" | "devpost" | "cfp";
+    kind: "deadline" | "event";
+    title: string;
+    startsAt: Date;
+    allDay: boolean;
+    url: string | null;
+    note: string | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO events(id,title,starts_at,all_day,kind,source,external_key,url,note)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (external_key) DO UPDATE SET title=EXCLUDED.title,starts_at=EXCLUDED.starts_at,
+         all_day=EXCLUDED.all_day,url=EXCLUDED.url,note=EXCLUDED.note,updated_at=now()`,
+      [
+        randomUUID(),
+        input.title.slice(0, 300),
+        input.startsAt,
+        input.allDay,
+        input.kind,
+        input.source,
+        input.externalKey,
+        input.url,
+        input.note,
+      ],
+    );
+  }
+
+  async lastCollectedEventAt(): Promise<Date | null> {
+    const result = await this.pool.query<{ at: Date | null }>(
+      "SELECT max(updated_at) AS at FROM events WHERE source<>'manual'",
+    );
+    return result.rows[0]?.at ?? null;
+  }
+
   async getBatch(batchId: string): Promise<FrozenBatch> {
     const client = await this.pool.connect();
     try {

@@ -158,6 +158,11 @@ async function collect(): Promise<void> {
       "Delegated sources require CRAWLER_ENDPOINT and CRAWLER_CALLER_TOKEN",
     );
   await crawler?.runOnce();
+  const collected = await agent.collectEvents();
+  if (collected.failures.length)
+    process.stderr.write(
+      `Event sources failed: ${collected.failures.join("; ")}\n`,
+    );
   const destination = config.COMMUNITY_GUILD_ID
     ? await store.webhookConnectionByName(
         config.COMMUNITY_GUILD_ID,

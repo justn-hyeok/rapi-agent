@@ -287,6 +287,8 @@ const server = createDiscordInteractionServer(
       page: (batchId, token) => agent.briefingPage(batchId, token),
       feedback: (batchId, token, input) =>
         agent.recordBriefingFeedback(batchId, token, input),
+      schedule: (batchId, token, input) =>
+        agent.briefingSchedule(batchId, token, input),
     },
     component: async (identity, customId) => {
       if (!identity.guildId)

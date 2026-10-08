@@ -120,6 +120,75 @@ describe("briefing page", () => {
         { kind: "save", active: true },
         { kind: "up", active: false },
       ]);
+      const preview = await agent.briefingSchedule(batch.id, token, {
+        action: "preview",
+        text: "2030-01-02 오후 3시 면담",
+      });
+      assert.equal(preview.status, 200);
+      assert.match(JSON.stringify(preview.body), /1\/2 \(수\) 15:00 · 면담/);
+      const added = await agent.briefingSchedule(batch.id, token, {
+        action: "add",
+        text: "2030-01-02 오후 3시 면담",
+      });
+      assert.equal(added.status, 200);
+      const stored = await store.pool.query<{
+        id: string;
+        owner_id: string;
+        title: string;
+      }>("SELECT id,owner_id,title FROM events");
+      assert.deepEqual(
+        stored.rows.map((r) => [r.owner_id, r.title]),
+        [["owner-1", "면담"]],
+      );
+      assert.equal(
+        (
+          await agent.briefingSchedule(batch.id, token, {
+            action: "add",
+            text: "날짜 없음",
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await agent.briefingSchedule(batch.id, "1.bad", {
+            action: "add",
+            text: "내일 회의",
+          })
+        ).status,
+        403,
+      );
+      await store.upsertCollectedEvent({
+        externalKey: "devpost:x",
+        source: "devpost",
+        kind: "deadline",
+        title: "[해커톤] X 제출 마감",
+        startsAt: new Date(Date.now() + 3 * 86_400_000),
+        allDay: true,
+        url: "https://x",
+        note: null,
+      });
+      const upcoming = await agent.upcomingEvents("owner-1", 30);
+      assert.equal(upcoming.length, 1);
+      assert.equal(upcoming[0]!.title, "[해커톤] X 제출 마감");
+      await agent.scheduleCommand("owner-1", {
+        action: "delete",
+        id: upcoming[0]!.id,
+      });
+      assert.equal((await agent.upcomingEvents("owner-1", 30)).length, 0);
+      assert.equal(
+        (await store.pool.query("SELECT 1 FROM events WHERE hidden")).rowCount,
+        1,
+      );
+      assert.equal(
+        (
+          await agent.scheduleCommand("someone-else", {
+            action: "delete",
+            id: stored.rows[0]!.id,
+          })
+        ).ok,
+        false,
+      );
       const after = await agent.briefingPage(batch.id, token);
       assert.match(after!.html, /data-k="down" aria-pressed="true"/);
       assert.match(after!.html, /data-k="save" aria-pressed="true"/);

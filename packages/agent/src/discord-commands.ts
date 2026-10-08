@@ -28,6 +28,7 @@ export const slashCommands = [
   "approve",
   "cancel",
   "privacy",
+  "schedule",
 ] as const;
 
 export interface DiscordCommand {
@@ -174,6 +175,49 @@ export class DiscordCommandService {
     assertDiscordLevel(level, requiredCommandAccess(command.name));
     const ownerId = identity.userId;
     switch (command.name) {
+      case "schedule": {
+        if (command.options.action === "목록") {
+          const events = await this.agent.upcomingEvents(ownerId, 30);
+          return {
+            messages: splitDiscordMessage(
+              events.length
+                ? events
+                    .map(
+                      (event, index) =>
+                        `${index + 1}. ${event.when} · ${event.title}${event.daysUntil >= 0 && event.daysUntil <= 7 ? ` (D-${event.daysUntil})` : ""}`,
+                    )
+                    .join("\n")
+                : "앞으로 30일 안의 일정과 마감이 없습니다.",
+            ),
+          };
+        }
+        if (command.options.action === "삭제") {
+          const events = await this.agent.upcomingEvents(ownerId, 30);
+          const index = Number(command.options.number) - 1;
+          const target = events[index];
+          if (!target)
+            throw new Error(
+              "목록에서 그 번호를 찾지 못했습니다. /일정 목록으로 번호를 확인해 주세요.",
+            );
+          const result = await this.agent.scheduleCommand(ownerId, {
+            action: "delete",
+            id: target.id,
+          });
+          return {
+            messages: [
+              result.ok
+                ? `지웠습니다: ${target.when} · ${target.title}`
+                : result.message,
+            ],
+          };
+        }
+        const result = await this.agent.scheduleCommand(ownerId, {
+          action: "add",
+          text: command.options.content,
+        });
+        if (!result.ok) throw new Error(result.message);
+        return { messages: [result.message] };
+      }
       case "privacy": {
         if (!this.operations?.privacy)
           throw new Error("개인정보 정리 기능이 연결되지 않았습니다.");
