@@ -324,7 +324,8 @@ async function batch(
 it("pseudonymizes old terminal receipts without exposing addresses or allowing duplicate delivery; preserves active data", async () => {
   const s = await setup();
   try {
-    const i = await item(s);
+    // A public item: a private one may only be delivered to its owner.
+    const i = await item(s, "public");
     const b = await batch(s, i.id, 100);
     const active = await batch(s, i.id, 100, "sending");
     for (const id of [b, active])

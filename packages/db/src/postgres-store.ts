@@ -510,10 +510,10 @@ export class PostgresStore {
                   : null,
             }))
             .filter((row) => {
-              // Browser data never joins existing catch-all or public-channel
-              // subscriptions. Its owner must explicitly select this source.
+              // Private data (browser captures, the owner's GitHub feeds) only
+              // reaches its owner, who must explicitly select the source.
               if (
-                row.source_kind === "aside" &&
+                (row.source_kind === "aside" || row.visibility !== "public") &&
                 (row.source_owner !== sub.owner_id ||
                   !sub.source_ids.includes(row.source_id) ||
                   sub.channels.some(
@@ -910,7 +910,7 @@ export class PostgresStore {
         JOIN source_items si ON si.id=bi.source_item_id JOIN raw_events re ON re.id=si.raw_event_id
         JOIN sources src ON src.id=re.source_id JOIN delivery_batches b ON b.id=bi.batch_id
         JOIN subscriptions sub ON sub.id=b.subscription_id
-        WHERE bi.batch_id=$1 AND src.kind='aside' AND (
+        WHERE bi.batch_id=$1 AND (src.kind='aside' OR si.visibility<>'public') AND (
           src.collection_policy->>'ownerId' IS DISTINCT FROM sub.owner_id
           OR NOT(src.id=ANY(sub.source_ids)) OR $2='discord_channel'
           OR ($2='discord_dm' AND $3<>sub.owner_id)) LIMIT 1`,
@@ -918,7 +918,7 @@ export class PostgresStore {
       );
       if (forbiddenAside.rowCount)
         throw new Error(
-          "Aside delivery requires explicit owner and private target scope",
+          "Private items require their owner's subscription and a private target",
         );
       const retired = await client.query<{ id: string; attempt_count: number }>(
         "SELECT id,attempt_count FROM delivery_attempts WHERE batch_id=$1 AND anonymized_at IS NOT NULL LIMIT 1",
