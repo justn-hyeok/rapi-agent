@@ -48,8 +48,14 @@ export async function verifyRelease(root, expectedSha) {
     "restore:smoke",
     "audit:prod",
   ];
+  // A CI-verified release relies on GitHub CI for check, E2E and audit of
+  // the same SHA and proves only build and migration restore on the host.
+  const ciVerified = ["npm ci", "build", "restore:smoke", "github-ci"];
   if (
-    !required.every((gate) => manifest.gates?.includes(gate)) ||
+    !(
+      required.every((gate) => manifest.gates?.includes(gate)) ||
+      ciVerified.every((gate) => manifest.gates?.includes(gate))
+    ) ||
     !manifest.files ||
     !Array.isArray(manifest.migrations)
   )
