@@ -153,10 +153,25 @@ Remove the Mac Aside bridge, receiver, collector and setup scripts added in
 v0.1.3. Collection depended on a signed-in, awake Mac, and its only source
 (Hacker News) has public feeds. All collection runs on the VM through official
 feeds and APIs; sites without feeds get an approved VM HTTP/HTML extractor.
-Rapi does not collect through the owner's logged-in browser state.
+Logged-in collection is not banned; it is approved per source (see D-012).
 
 The `aside` source kind stays as the private, owner-bound browser source kind
 used by the delegated crawler (`collection_policy.crawler.enabled`). Delivery
 keeps rejecting those items outside an explicit owner-only private subscription.
 An active `aside` source without an enabled crawler policy reports failed
 readiness as unsupported until it is disabled or converted.
+
+## D-012: Logged-in sources are approved per source (accepted, 2026-10-07)
+
+Removing Aside (D-011) was an operational decision, not a ban on logged-in
+collection. A source that needs an authenticated session may be added when no
+feed, API, email or official bot path covers it. Each such source requires:
+
+- a dedicated account where the site allows it, and low polling frequency on
+  sites that suspend automated personal accounts;
+- the session stored encrypted on the VM and passed only to the crawler;
+- forced `private` visibility and owner-only delivery;
+- detection of login pages or empty results as `degraded`, with a Discord
+  request to re-authenticate instead of silent zero-item success.
+
+No logged-in source is built until a concrete source needs it.
