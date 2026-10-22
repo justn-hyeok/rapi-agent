@@ -231,3 +231,48 @@ test("deploy readiness ignores only external source outages", async () => {
     false,
   );
 });
+
+test("a candidate may not fail more sources than the running release", async () => {
+  const { systemdDriver, deployReady } = await import(
+    "../scripts/switch-release.mjs"
+  );
+  const { createServer } = await import("node:http");
+  const oldSha = "a".repeat(40);
+  const newSha = "b".repeat(40);
+  const body = (revision: string, failing: number) => ({
+    ready: failing === 0,
+    revision,
+    components: [
+      { name: "database", status: "ok", required: true },
+      {
+        name: "sources",
+        status: failing ? "failed" : "ok",
+        required: true,
+        details: { configured: 34, failing },
+      },
+    ],
+  });
+  assert.equal(deployReady("worker", 503, body(newSha, 1), newSha, 1), true);
+  assert.equal(deployReady("worker", 503, body(newSha, 34), newSha, 1), false);
+  let current = body(oldSha, 1);
+  const server = createServer((_req, res) => {
+    res.writeHead(current.ready ? 200 : 503);
+    res.end(JSON.stringify(current));
+  });
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
+  const port = (server.address() as { port: number }).port;
+  try {
+    const driver = systemdDriver({ worker: port }, 2, async () => ({
+      stdout: "",
+    }));
+    await driver.ready(["worker"], oldSha);
+    current = body(newSha, 1);
+    await driver.ready(["worker"], newSha);
+    current = body(newSha, 34);
+    await assert.rejects(driver.ready(["worker"], newSha), /does not match/);
+  } finally {
+    server.close();
+  }
+});

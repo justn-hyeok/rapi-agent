@@ -9,7 +9,9 @@ export function deployReady(
   status: number,
   body: unknown,
   sha: string,
+  allowedSourceFailures?: number,
 ): boolean;
+export function sourceFailures(body: unknown): number;
 export function configuredHealthPorts(
   environment: Record<string, string | undefined>,
 ): Record<string, number>;

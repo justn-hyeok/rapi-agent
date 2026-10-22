@@ -21,15 +21,32 @@ const ports = { bot: 3000, chat: 3100, omp: 3200, monitor: 3300, worker: 3400 };
 
 // A release is ready when the new revision is serving. External source
 // outages (a feed or crawl target failing) are reported by the monitor, but
-// they say nothing about the release and must not block every deploy.
-export function deployReady(name, status, body, sha) {
+// they say nothing about the release and must not block every deploy. A
+// release that makes more sources fail than before the switch is a regression
+// and still fails, so pass the pre-switch count as allowedSourceFailures.
+export function sourceFailures(body) {
+  const sources = (body?.components ?? []).find((c) => c.name === "sources");
+  const failing = Number(sources?.details?.failing ?? 0);
+  return Number.isFinite(failing) ? failing : 0;
+}
+export function deployReady(
+  name,
+  status,
+  body,
+  sha,
+  allowedSourceFailures = Infinity,
+) {
   if (body?.revision !== sha) return false;
   if (name === "monitor") return status === 200 && body.status === "ok";
   if (body.ready === true) return status === 200;
   const failing = (body.components ?? []).filter(
     (component) => component.required && component.status !== "ok",
   );
-  return failing.length > 0 && failing.every((c) => c.name === "sources");
+  return (
+    failing.length > 0 &&
+    failing.every((c) => c.name === "sources") &&
+    sourceFailures(body) <= allowedSourceFailures
+  );
 }
 
 export function configuredHealthPorts(environment) {
@@ -209,6 +226,8 @@ export function systemdDriver(
 ) {
   const unit = (name) => `rapi-${name}.service`;
   let stoppedDependents = [];
+  let baselineSha;
+  const baselineSourceFailures = {};
   return {
     async active(services) {
       const active = [];
@@ -254,7 +273,17 @@ export function systemdDriver(
               { signal: AbortSignal.timeout(1500) },
             );
             const body = await response.json();
-            if (!deployReady(name, response.status, body, sha)) ready = false;
+            // The first check verifies the running release; its source
+            // failures are the baseline a candidate may not exceed.
+            baselineSha ??= sha;
+            const allowed =
+              sha === baselineSha
+                ? Infinity
+                : (baselineSourceFailures[name] ?? 0);
+            if (!deployReady(name, response.status, body, sha, allowed))
+              ready = false;
+            else if (sha === baselineSha)
+              baselineSourceFailures[name] = sourceFailures(body);
           } catch {
             ready = false;
           }
