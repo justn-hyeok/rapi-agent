@@ -7,7 +7,7 @@ after. Raw per-run counts: [data-lifecycle-measure-20261022.jsonl](data-lifecycl
 ## Conditions
 
 - Code: `origin/main` `850ab0e` plus `scripts/measure-privacy-lifecycle.ts`.
-- Database: fresh `postgres:16-alpine` from `compose.test.yaml` (project `rapi-measure-b`),
+- Database: fresh `postgres:16-alpine` from `compose.test.yaml` (projects `rapi-measure-b` and `rapi-measure-c` (rerun after a typing-only fix, identical totals)),
   all migrations applied, torn down afterwards. The script refuses any database whose
   name does not end in `_test` (`resetForTests`). No production data was touched.
 - 100 runs, seed `20261022`. Every run resets the database and seeds new random counts.

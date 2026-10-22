@@ -348,7 +348,7 @@ try {
     });
     result.ownerMessagesAfterPreview = await ownerMessages();
     result.foreignConfirmAttempts = others.length;
-    result.foreignConfirmRejected = 0;
+    let rejected = 0;
     for (const person of others)
       await confirmDeletion(client, {
         id: stale.id,
@@ -357,8 +357,9 @@ try {
         key,
       }).then(
         () => undefined,
-        () => result.foreignConfirmRejected++,
+        () => rejected++,
       );
+    result.foreignConfirmRejected = rejected;
     await client.query(
       "UPDATE privacy_requests SET expires_at=now()-interval '1 minute' WHERE id=$1",
       [stale.id],
