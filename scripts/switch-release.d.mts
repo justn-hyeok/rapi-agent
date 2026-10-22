@@ -4,6 +4,12 @@ export interface ServiceDriver {
   start(services: string[]): Promise<void>;
   ready(services: string[], sha: string): Promise<void>;
 }
+export function deployReady(
+  name: string,
+  status: number,
+  body: unknown,
+  sha: string,
+): boolean;
 export function configuredHealthPorts(
   environment: Record<string, string | undefined>,
 ): Record<string, number>;

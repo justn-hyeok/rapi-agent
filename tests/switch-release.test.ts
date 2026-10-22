@@ -160,3 +160,74 @@ test("isolated service switch verifies boot revision, rolls back failure and pre
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("deploy readiness ignores only external source outages", async () => {
+  const { deployReady } = await import("../scripts/switch-release.mjs");
+  const sha = "a".repeat(40);
+  const component = (name: string, status = "failed", required = true) => ({
+    name,
+    status,
+    required,
+  });
+  assert.equal(
+    deployReady("worker", 200, { ready: true, revision: sha }, sha),
+    true,
+  );
+  assert.equal(
+    deployReady(
+      "worker",
+      503,
+      {
+        ready: false,
+        revision: sha,
+        components: [component("database", "ok"), component("sources")],
+      },
+      sha,
+    ),
+    true,
+  );
+  assert.equal(
+    deployReady(
+      "worker",
+      503,
+      {
+        ready: false,
+        revision: sha,
+        components: [component("sources"), component("database")],
+      },
+      sha,
+    ),
+    false,
+  );
+  assert.equal(
+    deployReady(
+      "worker",
+      503,
+      { ready: false, revision: sha, components: [component("sources")] },
+      "b".repeat(40),
+    ),
+    false,
+  );
+  assert.equal(
+    deployReady(
+      "worker",
+      503,
+      { ready: false, revision: sha, components: [] },
+      sha,
+    ),
+    false,
+  );
+  assert.equal(
+    deployReady("monitor", 200, { status: "ok", revision: sha }, sha),
+    true,
+  );
+  assert.equal(
+    deployReady(
+      "monitor",
+      200,
+      { status: "ok", revision: "b".repeat(40) },
+      sha,
+    ),
+    false,
+  );
+});

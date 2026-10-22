@@ -19,6 +19,19 @@ import { verifyRelease } from "./release-artifact.mjs";
 const execute = promisify(execFile);
 const ports = { bot: 3000, chat: 3100, omp: 3200, monitor: 3300, worker: 3400 };
 
+// A release is ready when the new revision is serving. External source
+// outages (a feed or crawl target failing) are reported by the monitor, but
+// they say nothing about the release and must not block every deploy.
+export function deployReady(name, status, body, sha) {
+  if (body?.revision !== sha) return false;
+  if (name === "monitor") return status === 200 && body.status === "ok";
+  if (body.ready === true) return status === 200;
+  const failing = (body.components ?? []).filter(
+    (component) => component.required && component.status !== "ok",
+  );
+  return failing.length > 0 && failing.every((c) => c.name === "sources");
+}
+
 export function configuredHealthPorts(environment) {
   const keys = {
     bot: "PORT",
@@ -241,10 +254,7 @@ export function systemdDriver(
               { signal: AbortSignal.timeout(1500) },
             );
             const body = await response.json();
-            const healthy =
-              name === "monitor" ? body.status === "ok" : body.ready === true;
-            if (!response.ok || !healthy || body.revision !== sha)
-              ready = false;
+            if (!deployReady(name, response.status, body, sha)) ready = false;
           } catch {
             ready = false;
           }
