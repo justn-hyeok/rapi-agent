@@ -9,6 +9,9 @@ const execFileAsync = promisify(execFile);
 const script = fileURLToPath(
   new URL("../scripts/restore-smoke.sh", import.meta.url),
 );
+const unit = fileURLToPath(
+  new URL("../ops/systemd/rapi-restore-smoke.service", import.meta.url),
+);
 
 describe("restore smoke target safety", () => {
   it("requires disposable project and database before Docker can run", async () => {
@@ -48,6 +51,18 @@ describe("restore smoke target safety", () => {
     );
     assert.match(source, /"\$\{compose\[@\]\}" up -d --wait postgres/);
     assert.doesNotMatch(source, /-d rapi_restore_smoke(?:\s|$)/);
+  });
+
+  it("gives the weekly unit a target the script accepts", async () => {
+    const source = await readFile(unit, "utf8");
+    assert.match(
+      source,
+      /^Environment=RESTORE_SMOKE_PROJECT=rapi-restore-[a-z0-9-]+$/m,
+    );
+    assert.match(
+      source,
+      /^Environment=RESTORE_SMOKE_DATABASE=rapi_restore_smoke_[a-z0-9_]+$/m,
+    );
   });
 
   it("verifies the restored migration set exactly", async () => {

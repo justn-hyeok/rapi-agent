@@ -10,6 +10,8 @@ Group=docker
 WorkingDirectory=/home/justn/rapi-agent
 EnvironmentFile=/home/justn/rapi-agent/.env
 Environment=RESTORE_LATEST_BACKUP=true
+Environment=RESTORE_SMOKE_PROJECT=rapi-restore-weekly
+Environment=RESTORE_SMOKE_DATABASE=rapi_restore_smoke_weekly
 ExecStart=/home/justn/rapi-agent/scripts/restore-smoke.sh
 NoNewPrivileges=true
 PrivateTmp=true
