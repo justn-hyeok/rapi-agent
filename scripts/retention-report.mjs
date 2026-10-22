@@ -27,7 +27,7 @@ try {
       (SELECT count(*)::int FROM delivery_attempts WHERE created_at < now() - interval '90 days') AS recipient_identifiers,
       (SELECT count(*)::int FROM delivery_batches WHERE created_at < now() - interval '1 year') AS delivery_audit,
       (SELECT count(*)::int FROM task_requests WHERE created_at < now() - interval '1 year') AS task_audit,
-      (SELECT count(*)::int FROM mdx_publications mp JOIN delivery_batch_items bi ON bi.batch_id=mp.batch_id JOIN source_items si ON si.id=bi.source_item_id WHERE si.collected_at < now() - CASE WHEN si.visibility = 'public' THEN interval '90 days' ELSE interval '30 days' END) AS publication_links_requiring_withdrawal
+      (SELECT count(*)::int FROM mdx_publications mp JOIN delivery_batch_items bi ON bi.batch_id=mp.batch_id JOIN source_items si ON si.id=bi.source_item_id WHERE mp.visibility = 'public' AND si.collected_at < now() - CASE WHEN si.visibility = 'public' THEN interval '90 days' ELSE interval '30 days' END) AS publication_links_requiring_withdrawal
   `);
   await client.query("COMMIT");
   process.stdout.write(
