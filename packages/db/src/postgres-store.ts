@@ -792,6 +792,80 @@ export class PostgresStore {
     );
   }
 
+  async discordGuildStatus(
+    guildId: string,
+  ): Promise<"pending" | "allowed" | "rejected" | "left" | undefined> {
+    const result = await this.pool.query<{
+      status: "pending" | "allowed" | "rejected" | "left";
+    }>("SELECT status FROM discord_guilds WHERE guild_id=$1", [guildId]);
+    return result.rows[0]?.status;
+  }
+
+  async allowedDiscordGuilds(): Promise<
+    Array<{ guildId: string; allowedAt: Date | null }>
+  > {
+    const result = await this.pool.query<{
+      guild_id: string;
+      decided_at: Date | null;
+    }>("SELECT guild_id,decided_at FROM discord_guilds WHERE status='allowed'");
+    return result.rows.map((row) => ({
+      guildId: row.guild_id,
+      allowedAt: row.decided_at,
+    }));
+  }
+
+  /** Records a join request; true only when the row became pending now. */
+  async requestDiscordGuild(guildId: string, name: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO discord_guilds(guild_id,name,status) VALUES($1,$2,'pending')
+       ON CONFLICT (guild_id) DO UPDATE SET status='pending',name=EXCLUDED.name,requested_at=now(),decided_at=NULL,decided_by=NULL,left_at=NULL
+       WHERE discord_guilds.status='left'
+       RETURNING guild_id`,
+      [guildId, name],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Settles a pending guild once; false when it was already decided. */
+  async decideDiscordGuild(
+    guildId: string,
+    status: "allowed" | "rejected",
+    decidedBy: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE discord_guilds SET status=$2,decided_at=now(),decided_by=$3 WHERE guild_id=$1 AND status='pending'`,
+      [guildId, status, decidedBy],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async markDiscordGuildLeft(guildId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE discord_guilds SET status='left',left_at=now() WHERE guild_id=$1 AND status IN ('allowed','pending')`,
+      [guildId],
+    );
+  }
+
+  async communityGuildPostSent(guildId: string, key: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM community_guild_posts WHERE guild_id=$1 AND key=$2",
+      [guildId, key],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async recordCommunityGuildPost(input: {
+    guildId: string;
+    key: string;
+    channelId: string;
+    messageId: string | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO community_guild_posts(guild_id,key,channel_id,message_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [input.guildId, input.key, input.channelId, input.messageId],
+    );
+  }
+
   async communityPostExists(key: string): Promise<boolean> {
     const result = await this.pool.query(
       "SELECT 1 FROM community_posts WHERE key=$1",
@@ -848,15 +922,19 @@ export class PostgresStore {
     return result.rows as never;
   }
 
-  async communityDraft(
-    key: string,
-  ): Promise<{ key: string; feed: string; embeds: unknown[] } | null> {
+  async communityDraft(key: string): Promise<{
+    key: string;
+    feed: string;
+    embeds: unknown[];
+    created: Date;
+  } | null> {
     const result = await this.pool.query<{
       key: string;
       feed: string;
       embeds: unknown[];
+      created: Date;
     }>(
-      "SELECT key,feed,embeds FROM community_posts WHERE key=$1 AND state='draft'",
+      "SELECT key,feed,embeds,posted_at AS created FROM community_posts WHERE key=$1 AND state='draft'",
       [key],
     );
     return result.rows[0] ?? null;

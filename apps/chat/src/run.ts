@@ -5,7 +5,11 @@ import { PublicCommunityService } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
   assertDiscordAccess,
+  createGuildGate,
   createLocalHealthServer,
+  decideGuildAdmission,
+  isGuildAllowed,
+  resolveHomeGuildId,
   splitDiscordMessage,
   summarizeReadiness,
 } from "@rapi/core";
@@ -21,6 +25,11 @@ import { establishesGatewaySession } from "./gateway-state.js";
 import { DiscordTyping } from "./typing.js";
 
 const config = loadEnvironment();
+const homeGuildId = resolveHomeGuildId(
+  config.DISCORD_HOME_GUILD_ID,
+  config.COMMUNITY_GUILD_ID,
+  config.DISCORD_ALLOWED_GUILD_IDS,
+);
 const discordAccess = {
   userIds: config.DISCORD_ALLOWED_USER_IDS,
   ...(config.DISCORD_SUPERADMIN_USER_IDS
@@ -37,9 +46,7 @@ const discordAccess = {
     ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
     : {}),
   guildMembersAreUsers: config.DISCORD_GUILD_MEMBERS_ARE_USERS,
-  ...(config.DISCORD_ALLOWED_GUILD_IDS
-    ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
-    : {}),
+  ...(homeGuildId ? { homeGuildId } : {}),
   ...(config.DISCORD_ALLOWED_CHANNEL_IDS
     ? { channelIds: config.DISCORD_ALLOWED_CHANNEL_IDS }
     : {}),
@@ -48,6 +55,12 @@ const store = new PostgresStore(config.DATABASE_URL, {
   max: config.DB_POOL_MAX,
   connectionTimeoutMs: config.DB_CONNECT_TIMEOUT_MS,
   queryTimeoutMs: config.DB_QUERY_TIMEOUT_MS,
+});
+const guildGate = createGuildGate({
+  envIds: config.DISCORD_ALLOWED_GUILD_IDS,
+  homeGuildId,
+  load: async () =>
+    (await store.allowedDiscordGuilds()).map((guild) => guild.guildId),
 });
 const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
@@ -101,6 +114,7 @@ const chat = new ChatOrchestrator(
       signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
     });
   }),
+  homeGuildId,
 );
 lease.on("error", () => {
   void chat.shutdown().finally(() => process.exit(1));
@@ -175,6 +189,7 @@ async function enqueue(raw: unknown): Promise<void> {
     message.author.bot ||
     !message.guild_id ||
     parseRapiInvocation(message.content) === null ||
+    !isGuildAllowed(message.guild_id, await guildGate.allowed()) ||
     !(await store.chatChannelEnabled(message.guild_id, message.channel_id))
   )
     return;
@@ -195,6 +210,81 @@ async function enqueue(raw: unknown): Promise<void> {
     return;
   }
   await chat.receive(message, accessLevel);
+}
+
+async function askGuildApproval(guildId: string, name: string): Promise<void> {
+  const owners = new Set([
+    ...config.DISCORD_ALLOWED_USER_IDS,
+    ...(config.DISCORD_SUPERADMIN_USER_IDS ?? []),
+  ]);
+  for (const owner of owners) {
+    try {
+      const channel = (await (
+        await discordRequest("/users/@me/channels", {
+          method: "POST",
+          body: JSON.stringify({ recipient_id: owner }),
+        })
+      ).json()) as { id: string };
+      await discordRequest(`/channels/${channel.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({
+          content: `라피가 새 서버에 초대됐습니다: ${name} (${guildId})\n허용하기 전까지 이 서버에서는 응답하지 않습니다.`,
+          allowed_mentions: { parse: [] },
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 3,
+                  label: "허용",
+                  custom_id: `guild_allow:${guildId}`,
+                },
+                {
+                  type: 2,
+                  style: 4,
+                  label: "거절",
+                  custom_id: `guild_reject:${guildId}`,
+                },
+              ],
+            },
+          ],
+        }),
+      });
+    } catch {
+      process.stderr.write("Guild approval request could not be delivered\n");
+    }
+  }
+}
+
+async function guildCreated(raw: unknown): Promise<void> {
+  const guild = raw as { id?: unknown; name?: unknown; unavailable?: boolean };
+  if (typeof guild.id !== "string" || guild.unavailable) return;
+  const action = decideGuildAdmission(
+    guild.id,
+    config.DISCORD_ALLOWED_GUILD_IDS,
+    await store.discordGuildStatus(guild.id),
+  );
+  if (action === "leave") {
+    await discordRequest(`/users/@me/guilds/${guild.id}`, { method: "DELETE" });
+  } else if (
+    action === "request" &&
+    (await store.requestDiscordGuild(
+      guild.id,
+      typeof guild.name === "string" ? guild.name : guild.id,
+    ))
+  ) {
+    await askGuildApproval(
+      guild.id,
+      typeof guild.name === "string" ? guild.name : guild.id,
+    );
+  }
+}
+
+async function guildDeleted(raw: unknown): Promise<void> {
+  const guild = raw as { id?: unknown; unavailable?: boolean };
+  if (typeof guild.id !== "string" || guild.unavailable) return;
+  await store.markDiscordGuildLeft(guild.id);
 }
 
 let socket: WebSocket | undefined;
@@ -295,6 +385,14 @@ function connect(): void {
       gatewayReady = true;
       process.stdout.write(
         `rapi-chat ${payload.t === "RESUMED" ? "resumed" : "connected"} Discord Gateway session\n`,
+      );
+    } else if (payload.op === 0 && payload.t === "GUILD_CREATE") {
+      void guildCreated(payload.d).catch(() =>
+        process.stderr.write("Guild admission failed\n"),
+      );
+    } else if (payload.op === 0 && payload.t === "GUILD_DELETE") {
+      void guildDeleted(payload.d).catch(() =>
+        process.stderr.write("Guild removal failed\n"),
       );
     } else if (payload.op === 0 && payload.t === "MESSAGE_CREATE") {
       void enqueue(payload.d).catch(() =>

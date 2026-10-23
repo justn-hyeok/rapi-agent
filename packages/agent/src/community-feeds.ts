@@ -8,7 +8,9 @@ import {
   kstReached,
   kstWeekday,
   selectProjectRepositories,
+  selectFeedTargets,
   type CitationCandidate,
+  type FeedGuildTarget,
 } from "@rapi/core";
 import type { PostgresStore } from "@rapi/db";
 
@@ -45,6 +47,8 @@ export interface CommunityFeedOptions {
   projects?: string[];
   setupFile?: string;
   githubToken?: string;
+  /** Other allowed guilds that receive the feeds too; absent means only `guildId`. */
+  guildTargets?: () => Promise<FeedGuildTarget[]>;
   /** Posts one Discord message and returns its id. */
   post(channelId: string, embeds: Embed[]): Promise<string>;
   getJson?: (url: string, accept?: string) => Promise<unknown>;
@@ -97,12 +101,51 @@ export class CommunityFeeds {
         JSON.parse(await this.getText(url, accept)) as unknown);
   }
 
-  private async channel(feed: Feed): Promise<string | null> {
+  private async channel(
+    feed: Feed,
+    guildId = this.options.guildId,
+  ): Promise<string | null> {
     return this.store.managedDiscordResourceId(
-      this.options.guildId,
+      guildId,
       "channel",
       CURATION_CHANNELS[feed],
     );
+  }
+
+  /**
+   * Sends a post that went to the community guild to every other allowed
+   * guild that has the feed's channel, once per guild. A failing guild never
+   * affects the others or the main post, and is not retried.
+   */
+  private async fanOut(
+    feed: Feed,
+    key: string,
+    embeds: Embed[],
+    createdAt: Date,
+  ): Promise<void> {
+    if (!this.options.guildTargets) return;
+    const sent = new Set<string>();
+    const guilds = (await this.options.guildTargets()).filter(
+      (guild) => guild.guildId !== this.options.guildId,
+    );
+    for (const guild of guilds)
+      if (await this.store.communityGuildPostSent(guild.guildId, key))
+        sent.add(guild.guildId);
+    for (const guildId of selectFeedTargets(createdAt, guilds, sent)) {
+      try {
+        const channelId = await this.channel(feed, guildId);
+        if (!channelId) continue;
+        const messageId = await this.options.post(channelId, embeds);
+        await this.store.recordCommunityGuildPost({
+          guildId,
+          key,
+          channelId,
+          messageId: messageId || null,
+        });
+      } catch {
+        // Another guild's failure must not block the rest.
+      }
+    }
   }
 
   /**
@@ -136,6 +179,7 @@ export class CommunityFeeds {
       messageId,
       data,
     });
+    await this.fanOut(feed, key, embeds.slice(0, 10), new Date());
     return true;
   }
 
@@ -178,6 +222,12 @@ export class CommunityFeeds {
       draft.embeds as Embed[],
     );
     await this.store.settleCommunityDraft(key, "posted", channelId, messageId);
+    await this.fanOut(
+      draft.feed as Feed,
+      key,
+      draft.embeds as Embed[],
+      draft.created,
+    );
     return { ok: true, message: "채널에 보냈습니다." };
   }
 
@@ -534,6 +584,8 @@ export async function createCommunityFeeds(input: {
   store: PostgresStore;
   summarizer: ItemSummarizer | undefined;
   guildId: string;
+  /** Guilds from DISCORD_ALLOWED_GUILD_IDS; approved guilds are read from the database. */
+  extraGuildIds?: readonly string[];
   botToken: string;
   root: string;
   githubToken?: string;
@@ -552,6 +604,18 @@ export async function createCommunityFeeds(input: {
   }
   return new CommunityFeeds(input.store, input.summarizer, {
     guildId: input.guildId,
+    guildTargets: async () => {
+      const targets = new Map<string, FeedGuildTarget>();
+      for (const guildId of input.extraGuildIds ?? [])
+        targets.set(guildId, { guildId, allowedSince: null });
+      for (const guild of await input.store.allowedDiscordGuilds())
+        if (!targets.has(guild.guildId))
+          targets.set(guild.guildId, {
+            guildId: guild.guildId,
+            allowedSince: guild.allowedAt,
+          });
+      return [...targets.values()];
+    },
     owner: input.owner ?? "justn-hyeok",
     setupFile: `${input.root}/config/curation/setup.md`,
     ...(config.autoPost ? { autoPost: config.autoPost } : {}),

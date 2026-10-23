@@ -21,7 +21,14 @@ import {
   WebhookManager,
 } from "@rapi/agent";
 import { PublicAgentClient } from "@rapi/adapters";
-import { briefingLinkKey, summarizeReadiness } from "@rapi/core";
+import {
+  assertDiscordAccess,
+  briefingLinkKey,
+  createGuildGate,
+  isGuildAllowed,
+  resolveHomeGuildId,
+  summarizeReadiness,
+} from "@rapi/core";
 import { loadEnvironment } from "@rapi/config";
 import {
   compareMigrationNames,
@@ -113,6 +120,7 @@ if (config.COMMUNITY_GUILD_ID)
       store,
       summarizer: undefined,
       guildId: config.COMMUNITY_GUILD_ID,
+      extraGuildIds: config.DISCORD_ALLOWED_GUILD_IDS ?? [],
       botToken: config.DISCORD_BOT_TOKEN,
       root: process.cwd(),
     }),
@@ -151,140 +159,145 @@ const webhookManager =
         },
       })
     : undefined;
-const commands = new DiscordCommandService(
-  agent,
-  {
-    userIds: config.DISCORD_ALLOWED_USER_IDS,
-    ...(config.DISCORD_SUPERADMIN_USER_IDS
-      ? { superadminUserIds: config.DISCORD_SUPERADMIN_USER_IDS }
-      : {}),
-    ...(config.DISCORD_ADMIN_USER_IDS
-      ? { adminUserIds: config.DISCORD_ADMIN_USER_IDS }
-      : {}),
-    ...(config.DISCORD_USER_IDS
-      ? { userUserIds: config.DISCORD_USER_IDS }
-      : {}),
-    ...(config.DISCORD_ADMIN_ROLE_IDS
-      ? { adminRoleIds: config.DISCORD_ADMIN_ROLE_IDS }
-      : {}),
-    ...(config.DISCORD_USER_ROLE_IDS
-      ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
-      : {}),
-    guildMembersAreUsers: config.DISCORD_GUILD_MEMBERS_ARE_USERS,
-    ...(config.DISCORD_ALLOWED_GUILD_IDS
-      ? { guildIds: config.DISCORD_ALLOWED_GUILD_IDS }
-      : {}),
-    ...(config.DISCORD_ALLOWED_CHANNEL_IDS
-      ? { channelIds: config.DISCORD_ALLOWED_CHANNEL_IDS }
-      : {}),
-  },
-  {
-    privacy: async (identity, options, level) =>
-      executePrivacyCommand(
-        identity,
-        options,
-        level,
-        config.PRIVACY_HMAC_KEY ?? "",
-        config.DATABASE_URL,
-      ),
-    status: async () => {
-      try {
-        const monitor = JSON.parse(
-          await readFile(config.MONITOR_STATE_FILE, "utf8"),
-        ) as {
-          updatedAt: string;
-          components: Array<{
-            name: string;
-            status: string;
-            checkedAt: string;
-            lastSuccessAt?: string;
-            reason?: string;
-            details?: Record<string, unknown>;
-          }>;
-        };
-        const stale =
-          Date.now() - new Date(monitor.updatedAt).getTime() >
-          config.MONITOR_INTERVAL_SECONDS * 3000;
-        return [
-          `라피 상태: ${stale ? "확인 불가" : "감시 중"}`,
-          ...monitor.components.map(
-            (component) =>
-              `${component.name}: ${stale ? "unknown" : component.status} · 확인 ${component.checkedAt}` +
-              (component.lastSuccessAt
-                ? ` · 최근 성공 ${component.lastSuccessAt}`
-                : "") +
-              (component.reason ? ` · ${component.reason}` : "") +
-              (typeof component.details?.percent === "number" ||
-              typeof component.details?.percent === "string"
-                ? ` · DB ${component.details.percent}%`
-                : ""),
-          ),
-        ].join("\n");
-      } catch {
-        // Fall back to a direct database check before the monitor has written state.
-      }
-      try {
-        const health = await store.checkHealth();
-        return `라피 상태: 정상\nDB 응답: ${health.latencyMs}ms\nDB 사용량: ${health.databaseBytes} bytes`;
-      } catch {
-        return "라피 상태: 확인 불가\nDB 연결을 확인하지 못했습니다.";
-      }
-    },
-    ...(webhookManager ? { webhooks: webhookManager } : {}),
-    usage: {
-      status: async (guildId, userId, tier) => {
-        const usage = await store.aiUsageStatus(guildId, userId);
-        return [
-          tier === "staff"
-            ? "내 AI 사용량: 운영진 무제한"
-            : `내 AI 사용량: ${usage.used}회 · 남음 ${usage.remaining}회`,
-          `서버 전체: ${usage.globalUsed}회 · 남음 ${usage.globalRemaining}회`,
-          `초기화: ${usage.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (Asia/Seoul)`,
-        ].join("\n");
-      },
-      policy: async (guildId) => {
-        const policy = await store.aiUsagePolicy(guildId);
-        return [
-          `USER: 하루 ${policy.userDailyLimit}회 · 쿨다운 ${policy.userCooldownSeconds}초`,
-          `서버: 하루 ${policy.globalDailyLimit}회 · 동시 ${policy.globalConcurrency}개`,
-          `초기화: ${policy.timezone} ${String(policy.resetHour).padStart(2, "0")}:${String(policy.resetMinute).padStart(2, "0")}`,
-          "Discord Administrator는 애플리케이션 사용량 제한을 적용받지 않습니다.",
-        ].join("\n");
-      },
-      update: async (guildId, actorId, input) => {
-        const current = await store.aiUsagePolicy(guildId);
-        await store.upsertAiUsagePolicy({
-          ...current,
-          ...input,
-          guildId,
-          updatedBy: actorId,
-        });
-        return "AI 사용 정책을 변경했습니다.";
-      },
-    },
-    serverConfig: {
-      preview: (guildId, actorId) => layout.preview(guildId, actorId),
-      apply: (guildId, actorId, planId) =>
-        layout.apply(guildId, actorId, planId),
-      export: (_guildId, format) => layout.export(format),
-    },
-    publicBrief: async (guildId, userId, requestId, tier) =>
-      (await publicCommunity.answer({
-        guildId,
-        userId,
-        requestId,
-        tier,
-        text: "최근 24시간의 주요 기술 소식을 브리핑해줘.",
-        mode: "brief",
-      })) ?? "이미 처리한 요청입니다.",
-  },
+const homeGuildId = resolveHomeGuildId(
+  config.DISCORD_HOME_GUILD_ID,
+  config.COMMUNITY_GUILD_ID,
+  config.DISCORD_ALLOWED_GUILD_IDS,
 );
+// Guild membership is checked against the gate, which also covers approved guilds.
+const guildGate = createGuildGate({
+  envIds: config.DISCORD_ALLOWED_GUILD_IDS,
+  homeGuildId,
+  load: async () =>
+    (await store.allowedDiscordGuilds()).map((guild) => guild.guildId),
+});
+const allowlists = {
+  userIds: config.DISCORD_ALLOWED_USER_IDS,
+  ...(config.DISCORD_SUPERADMIN_USER_IDS
+    ? { superadminUserIds: config.DISCORD_SUPERADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_ADMIN_USER_IDS
+    ? { adminUserIds: config.DISCORD_ADMIN_USER_IDS }
+    : {}),
+  ...(config.DISCORD_USER_IDS ? { userUserIds: config.DISCORD_USER_IDS } : {}),
+  ...(config.DISCORD_ADMIN_ROLE_IDS
+    ? { adminRoleIds: config.DISCORD_ADMIN_ROLE_IDS }
+    : {}),
+  ...(config.DISCORD_USER_ROLE_IDS
+    ? { userRoleIds: config.DISCORD_USER_ROLE_IDS }
+    : {}),
+  guildMembersAreUsers: config.DISCORD_GUILD_MEMBERS_ARE_USERS,
+  ...(homeGuildId ? { homeGuildId } : {}),
+  ...(config.DISCORD_ALLOWED_CHANNEL_IDS
+    ? { channelIds: config.DISCORD_ALLOWED_CHANNEL_IDS }
+    : {}),
+};
+const commands = new DiscordCommandService(agent, allowlists, {
+  guildAllowlist: () => guildGate.allowed(),
+  privacy: async (identity, options, level) =>
+    executePrivacyCommand(
+      identity,
+      options,
+      level,
+      config.PRIVACY_HMAC_KEY ?? "",
+      config.DATABASE_URL,
+    ),
+  status: async () => {
+    try {
+      const monitor = JSON.parse(
+        await readFile(config.MONITOR_STATE_FILE, "utf8"),
+      ) as {
+        updatedAt: string;
+        components: Array<{
+          name: string;
+          status: string;
+          checkedAt: string;
+          lastSuccessAt?: string;
+          reason?: string;
+          details?: Record<string, unknown>;
+        }>;
+      };
+      const stale =
+        Date.now() - new Date(monitor.updatedAt).getTime() >
+        config.MONITOR_INTERVAL_SECONDS * 3000;
+      return [
+        `라피 상태: ${stale ? "확인 불가" : "감시 중"}`,
+        ...monitor.components.map(
+          (component) =>
+            `${component.name}: ${stale ? "unknown" : component.status} · 확인 ${component.checkedAt}` +
+            (component.lastSuccessAt
+              ? ` · 최근 성공 ${component.lastSuccessAt}`
+              : "") +
+            (component.reason ? ` · ${component.reason}` : "") +
+            (typeof component.details?.percent === "number" ||
+            typeof component.details?.percent === "string"
+              ? ` · DB ${component.details.percent}%`
+              : ""),
+        ),
+      ].join("\n");
+    } catch {
+      // Fall back to a direct database check before the monitor has written state.
+    }
+    try {
+      const health = await store.checkHealth();
+      return `라피 상태: 정상\nDB 응답: ${health.latencyMs}ms\nDB 사용량: ${health.databaseBytes} bytes`;
+    } catch {
+      return "라피 상태: 확인 불가\nDB 연결을 확인하지 못했습니다.";
+    }
+  },
+  ...(webhookManager ? { webhooks: webhookManager } : {}),
+  usage: {
+    status: async (guildId, userId, tier) => {
+      const usage = await store.aiUsageStatus(guildId, userId);
+      return [
+        tier === "staff"
+          ? "내 AI 사용량: 운영진 무제한"
+          : `내 AI 사용량: ${usage.used}회 · 남음 ${usage.remaining}회`,
+        `서버 전체: ${usage.globalUsed}회 · 남음 ${usage.globalRemaining}회`,
+        `초기화: ${usage.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (Asia/Seoul)`,
+      ].join("\n");
+    },
+    policy: async (guildId) => {
+      const policy = await store.aiUsagePolicy(guildId);
+      return [
+        `USER: 하루 ${policy.userDailyLimit}회 · 쿨다운 ${policy.userCooldownSeconds}초`,
+        `서버: 하루 ${policy.globalDailyLimit}회 · 동시 ${policy.globalConcurrency}개`,
+        `초기화: ${policy.timezone} ${String(policy.resetHour).padStart(2, "0")}:${String(policy.resetMinute).padStart(2, "0")}`,
+        "Discord Administrator는 애플리케이션 사용량 제한을 적용받지 않습니다.",
+      ].join("\n");
+    },
+    update: async (guildId, actorId, input) => {
+      const current = await store.aiUsagePolicy(guildId);
+      await store.upsertAiUsagePolicy({
+        ...current,
+        ...input,
+        guildId,
+        updatedBy: actorId,
+      });
+      return "AI 사용 정책을 변경했습니다.";
+    },
+  },
+  serverConfig: {
+    preview: (guildId, actorId) => layout.preview(guildId, actorId),
+    apply: (guildId, actorId, planId) => layout.apply(guildId, actorId, planId),
+    export: (_guildId, format) => layout.export(format),
+  },
+  publicBrief: async (guildId, userId, requestId, tier) =>
+    (await publicCommunity.answer({
+      guildId,
+      userId,
+      requestId,
+      tier,
+      text: "최근 24시간의 주요 기술 소식을 브리핑해줘.",
+      mode: "brief",
+    })) ?? "이미 처리한 요청입니다.",
+});
 
 if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
   await registerSlashCommands(
     config.DISCORD_APPLICATION_ID,
     config.DISCORD_BOT_TOKEN,
-    config.DISCORD_ALLOWED_GUILD_IDS?.[0],
+    homeGuildId,
   );
 }
 
@@ -311,8 +324,51 @@ const server = createDiscordInteractionServer(
         agent.briefingCuration(batchId, token, input),
     },
     component: async (identity, customId) => {
+      if (
+        customId.startsWith("guild_allow:") ||
+        customId.startsWith("guild_reject:")
+      ) {
+        // Pressed in the owner's DM; only a SUPERADMIN may decide.
+        assertDiscordAccess(identity, allowlists, "superadmin");
+        const allow = customId.startsWith("guild_allow:");
+        const guildId = customId.slice(customId.indexOf(":") + 1);
+        if (!/^\d+$/.test(guildId)) throw new Error("알 수 없는 버튼입니다.");
+        const decided = await store.decideDiscordGuild(
+          guildId,
+          allow ? "allowed" : "rejected",
+          identity.userId,
+        );
+        guildGate.invalidate();
+        if (!decided) return "이미 처리했거나 요청이 없는 서버입니다.";
+        if (!allow) {
+          const left = await fetch(
+            `https://discord.com/api/v10/users/@me/guilds/${guildId}`,
+            {
+              method: "DELETE",
+              headers: { authorization: `Bot ${config.DISCORD_BOT_TOKEN}` },
+              signal: AbortSignal.timeout(10_000),
+            },
+          );
+          await left.arrayBuffer();
+          return left.ok
+            ? "서버를 거절하고 라피가 나갔습니다."
+            : "서버를 거절했지만 라피가 나가지 못했습니다. 직접 내보내 주세요.";
+        }
+        try {
+          await registerSlashCommands(
+            config.DISCORD_APPLICATION_ID,
+            config.DISCORD_BOT_TOKEN,
+            guildId,
+          );
+        } catch {
+          return "서버를 허용했습니다. slash 명령 등록은 실패했으니 나중에 다시 등록해 주세요.";
+        }
+        return "서버를 허용했습니다. slash 명령도 등록했습니다.";
+      }
       if (!identity.guildId)
         throw new Error("서버에서만 사용할 수 있는 버튼입니다.");
+      if (!isGuildAllowed(identity.guildId, await guildGate.allowed()))
+        throw new Error("아직 허용되지 않은 서버입니다.");
       if (customId === "rapi_verify:v1")
         return layout.verifyMember(identity.guildId, identity.userId);
       if (customId.startsWith("server_config_apply:")) {

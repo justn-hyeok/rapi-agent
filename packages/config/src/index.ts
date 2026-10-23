@@ -47,6 +47,7 @@ export const environmentSchema = z
     DISCORD_USER_ROLE_IDS: csvIds.optional(),
     DISCORD_GUILD_MEMBERS_ARE_USERS: booleanString,
     DISCORD_ALLOWED_GUILD_IDS: csvIds.optional(),
+    DISCORD_HOME_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     DISCORD_ALLOWED_CHANNEL_IDS: csvIds.optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     EMAIL_TRANSPORT: z.enum(["smtp", "api"]).optional(),

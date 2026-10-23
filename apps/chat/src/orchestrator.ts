@@ -1,4 +1,8 @@
-import { assertDiscordLevel, type DiscordAccessLevel } from "@rapi/core";
+import {
+  assertDiscordLevel,
+  chatOpsExecutionAllowed,
+  type DiscordAccessLevel,
+} from "@rapi/core";
 import {
   parseModelDirective,
   parseRapiInvocation,
@@ -125,6 +129,7 @@ export class ChatOrchestrator {
     readonly send: (channel: string, text: string) => Promise<unknown>,
     readonly community?: PublicCommunityResponder,
     readonly typing?: DiscordTyping,
+    readonly homeGuildId?: string,
   ) {}
   private withTyping<T>(channel: string, work: () => Promise<T>): Promise<T> {
     return this.typing ? this.typing.run(channel, work) : work();
@@ -158,8 +163,18 @@ export class ChatOrchestrator {
     const selection = parseModelDirective(rawText);
     const text = selection.task;
     const route = routeIntent(text);
+    // Code, server and memory work is only taken in the home guild.
+    const homeGuild = chatOpsExecutionAllowed(scope.guild, this.homeGuildId);
+    if (!homeGuild && route !== "answer") {
+      await this.reply(
+        scope.channel,
+        "코드·서버 실행과 기억 관리는 운영자 서버에서만 사용할 수 있습니다.",
+      );
+      return;
+    }
     if (this.community) {
       const ownerExecutionChannel =
+        homeGuild &&
         accessLevel === "superadmin" &&
         (await this.community.isAdminChannel(scope));
       if (!ownerExecutionChannel) {

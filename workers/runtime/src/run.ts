@@ -100,6 +100,7 @@ const communityFeeds = config.COMMUNITY_GUILD_ID
       store,
       summarizer,
       guildId: config.COMMUNITY_GUILD_ID,
+      extraGuildIds: config.DISCORD_ALLOWED_GUILD_IDS ?? [],
       botToken: config.DISCORD_BOT_TOKEN,
       root: process.cwd(),
       ...(config.GITHUB_READ_TOKEN

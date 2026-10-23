@@ -8,6 +8,7 @@ export * from "./domain/schedule.js";
 export * from "./domain/preference.js";
 export * from "./domain/curation.js";
 export * from "./domain/access.js";
+export * from "./domain/guilds.js";
 export * from "./domain/health.js";
 export * from "./domain/usage.js";
 export * from "./ports/clock.js";

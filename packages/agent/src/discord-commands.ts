@@ -1,8 +1,11 @@
 import {
-  assertDiscordAccess,
   assertDiscordLevel,
+  assertDiscordScope,
+  isGuildAllowed,
+  resolveDiscordAccess,
   splitDiscordMessage,
   type DiscordAccessLevel,
+  type DiscordAccessScope,
   type DiscordAllowlists,
   type DiscordIdentity,
   type SubscriptionInput,
@@ -62,6 +65,20 @@ export function requiredCommandAccess(
   )
     return "admin";
   return "user";
+}
+
+const guildScopedCommands: ReadonlySet<DiscordCommand["name"]> = new Set([
+  "usage_policy",
+  "server_config",
+  "chat_enable",
+  "chat_disable",
+]);
+
+/** Whether a command only changes the guild it runs in, or reaches all of Rapi. */
+export function commandScope(
+  command: DiscordCommand["name"],
+): DiscordAccessScope {
+  return guildScopedCommands.has(command) ? "guild" : "global";
 }
 
 function requiredString(
@@ -132,6 +149,8 @@ export class DiscordCommandService {
         ): Promise<string>;
         export(guildId: string, format: "yaml" | "json"): Promise<string>;
       };
+      /** Guilds the bot answers in; undefined means no restriction. */
+      guildAllowlist?: () => Promise<readonly string[] | undefined>;
       publicBrief?: (
         guildId: string,
         userId: string,
@@ -171,8 +190,25 @@ export class DiscordCommandService {
     identity: DiscordIdentity,
     command: DiscordCommand,
   ): Promise<DiscordCommandResult> {
-    const level = assertDiscordAccess(identity, this.allowlists);
-    assertDiscordLevel(level, requiredCommandAccess(command.name));
+    if (identity.guildId && this.operations?.guildAllowlist) {
+      if (
+        !isGuildAllowed(
+          identity.guildId,
+          await this.operations.guildAllowlist(),
+        )
+      )
+        throw new Error("아직 허용되지 않은 서버입니다.");
+    }
+    const access = resolveDiscordAccess(identity, this.allowlists);
+    const level = access.level;
+    // A guild-scoped admin may run guild settings but nothing that reaches all of Rapi.
+    const guildAdmin =
+      access.scope === "guild" && commandScope(command.name) === "guild";
+    let required = requiredCommandAccess(command.name);
+    if (required !== "user" && commandScope(command.name) === "global")
+      assertDiscordScope(access, "global");
+    if (guildAdmin && required === "superadmin") required = "admin";
+    assertDiscordLevel(level, required);
     const ownerId = identity.userId;
     switch (command.name) {
       case "schedule": {
@@ -355,7 +391,7 @@ export class DiscordCommandService {
               await this.operations.usage.policy(identity.guildId),
             ),
           };
-        assertDiscordLevel(level, "superadmin");
+        assertDiscordLevel(level, guildAdmin ? "admin" : "superadmin");
         const number = (name: string): number | undefined => {
           const value = command.options[name];
           if (value === undefined || value === null || value === "")
