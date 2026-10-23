@@ -456,6 +456,15 @@ export async function processDeletion(client, id, config) {
       await client.query("DELETE FROM events WHERE owner_id=$1", [
         row.target_id,
       ]);
+      for (const table of [
+        "learner_clicks",
+        "learner_replies",
+        "learner_deliveries",
+        "learner_subscriptions",
+      ])
+        await client.query(`DELETE FROM ${table} WHERE user_id=$1`, [
+          row.target_id,
+        ]);
       await client.query(
         "UPDATE approvals SET approver_id=$2,discord_message_ref=NULL WHERE approver_id=$1",
         [row.target_id, privacyRef(key, "actor", row.target_id)],

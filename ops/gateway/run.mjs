@@ -86,11 +86,18 @@ const server = createServer(async (incoming, outgoing) => {
   const briefingPage =
     ["GET", "HEAD"].includes(incoming.method) &&
     /^\/b\/[0-9a-f-]{36}$/.test(path);
+  // Tracked learner links: one signed token per item and recipient.
+  const learnerLink =
+    incoming.method === "GET" &&
+    /^\/r\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{15,20}\.\d{10}\.[\w-]{43}$/.test(
+      path,
+    );
   const briefingFeedback =
     incoming.method === "POST" &&
     /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail|curation)$/.test(path);
   if (
     !briefingPage &&
+    !learnerLink &&
     !briefingFeedback &&
     (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path)))
   ) {

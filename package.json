@@ -24,6 +24,7 @@
     "backup": "./scripts/backup.sh",
     "encrypt:webhook": "node scripts/encrypt-secret.mjs",
     "discord:rotate-token": "./scripts/rotate-discord-token.sh",
+    "learner:post-guide": "node --env-file=.env --import tsx scripts/post-learner-guide.ts",
     "discord:register-commands": "node --env-file=.env --import tsx scripts/register-discord-commands.ts",
     "tunnel:configure": "./scripts/configure-cloudflare-tunnel.sh",
     "web-proxy:install": "./scripts/install-web-proxy.sh",

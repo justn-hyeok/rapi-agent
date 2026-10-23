@@ -16,6 +16,7 @@ import {
 } from "@rapi/adapters";
 import {
   createCommunityFeeds,
+  createLearnerExperiment,
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
   RapiAgent,
@@ -119,6 +120,8 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
     )
   : undefined;
 
+const learner = createLearnerExperiment(config, store, discord);
+
 type LoopState = {
   running?: boolean;
   lastStartedAt?: string;
@@ -127,13 +130,14 @@ type LoopState = {
   deliveryOutcome?: "delivered" | "idle";
 };
 const loops: Record<
-  "collection" | "delivery" | "webhook" | "curation",
+  "collection" | "delivery" | "webhook" | "curation" | "learner",
   LoopState
 > = {
   collection: {},
   delivery: {},
   webhook: {},
   curation: {},
+  learner: {},
 };
 
 async function runLoop(
@@ -231,6 +235,13 @@ const curationTimer = communityFeeds
   ? setInterval(() => void runLoop("curation", curate), 5 * 60_000)
   : undefined;
 
+const learnerTimer = learner
+  ? setInterval(
+      () => void runLoop("learner", () => learner.runDue(new Date())),
+      60_000,
+    )
+  : undefined;
+
 await runLoop("collection", collect);
 if (shouldRunDelivery(config.DELIVERY_ENABLED))
   await runLoop("delivery", deliver);
@@ -323,6 +334,7 @@ const healthServer = createLocalHealthServer(
             required:
               !disabled &&
               name !== "curation" &&
+              name !== "learner" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -346,6 +358,7 @@ const healthServer = createLocalHealthServer(
 const shutdown = (): void => {
   clearInterval(collectionTimer);
   if (curationTimer) clearInterval(curationTimer);
+  if (learnerTimer) clearInterval(learnerTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();

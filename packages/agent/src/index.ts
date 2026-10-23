@@ -7,3 +7,4 @@ export * from "./discord-layout-manager.js";
 export * from "./public-community.js";
 export * from "./crawler-collector.js";
 export * from "./community-feeds.js";
+export * from "./learner-experiment.js";

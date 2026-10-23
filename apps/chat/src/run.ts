@@ -23,6 +23,7 @@ import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
 import { establishesGatewaySession } from "./gateway-state.js";
 import { DiscordTyping } from "./typing.js";
+import { countDirectReply, isDirectMessage } from "./direct-message.js";
 
 const config = loadEnvironment();
 const homeGuildId = resolveHomeGuildId(
@@ -71,7 +72,12 @@ const publicCommunity = new PublicCommunityService(
   publicAgent,
   config.PUBLIC_AGENT_ENABLED,
 );
-const intents = (1 << 0) | (1 << 9) | (1 << 15);
+// DIRECT_MESSAGES is requested only for the learner experiment, which counts replies.
+const intents =
+  (1 << 0) |
+  (1 << 9) |
+  (1 << 15) |
+  (config.LEARNER_EXPERIMENT_ENABLED ? 1 << 12 : 0);
 await mkdir(chatWorkspace, { recursive: true });
 // One Gateway owner per database. Losing this session stops execution.
 const lease = await store.pool.connect();
@@ -395,9 +401,13 @@ function connect(): void {
         process.stderr.write("Guild removal failed\n"),
       );
     } else if (payload.op === 0 && payload.t === "MESSAGE_CREATE") {
-      void enqueue(payload.d).catch(() =>
-        process.stderr.write("ChatOps request failed\n"),
-      );
+      const work =
+        config.LEARNER_EXPERIMENT_ENABLED && isDirectMessage(payload.d)
+          ? countDirectReply(payload.d, (userId) =>
+              store.learnerRecordReply(userId),
+            )
+          : enqueue(payload.d);
+      void work.catch(() => process.stderr.write("ChatOps request failed\n"));
     }
   });
   socket.on("close", (code) => {

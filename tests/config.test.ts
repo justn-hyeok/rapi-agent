@@ -33,6 +33,29 @@ describe("environment configuration", () => {
     assert.equal(config.DATABASE_URL, validEnvironment.DATABASE_URL);
   });
 
+  it("keeps the learner experiment off and requires its secrets when on", () => {
+    assert.equal(
+      loadEnvironment(validEnvironment).LEARNER_EXPERIMENT_ENABLED,
+      false,
+    );
+    assert.throws(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        LEARNER_EXPERIMENT_ENABLED: "true",
+      }),
+    );
+    assert.equal(
+      loadEnvironment({
+        ...validEnvironment,
+        LEARNER_EXPERIMENT_ENABLED: "true",
+        DISCORD_SUPERADMIN_USER_IDS: "100",
+        WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
+        RAPI_PUBLIC_BASE_URL: "https://rapi.example",
+      }).LEARNER_EXPERIMENT_ENABLED,
+      true,
+    );
+  });
+
   it("parses allowlists before application startup", () => {
     const config = loadEnvironment({
       ...validEnvironment,

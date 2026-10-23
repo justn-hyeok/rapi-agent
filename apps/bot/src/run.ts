@@ -11,6 +11,7 @@ import {
   PublicCommunityService,
   RapiAgent,
   createCommunityFeeds,
+  createLearnerExperiment,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
@@ -95,6 +96,7 @@ const agent = new RapiAgent(
       }
     : undefined,
 );
+const learner = createLearnerExperiment(config, store, discord);
 if (config.COMMUNITY_GUILD_ID)
   agent.enableCuration(
     await createCommunityFeeds({
@@ -301,6 +303,16 @@ const server = createDiscordInteractionServer(
       curation: (batchId, token, input) =>
         agent.briefingCuration(batchId, token, input),
     },
+    ...(learner
+      ? {
+          learner: {
+            handle: (identity, customId) =>
+              learner.handleComponent(identity, customId),
+            link: (token, userAgent) =>
+              learner.resolveLink(token, new Date(), userAgent),
+          },
+        }
+      : {}),
     component: async (identity, customId) => {
       if (
         customId.startsWith("guild_allow:") ||

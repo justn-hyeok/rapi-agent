@@ -973,6 +973,377 @@ export class PostgresStore {
     return result.rows.map((row) => row.key);
   }
 
+  // --- Phase-0 learner DM experiment (docs/product-direction.md) ---
+
+  async learnerSubscribe(input: {
+    userId: string;
+    guildId: string | null;
+    cadence: "daily" | "weekly";
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO learner_subscriptions(user_id,guild_id,cadence) VALUES($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET cadence=$3,
+        guild_id=COALESCE($2,learner_subscriptions.guild_id),
+        opted_in_at=CASE WHEN learner_subscriptions.opted_out_at IS NULL THEN learner_subscriptions.opted_in_at ELSE now() END,
+        opted_out_at=NULL`,
+      [input.userId, input.guildId, input.cadence],
+    );
+  }
+
+  async learnerSetCadence(
+    userId: string,
+    cadence: "daily" | "weekly",
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET cadence=$2 WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId, cadence],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerOptOut(userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET opted_out_at=now() WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerSetEmailInterest(
+    userId: string,
+    interested: boolean,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET email_interest=$2 WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId, interested],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerActiveSubscribers(
+    cadence: "daily" | "weekly",
+  ): Promise<Array<{ userId: string; emailAsked: boolean }>> {
+    const result = await this.pool.query<{
+      user_id: string;
+      asked: boolean;
+    }>(
+      `SELECT user_id, email_asked_at IS NOT NULL OR email_interest IS NOT NULL AS asked
+       FROM learner_subscriptions WHERE cadence=$1 AND opted_out_at IS NULL ORDER BY opted_in_at`,
+      [cadence],
+    );
+    return result.rows.map((row) => ({
+      userId: row.user_id,
+      emailAsked: row.asked,
+    }));
+  }
+
+  async learnerMarkEmailAsked(userId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_subscriptions SET email_asked_at=now() WHERE user_id=$1 AND email_asked_at IS NULL",
+      [userId],
+    );
+  }
+
+  /** Posts of the learner feeds after `since`. New free models are recorded as markers, so those count; drafts and check markers do not. */
+  async learnerCandidatePosts(
+    since: Date,
+    feeds: string[],
+  ): Promise<
+    Array<{
+      key: string;
+      feed: string;
+      title: string | null;
+      embeds: unknown;
+      data: unknown;
+    }>
+  > {
+    const result = await this.pool.query<{
+      key: string;
+      feed: string;
+      title: string | null;
+      embeds: unknown;
+      data: unknown;
+    }>(
+      `SELECT key,feed,title,embeds,data FROM community_posts
+       WHERE (state='posted' OR (state='marker' AND starts_with(key,'free-model:')))
+         AND feed=ANY($2) AND posted_at>$1 ORDER BY posted_at DESC LIMIT 200`,
+      [since, feeds],
+    );
+    return result.rows;
+  }
+
+  async learnerLastWindowEnd(
+    cadence: "daily" | "weekly",
+  ): Promise<Date | null> {
+    const result = await this.pool.query<{ at: Date | null }>(
+      "SELECT max(window_end) AS at FROM learner_issues WHERE cadence=$1 AND state<>'empty'",
+      [cadence],
+    );
+    return result.rows[0]?.at ?? null;
+  }
+
+  /** Creates the period's issue once; null when the period already has one. */
+  async learnerCreateIssue(input: {
+    cadence: "daily" | "weekly";
+    periodKey: string;
+    windowStart: Date;
+    windowEnd: Date;
+    items: Array<{
+      postKey: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>;
+  }): Promise<string | null> {
+    return this.transaction(async (client) => {
+      const id = randomUUID();
+      const inserted = await client.query(
+        `INSERT INTO learner_issues(id,cadence,period_key,state,window_start,window_end)
+         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (cadence,period_key) DO NOTHING`,
+        [
+          id,
+          input.cadence,
+          input.periodKey,
+          input.items.length ? "pending" : "empty",
+          input.windowStart,
+          input.windowEnd,
+        ],
+      );
+      if (!inserted.rowCount) return null;
+      for (const [position, item] of input.items.entries())
+        await client.query(
+          `INSERT INTO learner_issue_items(id,issue_id,position,section,post_key,title,summary,url)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            randomUUID(),
+            id,
+            position,
+            item.section,
+            item.postKey,
+            item.title,
+            item.summary,
+            item.url,
+          ],
+        );
+      return input.items.length ? id : null;
+    });
+  }
+
+  async learnerIssueExists(
+    cadence: "daily" | "weekly",
+    periodKey: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM learner_issues WHERE cadence=$1 AND period_key=$2",
+      [cadence, periodKey],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerIssue(id: string): Promise<{
+    id: string;
+    cadence: "daily" | "weekly";
+    periodKey: string;
+    state: string;
+    items: Array<{
+      id: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>;
+  } | null> {
+    const issue = await this.pool.query<{
+      id: string;
+      cadence: "daily" | "weekly";
+      period_key: string;
+      state: string;
+    }>("SELECT id,cadence,period_key,state FROM learner_issues WHERE id=$1", [
+      id,
+    ]);
+    const row = issue.rows[0];
+    if (!row) return null;
+    const items = await this.pool.query<{
+      id: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>(
+      "SELECT id,section,title,summary,url FROM learner_issue_items WHERE issue_id=$1 ORDER BY position",
+      [id],
+    );
+    return {
+      id: row.id,
+      cadence: row.cadence,
+      periodKey: row.period_key,
+      state: row.state,
+      items: items.rows,
+    };
+  }
+
+  /** Issues whose owner preview still has to go out (recent ones only). */
+  async learnerIssuesAwaitingPreview(): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM learner_issues WHERE state='pending' AND preview_sent_at IS NULL
+       AND created_at>now()-interval '24 hours' ORDER BY created_at`,
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async learnerMarkPreviewSent(id: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_issues SET preview_sent_at=now() WHERE id=$1",
+      [id],
+    );
+  }
+
+  /** Moves a pending issue to 'sending' or 'skipped'; only one caller can win. */
+  async learnerDecideIssue(
+    id: string,
+    to: "sending" | "skipped",
+    actorId: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_issues SET state=$2,decided_by=$3,decided_at=now() WHERE id=$1 AND state='pending'",
+      [id, to, actorId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerFinishIssue(id: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_issues SET state='sent',sent_at=now() WHERE id=$1 AND state='sending'",
+      [id],
+    );
+  }
+
+  async learnerIssueState(id: string): Promise<string | null> {
+    const result = await this.pool.query<{ state: string }>(
+      "SELECT state FROM learner_issues WHERE id=$1",
+      [id],
+    );
+    return result.rows[0]?.state ?? null;
+  }
+
+  async learnerRecordDelivery(input: {
+    issueId: string;
+    userId: string;
+    state: "sent" | "failed";
+    error?: string;
+    providerId?: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO learner_deliveries(issue_id,user_id,state,error,provider_id) VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT (issue_id,user_id) DO NOTHING`,
+      [
+        input.issueId,
+        input.userId,
+        input.state,
+        input.error ?? null,
+        input.providerId ?? null,
+      ],
+    );
+  }
+
+  async learnerDeliveryCounts(
+    issueId: string,
+  ): Promise<{ sent: number; failed: number }> {
+    const result = await this.pool.query<{ state: string; n: string }>(
+      "SELECT state,count(*) AS n FROM learner_deliveries WHERE issue_id=$1 GROUP BY state",
+      [issueId],
+    );
+    const count = (state: string) =>
+      Number(result.rows.find((row) => row.state === state)?.n ?? 0);
+    return { sent: count("sent"), failed: count("failed") };
+  }
+
+  /** The stored URL of an item in a sent issue; the only redirect target. */
+  async learnerItemUrl(itemId: string): Promise<string | null> {
+    const result = await this.pool.query<{ url: string }>(
+      `SELECT i.url FROM learner_issue_items i JOIN learner_issues s ON s.id=i.issue_id
+       WHERE i.id=$1 AND s.state IN ('sending','sent')`,
+      [itemId],
+    );
+    return result.rows[0]?.url ?? null;
+  }
+
+  async learnerRecordClick(itemId: string, userId: string): Promise<void> {
+    await this.pool.query(
+      "INSERT INTO learner_clicks(item_id,user_id) VALUES($1,$2)",
+      [itemId, userId],
+    );
+  }
+
+  /** Counts a reply only from an active subscriber; stores no message content. */
+  async learnerRecordReply(userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO learner_replies(user_id)
+       SELECT $1::text WHERE EXISTS (SELECT 1 FROM learner_subscriptions WHERE user_id=$1 AND opted_out_at IS NULL)`,
+      [userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerReportClaim(periodKey: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "INSERT INTO learner_reports(period_key) VALUES($1) ON CONFLICT DO NOTHING",
+      [periodKey],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerReportData(
+    from: Date,
+    to: Date,
+  ): Promise<{
+    active: number;
+    daily: number;
+    weekly: number;
+    optOutsWeek: number;
+    optOutsTotal: number;
+    clickers: number;
+    repliesWeek: number;
+    repliesTotal: number;
+    emailYes: number;
+    emailNo: number;
+    emailUnknown: number;
+  }> {
+    const result = await this.pool.query<Record<string, string>>(
+      `SELECT
+        count(*) FILTER (WHERE opted_out_at IS NULL) AS active,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND cadence='daily') AS daily,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND cadence='weekly') AS weekly,
+        count(*) FILTER (WHERE opted_out_at>=$1 AND opted_out_at<$2) AS opt_week,
+        count(*) FILTER (WHERE opted_out_at IS NOT NULL) AS opt_total,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND EXISTS (
+          SELECT 1 FROM learner_clicks c WHERE c.user_id=learner_subscriptions.user_id AND c.at>=$1 AND c.at<$2)) AS clickers,
+        (SELECT count(*) FROM learner_replies WHERE at>=$1 AND at<$2) AS replies_week,
+        (SELECT count(*) FROM learner_replies) AS replies_total,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS TRUE) AS email_yes,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS FALSE) AS email_no,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS NULL) AS email_unknown
+       FROM learner_subscriptions`,
+      [from, to],
+    );
+    const row = result.rows[0]!;
+    const n = (key: string) => Number(row[key] ?? 0);
+    return {
+      active: n("active"),
+      daily: n("daily"),
+      weekly: n("weekly"),
+      optOutsWeek: n("opt_week"),
+      optOutsTotal: n("opt_total"),
+      clickers: n("clickers"),
+      repliesWeek: n("replies_week"),
+      repliesTotal: n("replies_total"),
+      emailYes: n("email_yes"),
+      emailNo: n("email_no"),
+      emailUnknown: n("email_unknown"),
+    };
+  }
+
   /** Recent public posts from sources marked official (AI tool blogs). */
   async officialItems(since: Date): Promise<
     Array<{

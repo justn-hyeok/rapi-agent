@@ -371,6 +371,13 @@ export function createDiscordInteractionServer(
         input: { action?: unknown; key?: unknown },
       ): Promise<{ status: number; body: unknown }>;
     };
+    learner?: {
+      handle(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): Promise<{ content: string; components?: unknown[] }>;
+      link(token: string, userAgent: string): Promise<string | null>;
+    };
     component?: (
       identity: {
         userId: string;
@@ -401,6 +408,25 @@ export function createDiscordInteractionServer(
           ...(ready && typeof ready === "object" ? ready : {}),
           revision: runtimeRevision,
         });
+      }
+      const learnerLink = /^\/r\/([\w.-]{1,200})(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (learnerLink && integrations?.learner) {
+        const target =
+          request.method === "GET"
+            ? await integrations.learner.link(
+                learnerLink[1]!,
+                request.headers["user-agent"] ?? "",
+              )
+            : null;
+        if (!target) return json(response, 404, { error: "not found" });
+        response.writeHead(302, {
+          location: target,
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+        });
+        return response.end();
       }
       const briefing =
         /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail|\/curation)?(?:\?|$)/.exec(
@@ -561,6 +587,51 @@ export function createDiscordInteractionServer(
           : {}),
       };
       if (interaction.type === 3 && interaction.data?.custom_id) {
+        const learnerId = interaction.data.custom_id;
+        if (learnerId.startsWith("learner_")) {
+          const learner = integrations?.learner;
+          if (!learner)
+            return json(response, 200, {
+              type: 4,
+              data: { content: "지금은 쓸 수 없는 버튼입니다.", flags: 64 },
+            });
+          // Sending an issue takes longer than Discord's 3 second window.
+          if (
+            learnerId.startsWith("learner_issue_send:") &&
+            interaction.application_id &&
+            interaction.token
+          ) {
+            const original = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`;
+            json(response, 200, { type: 5, data: { flags: 64 } });
+            void learner
+              .handle(identity, learnerId)
+              .then((reply) => reply.content)
+              .catch(() => "발송 중 오류가 났어요. 발송 내역을 확인해 주세요.")
+              .then(async (content) => {
+                const update = await fetch(original, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content,
+                    allowed_mentions: { parse: [] },
+                  }),
+                });
+                await update.arrayBuffer();
+              })
+              .catch(() => undefined);
+            return;
+          }
+          const reply = await learner.handle(identity, learnerId);
+          return json(response, 200, {
+            type: 4,
+            data: {
+              content: reply.content,
+              flags: 64,
+              ...(reply.components ? { components: reply.components } : {}),
+              allowed_mentions: { parse: [] },
+            },
+          });
+        }
         if (!integrations?.component)
           return json(response, 400, { error: "component unavailable" });
         if (
