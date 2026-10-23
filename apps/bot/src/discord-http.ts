@@ -635,7 +635,10 @@ export function createDiscordInteractionServer(
         if (!integrations?.component)
           return json(response, 400, { error: "component unavailable" });
         if (
-          interaction.data.custom_id.startsWith("server_config_apply:") &&
+          (interaction.data.custom_id.startsWith("server_config_apply:") ||
+            /^harness_update_(?:apply|revert):/.test(
+              interaction.data.custom_id,
+            )) &&
           interaction.application_id &&
           interaction.token
         ) {

@@ -25,3 +25,4 @@ export function compareMigrationNames(
 
 export * from "./postgres-store.js";
 export * from "./chatops-store.js";
+export * from "./harness-updates-store.js";

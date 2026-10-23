@@ -130,6 +130,12 @@ export const environmentSchema = z
     DELIVERY_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(3600),
     DELIVERY_ENABLED: booleanString.default("true"),
     LEARNER_EXPERIMENT_ENABLED: booleanString,
+    HARNESS_UPDATES_ENABLED: booleanString,
+    HARNESS_UPDATES_REPO: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/)
+      .default("justn-hyeok/rapi-agent"),
+    HARNESS_UPDATES_BASE_BRANCH: z.string().min(1).default("main"),
     COMMUNITY_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     TECHNICAL_RSS_WEBHOOK_NAME: z.string().default("technical-rss-output"),
   })
@@ -145,6 +151,16 @@ export const environmentSchema = z
         path: ["LEARNER_EXPERIMENT_ENABLED"],
         message:
           "LEARNER_EXPERIMENT_ENABLED requires WEBHOOK_ENCRYPTION_KEY, RAPI_PUBLIC_BASE_URL and DISCORD_SUPERADMIN_USER_IDS",
+      });
+    }
+    if (
+      value.HARNESS_UPDATES_ENABLED &&
+      !value.DISCORD_SUPERADMIN_USER_IDS?.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["HARNESS_UPDATES_ENABLED"],
+        message: "HARNESS_UPDATES_ENABLED requires DISCORD_SUPERADMIN_USER_IDS",
       });
     }
     if (value.RAPI_PUBLIC_BASE_URL && !value.WEBHOOK_ENCRYPTION_KEY) {

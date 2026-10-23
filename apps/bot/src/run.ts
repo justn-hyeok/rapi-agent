@@ -11,7 +11,9 @@ import {
   PublicCommunityService,
   RapiAgent,
   createCommunityFeeds,
+  createHarnessUpdates,
   createLearnerExperiment,
+  HarnessUpdateService,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
@@ -28,6 +30,7 @@ import { loadEnvironment } from "@rapi/config";
 import {
   compareMigrationNames,
   expectedMigrationNames,
+  HarnessUpdatesStore,
   PostgresStore,
 } from "@rapi/db";
 import {
@@ -97,6 +100,11 @@ const agent = new RapiAgent(
     : undefined,
 );
 const learner = createLearnerExperiment(config, store, discord);
+const harnessUpdates = createHarnessUpdates(
+  config,
+  new HarnessUpdatesStore(store),
+  discord,
+);
 if (config.COMMUNITY_GUILD_ID)
   agent.enableCuration(
     await createCommunityFeeds({
@@ -354,6 +362,12 @@ const server = createDiscordInteractionServer(
           return "서버를 허용했습니다. slash 명령 등록은 실패했으니 나중에 다시 등록해 주세요.";
         }
         return "서버를 허용했습니다. slash 명령도 등록했습니다.";
+      }
+      if (HarnessUpdateService.handles(customId)) {
+        // Pressed in the owner's DM; only a SUPERADMIN may decide.
+        assertDiscordAccess(identity, allowlists, "superadmin");
+        if (!harnessUpdates) return "지금은 쓸 수 없는 버튼입니다.";
+        return harnessUpdates.handleComponent(identity, customId);
       }
       if (!identity.guildId)
         throw new Error("서버에서만 사용할 수 있는 버튼입니다.");

@@ -16,6 +16,7 @@ import {
 } from "@rapi/adapters";
 import {
   createCommunityFeeds,
+  createHarnessUpdates,
   createLearnerExperiment,
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
@@ -25,7 +26,7 @@ import {
 } from "@rapi/agent";
 import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
-import { PostgresStore } from "@rapi/db";
+import { HarnessUpdatesStore, PostgresStore } from "@rapi/db";
 import { requireHealthyDeliveryResults } from "./delivery-loop.js";
 import { deliveryReadiness } from "./delivery-readiness.js";
 import { shouldRunDelivery } from "./delivery-schedule.js";
@@ -121,6 +122,11 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
   : undefined;
 
 const learner = createLearnerExperiment(config, store, discord);
+const harnessUpdates = createHarnessUpdates(
+  config,
+  new HarnessUpdatesStore(store),
+  discord,
+);
 
 type LoopState = {
   running?: boolean;
@@ -130,7 +136,7 @@ type LoopState = {
   deliveryOutcome?: "delivered" | "idle";
 };
 const loops: Record<
-  "collection" | "delivery" | "webhook" | "curation" | "learner",
+  "collection" | "delivery" | "webhook" | "curation" | "learner" | "harness",
   LoopState
 > = {
   collection: {},
@@ -138,6 +144,7 @@ const loops: Record<
   webhook: {},
   curation: {},
   learner: {},
+  harness: {},
 };
 
 async function runLoop(
@@ -242,6 +249,16 @@ const learnerTimer = learner
     )
   : undefined;
 
+// Detection is rate limited inside the service to every 6 hours.
+const harnessTimer = harnessUpdates
+  ? setInterval(
+      () => void runLoop("harness", () => harnessUpdates.runDue(new Date())),
+      10 * 60_000,
+    )
+  : undefined;
+if (harnessUpdates)
+  void runLoop("harness", () => harnessUpdates.runDue(new Date()));
+
 await runLoop("collection", collect);
 if (shouldRunDelivery(config.DELIVERY_ENABLED))
   await runLoop("delivery", deliver);
@@ -335,6 +352,7 @@ const healthServer = createLocalHealthServer(
               !disabled &&
               name !== "curation" &&
               name !== "learner" &&
+              name !== "harness" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -359,6 +377,7 @@ const shutdown = (): void => {
   clearInterval(collectionTimer);
   if (curationTimer) clearInterval(curationTimer);
   if (learnerTimer) clearInterval(learnerTimer);
+  if (harnessTimer) clearInterval(harnessTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();

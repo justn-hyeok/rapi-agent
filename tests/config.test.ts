@@ -56,6 +56,23 @@ describe("environment configuration", () => {
     );
   });
 
+  it("keeps harness updates off and requires a SUPERADMIN when on", () => {
+    const config = loadEnvironment(validEnvironment);
+    assert.equal(config.HARNESS_UPDATES_ENABLED, false);
+    assert.equal(config.HARNESS_UPDATES_BASE_BRANCH, "main");
+    assert.throws(() =>
+      loadEnvironment({ ...validEnvironment, HARNESS_UPDATES_ENABLED: "true" }),
+    );
+    assert.equal(
+      loadEnvironment({
+        ...validEnvironment,
+        HARNESS_UPDATES_ENABLED: "true",
+        DISCORD_SUPERADMIN_USER_IDS: "100",
+      }).HARNESS_UPDATES_ENABLED,
+      true,
+    );
+  });
+
   it("parses allowlists before application startup", () => {
     const config = loadEnvironment({
       ...validEnvironment,

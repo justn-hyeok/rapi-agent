@@ -327,6 +327,25 @@ PI_CODING_AGENT_DIR=/var/lib/rapi/senpi/agent senpi   # 대화창에서 /login
 뜻일 뿐 로그인 상태는 아니다. 로그인 전에는 `센파이로`가 실패하므로 2번을 먼저 한다.
 `SENPI_BIN`, `SENPI_HOME`은 기본 경로를 바꿀 때만 설정한다.
 
+## 하네스 버전 갱신 (선택)
+
+`HARNESS_UPDATES_ENABLED=true`로 켜면 워커가 6시간마다 `ops/harness-versions.json`의
+`repo` 항목(예: senpi → `code-yeongyu/senpi`)의 최신 GitHub 릴리스를 확인한다. 새
+버전이면 임시 디렉터리에서 자산을 받아 SHA256SUMS를 대조하고 `--version`, 격리 설정
+유지, 고정 스모크 프롬프트를 검사한 뒤 SUPERADMIN 전원에게 `반영 추천`/`보류 추천`
+DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 뒤 재알림)이고 소유자만
+누를 수 있다. 자동으로 바뀌는 것은 없다.
+
+- `[반영]`: VM에 로그인된 `gh`로 `HARNESS_UPDATES_REPO`를 임시 clone해 브랜치
+  `chore/harness-<이름>-<버전>`에 고정값을 바꾸고 PR을 연다. 새 자격 증명은 없다.
+- PR이 머지되면 DM에 `[되돌리기]`가 오고, 누르면 이전 고정값 복원 PR을 연다.
+- 머지·배포 뒤 설치는 수동이다: `scripts/install-senpi.sh` (sudo가 필요해 배포
+  스크립트에는 연결하지 않았다).
+- 모든 단계는 `harness_updates`, `harness_update_events`에 남는다.
+- 스모크 프롬프트는 `SENPI_HOME/agent`의 로그인 파일(설정 제외)을 임시 디렉터리에
+  복사해 실행하고 끝나면 지운다.
+- 워커와 봇 둘 다 같은 환경변수를 읽으므로 워커와 `rapi-bot`을 재시작한다.
+
 ## OMP 제거
 
 2026-10-24부터 코드 실행 경로는 ChatOps(Codex 직접 실행) 하나다. `rapi-omp` 서비스,

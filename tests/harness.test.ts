@@ -204,6 +204,7 @@ test("harness-versions.json pins senpi to a checksummed release asset", async ()
     .object({
       senpi: z.object({
         version: z.string().regex(/^\d{4}\.\d+\.\d+(-\d+)?$/),
+        repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
         asset: z.string().regex(/^pi-linux-x64\.tar\.gz$/),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
       }),
