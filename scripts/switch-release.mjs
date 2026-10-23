@@ -432,7 +432,9 @@ if (
     candidatePath: RAPI_CANDIDATE_RELEASE,
     expectedSha: RAPI_RELEASE_SHA,
     receiptPath: RAPI_SWITCH_RECEIPT,
-    services: RAPI_SWITCH_SERVICES.split(","),
+    // The release that removed OMP is deployed by the previous release's
+    // auto-deploy.sh, which still lists omp.
+    services: RAPI_SWITCH_SERVICES.split(",").filter((name) => name !== "omp"),
     driver: systemdDriver(configuredHealthPorts(serviceEnvironment)),
   });
 }
