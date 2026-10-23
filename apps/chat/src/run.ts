@@ -87,9 +87,14 @@ const lock = await lease.query<{ acquired: boolean }>(
 if (!lock.rows[0]?.acquired) throw new Error("ChatOps instance already active");
 await runs.recover();
 await cleanupArtifacts(chatWorkspace);
+const executor = new CodexExecutor(repository, chatWorkspace, {
+  harness: config.CHATOPS_HARNESS,
+  senpiBinary: config.SENPI_BIN,
+  senpiHome: config.SENPI_HOME,
+});
 const chat = new ChatOrchestrator(
   runs,
-  new CodexExecutor(repository, chatWorkspace),
+  executor,
   async (channel, content) => {
     for (const chunk of splitDiscordMessage(redactChat(content)))
       await sendMessage(channel, chunk);
@@ -434,6 +439,8 @@ const healthServer = createLocalHealthServer(
   async () => {
     const db = await store.checkHealth();
     const publicAgentReady = await publicAgent.readiness();
+    const harnesses = await executor.readiness();
+    const senpiReady = harnesses.senpi.binary && harnesses.senpi.configured;
     const now = new Date();
     return summarizeReadiness([
       {
@@ -456,6 +463,26 @@ const healthServer = createLocalHealthServer(
         checkedAt: now.toISOString(),
         required: config.PUBLIC_AGENT_ENABLED,
         ...(publicAgentReady ? {} : { reason: "public agent unavailable" }),
+      },
+      {
+        name: "codex",
+        status: harnesses.codex.binary ? "ok" : "failed",
+        checkedAt: now.toISOString(),
+        required: config.CHATOPS_HARNESS === "codex",
+        ...(harnesses.codex.binary ? {} : { reason: "codex binary missing" }),
+      },
+      {
+        name: "senpi",
+        status: senpiReady ? "ok" : "failed",
+        checkedAt: now.toISOString(),
+        required: config.CHATOPS_HARNESS === "senpi",
+        ...(senpiReady
+          ? {}
+          : {
+              reason: harnesses.senpi.binary
+                ? "senpi settings missing"
+                : "senpi binary missing",
+            }),
       },
     ]);
   },

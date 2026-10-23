@@ -304,6 +304,29 @@ rollback 절차를 따른다.
 `…, 모델: gpt-6-astra`로 실행별 모델을 지정한다.
 선택 결과는 ChatOps 실행 행에 저장한다.
 
+## senpi 하니스 (선택)
+
+senpi는 소유자 실행 전용 두 번째 하니스다(동작은 [ChatOps 기능](chatops-capabilities.md)
+참고). 고정 버전은 `ops/harness-versions.json`이다.
+
+```bash
+# 1. VM에서 설치: 릴리스 tarball을 받아 sha256 확인 뒤 /opt/rapi-senpi/<버전>에
+#    풀고 /usr/local/bin/senpi를 연결한다. 전용 설정(텔레메트리 끔, 프로젝트 신뢰
+#    never)을 SENPI_HOME(기본 /var/lib/rapi/senpi)/agent/settings.json에 쓴다.
+#    다시 실행해도 안전하다. gh 로그인이 필요하다.
+scripts/install-senpi.sh
+
+# 2. 소유자가 서비스 계정(justn)으로 공급자 로그인(브라우저/기기 인증이 필요하다).
+PI_CODING_AGENT_DIR=/var/lib/rapi/senpi/agent senpi   # 대화창에서 /login
+
+# 3. 같은 요청을 Codex와 `센파이로 …`로 몇 번 나란히 돌려 본 뒤에만 기본값을 바꾼다.
+#    .env에 CHATOPS_HARNESS=senpi 를 쓰고 rapi-chat을 재시작한다.
+```
+
+`curl -s localhost:3100/ready`의 `senpi` 항목이 `ok`면 바이너리와 설정 파일이 있다는
+뜻일 뿐 로그인 상태는 아니다. 로그인 전에는 `센파이로`가 실패하므로 2번을 먼저 한다.
+`SENPI_BIN`, `SENPI_HOME`은 기본 경로를 바꿀 때만 설정한다.
+
 ## OMP 제거
 
 2026-10-24부터 코드 실행 경로는 ChatOps(Codex 직접 실행) 하나다. `rapi-omp` 서비스,

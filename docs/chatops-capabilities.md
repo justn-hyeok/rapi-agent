@@ -20,12 +20,32 @@ ChatOps가 유일한 코드 실행 경로다(OMP의 `/작업`·`/승인`은 제�
 | `라피야! 아스트라로 오류 고쳐줘` | 현재 요청만 `gpt-6-astra`로 실행 |
 | `라피야! 문서 정리해줘, 모델: gpt-5.6-sol` | 정확한 모델 ID로 실행 |
 
+## 실행 하니스 (Codex / senpi)
+
+코드 실행은 `apps/chat/src/harness.ts`의 하니스를 거친다. 기본은 Codex이며 인자와
+환경 필터는 그대로다. senpi는 소유자 실행(`execute`) 전용 선택지다.
+
+- `CHATOPS_HARNESS=codex|senpi`(기본 `codex`)가 기본 하니스다.
+- 소유자(SUPERADMIN)만 `센파이로 …` 또는 `senpi: …`로 해당 요청 한 번에 senpi를
+  고를 수 있다. 다른 등급의 같은 접두사는 일반 문장으로 취급한다. `아스트라로`
+  같은 모델 접두사와 이어 쓸 수 있고(`센파이로 아스트라로 …`), 명시한 모델만
+  `--model`로 넘기며 생략하면 senpi 기본 모델을 쓴다.
+- senpi는 샌드박스가 없어 읽기 전용 답변에는 절대 쓰지 않는다. 그 경우 항상
+  Codex `--sandbox read-only`로 답하고, senpi를 명시했다면 답변 첫 줄에 알린다.
+- senpi 바이너리나 설정이 없으면 Codex로 대체 실행하고 답변 첫 줄에 알린다.
+- senpi는 `-p --no-session --no-approve`로 실행하고 `PI_TELEMETRY=0`,
+  `PI_SKIP_VERSION_CHECK=1`, 전용 설정 디렉터리(`PI_CODING_AGENT_DIR`)를 준다.
+  자식 환경은 Codex와 같은 필터(토큰·비밀·DB URL 제외)를 통과한다.
+- `/ready`에는 `codex`, `senpi` 구성요소가 나온다. senpi는 바이너리와 설정 파일
+  존재만 보고 로그인 여부는 확인하지 않는다. `CHATOPS_HARNESS=senpi`일 때만 필수다.
+
 ## 구조와 권한 경계
 
 - `apps/chat/src/run.ts`: 환경, Gateway, allowlist, 메시지 검증, Discord 전달, 단일 인스턴스 잠금.
 - `router.ts`: 결정론적 한국어 라우팅과 타입 검사되는 capability catalog.
 - `orchestrator.ts`: 채널 대기열, 상태·취소 우회, 기억 문맥, 실행·반복·보고.
-- `executor.ts`: Codex 프로세스 그룹, timeout/취소, 제한된 출력, Git 관찰, 임시 파일 정리.
+- `harness.ts`: Codex·senpi 명령 생성, 준비 상태, 선택·대체 규칙.
+- `executor.ts`: 하니스 프로세스 그룹, timeout/취소, 제한된 출력, Git 관찰, 임시 파일 정리.
 - `packages/contracts/src/chatops.ts`: 외부 메시지·실행·증거·기억 Zod 계약과 비밀 마스킹.
 - `packages/db/src/chatops-store.ts`: PostgreSQL 원자적 메시지 접수, 실행·기억 저장.
 - `0004_chatops_capabilities.sql`: 별도 실행·이벤트·기억·기억 이벤트 테이블과 강제 전이 trigger.

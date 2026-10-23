@@ -17,6 +17,7 @@ import {
 import { ChatOpsStore } from "@rapi/db";
 import { routeIntent } from "./router.js";
 import type { Executor, ProcessResult } from "./executor.js";
+import { ownerHarnessDirective, type HarnessId } from "./harness.js";
 import type { DiscordTyping } from "./typing.js";
 
 export function memoryPack(memories: ChatMemory[]): string {
@@ -159,8 +160,10 @@ export class ChatOrchestrator {
       );
       return;
     }
-    const rawText = redactChat(request).slice(0, 20000);
-    const selection = parseModelDirective(rawText);
+    const redacted = redactChat(request).slice(0, 20000);
+    // Only the owner may pick the harness for one run.
+    const directive = ownerHarnessDirective(redacted, accessLevel);
+    const selection = parseModelDirective(directive.task);
     const text = selection.task;
     const route = routeIntent(text);
     // Code, server and memory work is only taken in the home guild.
@@ -309,6 +312,8 @@ export class ChatOrchestrator {
                 ? "execute"
                 : "answer",
             selection.model,
+            selection.explicit,
+            directive.harness,
           ),
         );
         try {
@@ -339,6 +344,8 @@ export class ChatOrchestrator {
     text: string,
     route: "execute" | "loop" | "answer",
     model: string,
+    modelExplicit = false,
+    harness?: HarnessId,
   ): Promise<void> {
     let run: ChatRun | undefined = prepared;
     const start = Date.now();
@@ -413,6 +420,8 @@ export class ChatOrchestrator {
                 : ""),
             execute: route !== "answer",
             model,
+            modelExplicit,
+            ...(harness ? { harness } : {}),
             signal: active.controller.signal,
             timeoutMs: Math.min(
               180000,
@@ -500,14 +509,15 @@ export class ChatOrchestrator {
         if (!this.cancelled(active)) {
           await this.reply(
             active.scope.channel,
-            (result.output
-              ? run
-                ? "실행기 보고(목표 검증 미확정):\n" + result.output
-                : result.output
-              : "") ||
-              (result.exitCode === 0
-                ? "응답 내용이 없습니다."
-                : "실행에 실패했습니다."),
+            (result.notice ? result.notice + "\n" : "") +
+              ((result.output
+                ? run
+                  ? "실행기 보고(목표 검증 미확정):\n" + result.output
+                  : result.output
+                : "") ||
+                (result.exitCode === 0
+                  ? "응답 내용이 없습니다."
+                  : "실행에 실패했습니다.")),
           );
           if (result.output)
             await this.store.db.appendChatMessage({

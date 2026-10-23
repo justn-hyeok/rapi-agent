@@ -75,6 +75,9 @@ export const environmentSchema = z
     MONITOR_STATE_FILE: z.string().default("/var/lib/rapi/monitor-state.json"),
     MONITOR_PORT: z.coerce.number().int().min(1).max(65535).default(3300),
     CHAT_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(3100),
+    CHATOPS_HARNESS: z.enum(["codex", "senpi"]).default("codex"),
+    SENPI_BIN: z.string().min(1).default("/usr/local/bin/senpi"),
+    SENPI_HOME: z.string().min(1).default("/var/lib/rapi/senpi"),
     PUBLIC_AGENT_SOCKET: z
       .string()
       .default("/run/rapi-public-agent/agent.sock"),
