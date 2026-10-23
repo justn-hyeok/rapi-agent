@@ -57,8 +57,6 @@ export const environmentSchema = z
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
     SMTP_USERNAME: z.string().min(1).optional(),
     SMTP_PASSWORD: z.string().min(1).optional(),
-    OMP_ENDPOINT: z.string().url().optional(),
-    OMP_CALLBACK_SECRET: z.string().min(16).optional(),
     WEBHOOK_SECRET: z.string().min(16).optional(),
     WEBHOOK_ENCRYPTION_KEY: z
       .string()
@@ -116,7 +114,6 @@ export const environmentSchema = z
     BOT_READY_URL: z.string().url().default("http://127.0.0.1:3000/ready"),
     CHAT_READY_URL: z.string().url().default("http://127.0.0.1:3100/ready"),
     WORKER_READY_URL: z.string().url().default("http://127.0.0.1:3400/ready"),
-    OMP_READY_URL: z.string().url().default("http://127.0.0.1:3200/ready"),
     BACKUP_STATUS_FILE: z.string().default("backups/backup-status.json"),
     SOURCE_EXPIRY_STATUS_FILE: z.string().optional(),
     PRIVACY_STATUS_FILE: z.string().optional(),

@@ -65,8 +65,6 @@ export const discordCommandAliases = {
   웹훅: "webhook",
   대화채널: "chat_enable",
   대화해제: "chat_disable",
-  작업: "task",
-  승인: "approve",
   취소: "cancel",
   데이터삭제: "privacy",
   일정: "schedule",
@@ -273,21 +271,6 @@ export const slashCommandDefinitions = [
     type: 1,
   },
   {
-    name: "작업",
-    description: "OMP 개발 작업을 준비합니다",
-    type: 1,
-    options: [
-      stringOption("내용", "할 일을 한글로 입력하세요"),
-      stringOption("공급자", "codex, cursor, commandcode (고트)", false),
-      stringOption("모델", "스파크, 아스트라 또는 정확한 모델 ID", false),
-    ],
-  },
-  {
-    name: "승인",
-    description: "가장 최근 작업을 승인하고 실행합니다",
-    type: 1,
-  },
-  {
     name: "취소",
     description: "가장 최근 진행 중인 작업을 취소합니다",
     type: 1,
@@ -361,7 +344,6 @@ export function createDiscordInteractionServer(
   integrations?: {
     webhook?: { agent: RapiAgent; secret: string };
     managedWebhook?: WebhookManager;
-    omp?: { agent: RapiAgent; secret: string };
     readiness?: () => Promise<unknown>;
     briefing?: {
       page(
@@ -512,17 +494,6 @@ export function createDiscordInteractionServer(
           request.headers,
         );
         return json(response, 202, result);
-      }
-      if (request.url === "/omp/callback" && integrations?.omp) {
-        const signature = request.headers["x-omp-signature"];
-        if (typeof signature !== "string")
-          return json(response, 401, { error: "missing OMP signature" });
-        const applied = await integrations.omp.agent.receiveOmpCallback(
-          body,
-          signature,
-          integrations.omp.secret,
-        );
-        return json(response, 202, { applied });
       }
       if (request.url?.startsWith("/webhooks/") && integrations?.webhook) {
         const signature = request.headers["x-rapi-signature"];
@@ -710,7 +681,6 @@ export function createDiscordInteractionServer(
       if (
         ((commandName === "webhook" && options.action === "테스트") ||
           commandName === "brief" ||
-          commandName === "approve" ||
           commandName === "cancel" ||
           commandName === "privacy" ||
           (commandName === "server_config" && options.action === "적용")) &&

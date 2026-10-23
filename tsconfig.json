@@ -9,7 +9,6 @@
     { "path": "./packages/agent" },
     { "path": "./apps/bot" },
     { "path": "./apps/chat" },
-    { "path": "./apps/omp" },
     { "path": "./apps/monitor" },
     { "path": "./apps/public-agent" },
     { "path": "./scripts" },

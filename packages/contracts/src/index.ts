@@ -60,24 +60,9 @@ export const taskSpecificationSchema = z
   })
   .transform(defaultProviderModel);
 
-export const executionCallbackSchema = z.object({
-  callback_event_id: identifierSchema,
-  receipt_id: identifierSchema,
-  execution_attempt_id: identifierSchema,
-  state_version: z.number().int().nonnegative(),
-  state: z.enum(["running", "blocked", "completed", "failed", "cancelled"]),
-  occurred_at: isoDateTimeSchema,
-  reason: z.string().optional(),
-  result_report_ref: z.string().optional(),
-  evidence_refs: z.array(z.string()).default([]),
-  key_id: identifierSchema,
-  signature: z.string().min(1),
-});
-
 export type DeliveryState = z.infer<typeof deliveryStateSchema>;
 export type TaskState = z.infer<typeof taskStateSchema>;
 export type TaskSpecification = z.infer<typeof taskSpecificationSchema>;
-export type ExecutionCallback = z.infer<typeof executionCallbackSchema>;
 
 export * from "./chatops.js";
 export * from "./models.js";

@@ -8,7 +8,6 @@ import {
   PublicCommunityService,
   RapiAgent,
   RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
 } from "@rapi/agent";
 import { createDiscordInteractionServer } from "../../apps/bot/src/discord-http.js";
 
@@ -32,11 +31,7 @@ test("signed Discord requests enforce USER/ADMIN/SUPERADMIN and isolate quota fa
       return { started: true, ok: true, output: "공개 답변", reason: "exit" };
     },
   });
-  const agent = new RapiAgent(
-    store,
-    new RecordingDeliveryAdapter(),
-    new RecordingOmpAdapter(),
-  );
+  const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
   const commands = new DiscordCommandService(
     agent,
     {

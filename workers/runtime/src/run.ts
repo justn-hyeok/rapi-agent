@@ -12,7 +12,6 @@ import {
   GitHubStarRecommender,
   CodexSummarizer,
   GitHubRepositoryInfo,
-  OmpHttpAdapter,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
 import {
@@ -64,9 +63,6 @@ const delivery = new CompositeDeliveryAdapter({
   discord_channel: discord,
   email,
 });
-const omp = config.OMP_ENDPOINT
-  ? new OmpHttpAdapter(config.OMP_ENDPOINT)
-  : { dispatch: () => Promise.reject(new Error("OMP is not configured")) };
 const summarizer =
   process.env.SUMMARY_MODEL === "off"
     ? undefined
@@ -74,7 +70,6 @@ const summarizer =
 const agent = new RapiAgent(
   store,
   delivery,
-  omp,
   summarizer,
   new GitHubRepositoryInfo(config.GITHUB_READ_TOKEN),
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL

@@ -4,7 +4,7 @@
 
 `rapi-core`는 TypeScript 패키지로 구현하며 도메인 규칙, 저장소 인터페이스,
 작업 상태 전이를 소유한다. Discord, 이메일, GitHub, 블로그, OpenClaw,
-ZeroClaw, OMP는 모두 포트 뒤의 어댑터다.
+ZeroClaw는 모두 포트 뒤의 어댑터다.
 
 이 경계는 초기 실행 계층을 OpenClaw로 시작하더라도 장기적으로 ZeroClaw를
 평가하거나 교체할 수 있게 한다.
@@ -18,7 +18,7 @@ ZeroClaw, OMP는 모두 포트 뒤의 어댑터다.
 | `core/ports` | DB, 큐, 모델, 채널, 실행기의 인터페이스 |
 | `adapters/ingest` | 웹훅, GitHub, 피드, 사이트 입력 |
 | `adapters/delivery` | Discord, 이메일, MDX 출력 |
-| `adapters/execution` | OpenClaw/ZeroClaw 런타임과 OMP 연결 |
+| `adapters/execution` | OpenClaw/ZeroClaw 런타임 연결 |
 | `workers` | 예약 수집, 정규화, 요약, 발송, 재시도 |
 | `apps/bot` | Discord Gateway와 명령 라우팅 |
 | `apps/blog` | MDX 렌더링 및 공개 빌드 |
@@ -42,12 +42,13 @@ ZeroClaw, OMP는 모두 포트 뒤의 어댑터다.
 
 ### 3.2 개발 작업 실행
 
-1. Discord 요청을 `TaskDraft`로 저장한다.
-2. 라피가 목표, 범위, 완료 조건, 권한을 구조화한다.
-3. 위험 정책에 따라 자동 진행 또는 사용자 승인을 요청한다.
-4. 승인된 명세만 OMP 어댑터에 전달한다.
-5. OMP receipt, 상태 변화, 결과 보고서를 동일 작업 ID에 연결한다.
-6. 결과를 Discord에 알리고 커밋·PR·테스트 증거를 보존한다.
+1. 소유자가 ChatOps 채널에서 `라피야!`로 요청한다.
+2. 라우터가 실행 여부를 결정하고 오케스트레이터가 Codex를 직접 실행한다.
+3. 시도와 증거를 실행 행에 기록하고 결과를 같은 채널에 알린다.
+4. `라피야! 멈춰`로 활성 프로세스를 중단한다.
+
+OMP 실행 경로는 2026-10-24에 제거됐다. `TaskRequest` 계열 테이블은 기존 행의
+보존 정책을 위해 남아 있다.
 
 ## 4. 데이터 모델
 
@@ -83,7 +84,7 @@ TaskRequest 1 ── N TaskRevision 1 ── N Approval
 | `TaskRequest` | 사용자 요청, 현재 revision, 상태, 위험 수준 |
 | `TaskRevision` | 구조화 명세, 권한, 완료 조건, 변경 이유 |
 | `Approval` | 승인자, 범위, 만료, 결정, Discord message 참조 |
-| `ExecutionAttempt` | OMP receipt, 입력 revision, 상태, 결과·증거 참조 |
+| `ExecutionAttempt` | 실행 receipt, 입력 revision, 상태, 결과·증거 참조 |
 
 모든 주요 테이블은 `created_at`, `updated_at`을 가지며, 외부 실행 기록은
 가능하면 append-only로 남긴다.
@@ -170,5 +171,5 @@ rapi-agent/
 ## 자연어 ChatOps capability release
 
 Gateway, 결정론적 라우터, 오케스트레이터, Codex 프로세스 어댑터를 분리했다.
-자연어 실행과 기억의 상태는 PostgreSQL이 소유하며 기존 slash OMP 흐름과 병존한다.
+자연어 실행과 기억의 상태는 PostgreSQL이 소유하며 유일한 코드 실행 경로다.
 구현 위치, 흐름, 취소·복구·자원 한도는 [ChatOps 구조](chatops-capabilities.md)를 따른다.

@@ -1,12 +1,6 @@
-import type {
-  DeliveryAdapter,
-  DeliveryResult,
-  OmpAdapter,
-  OmpDispatchResult,
-} from "@rapi/core";
+import type { DeliveryAdapter, DeliveryResult } from "@rapi/core";
 import {
   DiscordDeliveryAdapter,
-  OmpHttpAdapter,
   CodexSummarizer,
   SmtpDeliveryAdapter,
 } from "@rapi/adapters";
@@ -46,16 +40,6 @@ class DisabledDeliveryAdapter implements DeliveryAdapter {
   constructor(private readonly reason: string) {}
   send(): Promise<DeliveryResult> {
     return Promise.reject(new Error(this.reason));
-  }
-}
-
-class DisabledOmpAdapter implements OmpAdapter {
-  dispatch(): Promise<OmpDispatchResult> {
-    return Promise.reject(
-      new Error(
-        "OMP is not configured; set OMP_ENDPOINT to enable development tasks",
-      ),
-    );
   }
 }
 
@@ -100,9 +84,6 @@ const delivery = new CompositeDeliveryAdapter({
 const agent = new RapiAgent(
   store,
   delivery,
-  config.OMP_ENDPOINT
-    ? new OmpHttpAdapter(config.OMP_ENDPOINT)
-    : new DisabledOmpAdapter(),
   process.env.SUMMARY_MODEL === "off"
     ? undefined
     : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL),
@@ -307,9 +288,6 @@ const server = createDiscordInteractionServer(
   {
     ...(config.WEBHOOK_SECRET
       ? { webhook: { agent, secret: config.WEBHOOK_SECRET } }
-      : {}),
-    ...(config.OMP_CALLBACK_SECRET
-      ? { omp: { agent, secret: config.OMP_CALLBACK_SECRET } }
       : {}),
     ...(webhookManager ? { managedWebhook: webhookManager } : {}),
     briefing: {

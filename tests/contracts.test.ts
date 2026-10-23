@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  executionCallbackSchema,
-  taskSpecificationSchema,
-} from "../packages/contracts/src/index.js";
+import { taskSpecificationSchema } from "../packages/contracts/src/index.js";
 
-describe("OMP schemas", () => {
+describe("task specification schema", () => {
   it("accepts a versioned and approved task specification", () => {
     const result = taskSpecificationSchema.safeParse({
       task_id: "task-1",
@@ -28,18 +25,5 @@ describe("OMP schemas", () => {
     });
     assert.equal(result.success, true);
     assert.equal(result.data.model, "gpt-5.6-sol");
-  });
-  it("rejects callbacks without a signature", () => {
-    const result = executionCallbackSchema.safeParse({
-      callback_event_id: "callback-1",
-      receipt_id: "receipt-1",
-      execution_attempt_id: "attempt-1",
-      state_version: 1,
-      state: "running",
-      occurred_at: "2026-09-08T12:00:00Z",
-      key_id: "key-1",
-      evidence_refs: [],
-    });
-    assert.equal(result.success, false);
   });
 });

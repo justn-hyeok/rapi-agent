@@ -47,7 +47,6 @@
 | GitHub 실행 | 작업별 승인된 repo write/PR 범위 | 조직 관리자, 무관 저장소 접근 |
 | 이메일 | 지정 발신자 주소의 send | mailbox 전체 읽기 |
 | 블로그 배포 | 지정 repo/배포 대상 write | 다른 사이트·도메인 변경 |
-| OMP | 작업 명세에 적힌 저장소와 행위 | 승인 범위 밖 commit/push/deploy |
 
 GitHub 읽기와 쓰기 자격 증명은 분리한다. 평상시 수집 프로세스는 쓰기 토큰에
 접근하지 않는다. GitHub App을 사용할 때는 [공식 권한 문서](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app)를
@@ -63,7 +62,6 @@ GitHub 읽기와 쓰기 자격 증명은 분리한다. 평상시 수집 프로�
 - SMTP/API endpoint, username, app password, sender address
 - 모델 공급자 API key와 프로젝트 ID
 - 웹훅 source secret
-- OMP 실행 연결 정보
 - 블로그 배포 key와 object storage 자격 증명
 
 저장소에는 값이 없는 `.env.example`만 둔다. 운영 비밀은 읽기 권한이 제한된
@@ -134,7 +132,7 @@ RAPI_CANDIDATE_RELEASE=/absolute/releases/candidate-directory \
 RAPI_RELEASE_SHA=full-40-character-candidate-sha \
 RAPI_SWITCH_RECEIPT=/absolute/evidence/switch-receipt.json \
 RAPI_SERVICE_ENV_FILE=/home/justn/rapi-agent/.env \
-RAPI_SWITCH_SERVICES=bot,chat,omp,monitor \
+RAPI_SWITCH_SERVICES=bot,chat,monitor,worker \
   node scripts/switch-release.mjs
 ```
 
@@ -266,7 +264,7 @@ Discord 운영 채널 또는 DM으로 아래 상황을 알린다.
 - [ ] 같은 이벤트와 발송을 재시도해도 중복되지 않는다.
 - [ ] DB 백업을 별도 환경에서 실제 복원했다.
 - [ ] 공개 MDX 빌드에서 비공개 콘텐츠가 제외된다.
-- [ ] OMP 작업마다 승인 범위와 결과 증거가 연결된다.
+- [ ] ChatOps 실행마다 시도와 결과 증거가 기록된다.
 
 ## 11. 구현된 운영 명령
 
@@ -303,41 +301,21 @@ rollback 절차를 따른다.
 [운영 상세](chatops-capabilities.md)를 참고한다.
 
 기본 실행 모델은 `gpt-5.6-sol`이다. 명시적인 `스파크로 …`는 Spark를 그대로 선택하므로 계정 지원 여부를 확인해야 한다. ChatOps 요청의 `아스트라로 …`,
-`…, 모델: gpt-6-astra` 또는 `/작업`의 선택 항목 `모델`로 실행별 모델을 지정한다.
-선택 결과는 ChatOps 실행 행 또는 OMP 작업 명세에 저장한다.
+`…, 모델: gpt-6-astra`로 실행별 모델을 지정한다.
+선택 결과는 ChatOps 실행 행에 저장한다.
 
-## OMP provider setup
+## OMP 제거
 
-OMP uses installed CLI coding harnesses, not a direct model endpoint:
+2026-10-24부터 코드 실행 경로는 ChatOps(Codex 직접 실행) 하나다. `rapi-omp` 서비스,
+`/작업`·`/승인` 슬래시 명령, `/omp/callback`, `OMP_*` 설정은 제거됐다. 기존 task 행은
+DB에 남고 보존 정책을 따른다. 배포 뒤 VM에서 한 번 정리한다.
 
-| Provider | Binary | Authentication | `repo:write` flag |
-| --- | --- | --- | --- |
-| `codex` (default) | `/usr/local/bin/codex` | `codex login` as service user | `--approve-for-me` |
-| `cursor` | `/home/justn/.local/bin/cursor-agent` | `cursor-agent login` as service user; OAuth under `~/.cursor` | `--force` |
-| `commandcode` | `/usr/local/bin/command-code` | `COMMAND_CODE_API_KEY` | `--yolo` |
+```bash
+sudo systemctl stop rapi-omp && sudo systemctl disable rapi-omp
+sudo rm -f /etc/systemd/system/rapi-omp.service*
+sudo systemctl daemon-reload
+npm run discord:register-commands   # 슬래시 명령 재등록: /작업, /승인 제거
+```
 
-Put `COMMAND_CODE_API_KEY` in the production `.env` yourself, then restart the OMP service
-(`sudo systemctl restart rapi-omp`). Never paste keys into Discord or task specs.
-The key is passed only to the Command Code child environment, not Codex, Cursor,
-or Git children. OAuth credentials are not copied into clones or printed.
-Command Code v1.51.3 runs with `--no-session --skip-onboarding --no-auto-update`;
-its GOAT endpoint is not used directly because OMP needs the CLI coding tools.
-
-Run Cursor login externally with the same HOME/user as the OMP service. A service
-restart is needed after changing environment configuration. Re-register Discord
-commands after updating the bot to expose the optional `공급자` and `모델` fields.
-
-Examples: `/작업 내용:커서로 오류 고쳐줘`, `/작업 내용:고트로 오류 고쳐줘`,
-`/작업 내용:오류 고쳐줘 공급자:cursor 모델:MODEL_ID`. Codex defaults to Spark;
-other providers omit `--model` unless selected. Read-only tasks receive no write
-permission flag (Codex additionally uses its read-only sandbox). Provider CLI
-permissions are not an OS isolation boundary; existing approved broad authority
-and commit/push/deploy policy remain in effect.
-
-`GET http://127.0.0.1:3200/health` reports `providers.codex`, `providers.cursor`,
-and `providers.commandcode`: `binary` checks executable presence, `configured`
-checks Codex auth-file/Cursor directory presence or a nonempty Command Code key.
-`authentication: not_verified` means this does not contact the provider or prove
-credentials are valid. Failed receipts give installation/login/restart guidance;
-inspect the redacted `omp-execution.log` for execution failures. Cursor and Command
-Code stdout becomes `omp-result.md`; Codex retains its final-message output file.
+VM `.env`의 `OMP_*`와 `COMMAND_CODE_API_KEY`는 더 이상 읽지 않으므로 지워도 된다
+(남아 있어도 설정 검증은 알 수 없는 키를 무시한다).

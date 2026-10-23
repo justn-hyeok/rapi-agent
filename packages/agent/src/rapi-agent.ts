@@ -1,16 +1,9 @@
-import {
-  createHash,
-  createHmac,
-  randomUUID,
-  timingSafeEqual,
-} from "node:crypto";
-import { resolveProviderSelection } from "@rapi/contracts";
+import { createHash, randomUUID } from "node:crypto";
 export { DEFAULT_CODEX_MODEL as DEFAULT_SUMMARY_MODEL } from "@rapi/contracts";
 import type {
   DeliveryAdapter,
   DeliveryTarget,
   FrozenBatch,
-  OmpAdapter,
   SubscriptionInput,
   Visibility,
 } from "@rapi/core";
@@ -89,7 +82,6 @@ export class RapiAgent {
   constructor(
     readonly store: PostgresStore,
     private readonly delivery: DeliveryAdapter,
-    private readonly omp: OmpAdapter,
     private readonly summarizer?: ItemSummarizer,
     private readonly repositories?: RepositoryDescriber,
     private readonly briefingLinks?: { key: Buffer; baseUrl: string },
@@ -898,152 +890,9 @@ export class RapiAgent {
     return filePath;
   }
 
-  createTask(
-    requesterId: string,
-    specification: Record<string, unknown>,
-  ): Promise<{ taskId: string; revision: number }> {
-    const permissions = Array.isArray(specification.permissions)
-      ? specification.permissions
-      : [];
-    const risk = permissions.some((permission) =>
-      ["push", "deploy", "repo:write", "commit:create"].includes(
-        String(permission),
-      ),
-    )
-      ? "high"
-      : "low";
-    return this.store.createTask(
-      requesterId,
-      {
-        ...specification,
-        ...resolveProviderSelection(specification),
-      },
-      risk,
-    );
-  }
-
-  approveTask(
-    taskId: string,
-    revision: number,
-    approverId: string,
-    permissions: string[],
-    messageRef: string,
-    expiresAt = new Date(Date.now() + 15 * 60_000),
-  ): Promise<string> {
-    return this.store.approveTask(
-      taskId,
-      revision,
-      approverId,
-      permissions,
-      expiresAt,
-      messageRef,
-    );
-  }
-
-  async dispatchTask(taskId: string): Promise<{
-    attemptId: string;
-    receiptId: string;
-    provider: string;
-    model?: string | undefined;
-  }> {
-    const prepared = await this.store.prepareDispatch(taskId, "omp");
-    const selection = resolveProviderSelection(prepared.specification);
-    if (prepared.existingReceipt)
-      return {
-        attemptId: prepared.attemptId,
-        receiptId: prepared.existingReceipt,
-        ...selection,
-      };
-    const result = await this.omp.dispatch(
-      prepared.specification,
-      prepared.idempotencyKey,
-    );
-    await this.store.recordDispatch(
-      prepared.attemptId,
-      result.receiptId,
-      result.accepted,
-      result.reason,
-    );
-    return {
-      attemptId: prepared.attemptId,
-      receiptId: result.receiptId,
-      ...selection,
-    };
-  }
-
   async cancelTask(taskId: string): Promise<void> {
-    const attempt = await this.store.latestTaskExecution(taskId);
-    if (
-      attempt &&
-      ["dispatched", "running", "blocked"].includes(attempt.state)
-    ) {
-      if (!attempt.receiptId || !this.omp.cancel)
-        throw new Error(
-          "실행기 접수 또는 취소 기능을 확인할 수 없습니다. 취소 상태는 미확정입니다.",
-        );
-      if (!(await this.omp.cancel(attempt.receiptId, attempt.id)))
-        throw new Error(
-          "프로세스가 이미 종료됐거나 중단을 확인하지 못했습니다.",
-        );
-      if ((await this.store.taskState(taskId)) !== "cancelled")
-        throw new Error(
-          "실행기 중단은 확인했지만 DB 상태 반영은 미확정입니다.",
-        );
-      return;
-    }
     if ((await this.store.taskState(taskId)) !== "cancelled")
       await this.store.cancelTask(taskId);
-  }
-
-  async receiveOmpCallback(
-    rawBody: Buffer,
-    signature: string,
-    secret: string,
-  ): Promise<boolean> {
-    const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
-    const left = Buffer.from(expected);
-    const right = Buffer.from(signature);
-    if (left.length !== right.length || !timingSafeEqual(left, right))
-      throw new Error("Invalid OMP callback signature");
-    const callback = JSON.parse(rawBody.toString("utf8")) as {
-      callback_event_id: string;
-      receipt_id: string;
-      execution_attempt_id: string;
-      state_version: number;
-      state: "running" | "blocked" | "completed" | "failed" | "cancelled";
-      result_report_ref?: string;
-      evidence_refs?: string[];
-    };
-    if (
-      callback.state === "completed" &&
-      (!callback.result_report_ref || !callback.evidence_refs?.length)
-    ) {
-      throw new Error("Completed callback is missing required evidence");
-    }
-    const applied = await this.store.applyCallback(
-      callback.callback_event_id,
-      callback.execution_attempt_id,
-      callback.receipt_id,
-      callback.state_version,
-      callback.state,
-      callback as unknown as Record<string, unknown>,
-    );
-    if (applied) {
-      const ownerId = await this.store.executionOwner(
-        callback.execution_attempt_id,
-      );
-      await this.delivery.send(
-        { channel: "discord_dm", recipientId: ownerId },
-        {
-          subject: `OMP task ${callback.state}`,
-          text: `OMP 실행 상태: ${callback.state}`,
-          html: `<p>OMP 실행 상태: ${callback.state}</p>`,
-          itemIds: [],
-        },
-        `callback:${callback.callback_event_id}`,
-      );
-    }
-    return applied;
   }
 }
 

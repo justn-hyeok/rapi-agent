@@ -31,6 +31,8 @@ Discord는 자동화용 bot user를 별도로 제공하며 일반 사용자 계�
 
 ### D-005: 개발 구현은 OMP에 위임한다
 
+superseded 2026-10-24 by docs/product-direction.md
+
 라피는 요청을 versioned task specification으로 만들고 승인된 범위만 OMP에
 전달한다. 라피 런타임 자체에는 직접 코드를 수정하는 기능을 두지 않는다.
 
@@ -132,6 +134,8 @@ D-008의 Astra 고정 정책을 대체한다. ChatOps와 OMP의 기본 모델은
 fallback하지 않는다.
 
 ## D-010: OMP multi-provider CLI execution (accepted, 2026-09-09)
+
+superseded 2026-10-24 by docs/product-direction.md
 
 Extend the revision-approved OMP path with Codex, Cursor and Command Code CLI
 adapters. Codex/Spark remains the backward-compatible default. Cursor and Command

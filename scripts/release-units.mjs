@@ -15,7 +15,6 @@ import { randomUUID } from "node:crypto";
 const paths = {
   bot: "apps/bot/src/run.ts",
   chat: "apps/chat/src/run.ts",
-  omp: "apps/omp/src/run.ts",
   worker: "workers/runtime/src/run.ts",
   monitor: "apps/monitor/src/run.ts",
 };

@@ -23,6 +23,16 @@ describe("environment configuration", () => {
     );
   });
 
+  it("ignores leftover OMP_* keys from an older .env", () => {
+    const config = loadEnvironment({
+      ...validEnvironment,
+      OMP_ENDPOINT: "http://127.0.0.1:3200",
+      OMP_CALLBACK_SECRET: "x",
+      OMP_READY_URL: "not-a-url",
+    });
+    assert.equal(config.DATABASE_URL, validEnvironment.DATABASE_URL);
+  });
+
   it("parses allowlists before application startup", () => {
     const config = loadEnvironment({
       ...validEnvironment,

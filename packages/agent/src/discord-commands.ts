@@ -11,7 +11,6 @@ import {
   type SubscriptionInput,
 } from "@rapi/core";
 import { RapiAgent } from "./rapi-agent.js";
-import { parseTaskSelection, resolveProviderSelection } from "@rapi/contracts";
 
 export const slashCommands = [
   "brief",
@@ -27,8 +26,6 @@ export const slashCommands = [
   "server_config",
   "chat_enable",
   "chat_disable",
-  "task",
-  "approve",
   "cancel",
   "privacy",
   "schedule",
@@ -47,9 +44,7 @@ export interface DiscordCommandResult {
 export function requiredCommandAccess(
   command: DiscordCommand["name"],
 ): DiscordAccessLevel {
-  if (
-    ["task", "approve", "cancel", "webhook", "server_config"].includes(command)
-  )
+  if (["cancel", "webhook", "server_config"].includes(command))
     return "superadmin";
   if (
     [
@@ -610,76 +605,14 @@ export class DiscordCommandService {
           ],
         };
       }
-      case "task": {
-        const supplied = command.options.specification as
-          | Record<string, unknown>
-          | undefined;
-        const content = optionalString(command.options, "content");
-        const requestedModel = optionalString(command.options, "model");
-        const parsed = content
-          ? parseTaskSelection(
-              content,
-              optionalString(command.options, "provider"),
-              requestedModel,
-            )
-          : undefined;
-        const specification =
-          supplied ??
-          (content
-            ? {
-                goal: parsed!.task,
-                requirements: [parsed!.task],
-                provider: parsed!.provider,
-                model: parsed!.model,
-                acceptance_criteria: [
-                  "요청한 변경을 완료한다.",
-                  "관련 검사를 통과한다.",
-                ],
-                permissions: ["repo:write", "commit:create"],
-                forbidden_actions: ["push", "pull request", "deploy"],
-                timeout_seconds: 1800,
-              }
-            : undefined);
-        if (!specification) throw new Error("작업 내용을 입력하세요.");
-        const selection = resolveProviderSelection(specification);
-        const task = await this.agent.createTask(ownerId, specification);
-        return {
-          messages: [
-            `작업을 준비했습니다. 실행하려면 /승인 을 입력하세요.\n작업 ID: ${task.taskId} · ${selection.provider} / ${selection.model ?? "공급자 기본 모델"}`,
-          ],
-          data: task,
-        };
-      }
-      case "approve": {
-        const latest = await this.agent.store.latestAwaitingTask(ownerId);
-        const taskId = optionalString(command.options, "taskId") ?? latest?.id;
-        if (!taskId) throw new Error("승인할 작업이 없습니다.");
-        const revision = command.options.revision
-          ? Number(command.options.revision)
-          : (latest?.revision ?? 1);
-        const permissions = Array.isArray(command.options.permissions)
-          ? command.options.permissions.map(String)
-          : (latest?.permissions ?? []);
-        await this.agent.approveTask(
-          taskId,
-          revision,
-          ownerId,
-          permissions,
-          optionalString(command.options, "messageRef") ?? "discord-command",
-        );
-        const dispatch = await this.agent.dispatchTask(taskId);
-        return {
-          messages: [
-            `작업을 승인하고 OMP에 전달했습니다: ${dispatch.receiptId} · ${dispatch.provider} / ${dispatch.model ?? "공급자 기본 모델"}`,
-          ],
-          data: dispatch,
-        };
-      }
       case "cancel": {
         const taskId =
           optionalString(command.options, "taskId") ??
           (await this.agent.store.latestCancellableTask(ownerId));
-        if (!taskId) throw new Error("취소할 작업이 없습니다.");
+        if (!taskId)
+          throw new Error(
+            "취소할 작업이 없습니다. 실행 중인 ChatOps 작업은 채널에서 ‘라피야! 멈춰’로 중단하세요.",
+          );
         await this.agent.cancelTask(taskId);
         return { messages: ["작업 중단과 취소 상태를 확인했습니다."] };
       }

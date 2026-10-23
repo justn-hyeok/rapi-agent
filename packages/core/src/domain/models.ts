@@ -90,17 +90,3 @@ export interface DeliveryAdapter {
     idempotencyKey: string,
   ): Promise<DeliveryResult>;
 }
-
-export interface OmpDispatchResult {
-  receiptId: string;
-  accepted: boolean;
-  reason?: string;
-}
-
-export interface OmpAdapter {
-  cancel?(receiptId: string, attemptId: string): Promise<boolean>;
-  dispatch(
-    specification: Record<string, unknown>,
-    idempotencyKey: string,
-  ): Promise<OmpDispatchResult>;
-}

@@ -60,7 +60,7 @@ describe("external input boundaries", () => {
   });
 
   it("registers simple Korean slash commands", () => {
-    assert.equal(slashCommandDefinitions.length, 18);
+    assert.equal(slashCommandDefinitions.length, 16);
     const optionNames = slashCommandDefinitions.flatMap((command) =>
       (command.options ?? []).flatMap((option) => [
         option.name,
@@ -93,29 +93,20 @@ describe("external input boundaries", () => {
         "웹훅",
         "대화채널",
         "대화해제",
-        "작업",
-        "승인",
         "취소",
       ],
     );
     const subscribe = slashCommandDefinitions.find(
       (command) => command.name === "구독",
     );
-    const approve = slashCommandDefinitions.find(
-      (command) => command.name === "승인",
-    );
-    const task = slashCommandDefinitions.find(
-      (command) => command.name === "작업",
-    );
     assert.deepEqual(
       subscribe?.options?.map((option) => option.name),
       ["이름", "키워드", "분야", "주기"],
     );
-    assert.equal(approve?.options, undefined);
-    assert.deepEqual(
-      task?.options?.map((option) => option.name),
-      ["내용", "공급자", "모델"],
-    );
+    const names = slashCommandDefinitions.map((command) => command.name);
+    assert.equal(names.includes("작업"), false);
+    assert.equal(names.includes("승인"), false);
+    assert.equal(names.includes("취소"), true);
   });
 
   it("allows every channel when no channel allowlist is configured", () => {
@@ -205,8 +196,7 @@ describe("external input boundaries", () => {
   it("assigns command tiers", () => {
     assert.equal(requiredCommandAccess("search"), "user");
     assert.equal(requiredCommandAccess("chat_enable"), "admin");
-    assert.equal(requiredCommandAccess("task"), "superadmin");
-    assert.equal(requiredCommandAccess("approve"), "superadmin");
+    assert.equal(requiredCommandAccess("cancel"), "superadmin");
     assert.equal(requiredCommandAccess("status"), "admin");
     assert.equal(requiredCommandAccess("webhook"), "superadmin");
   });

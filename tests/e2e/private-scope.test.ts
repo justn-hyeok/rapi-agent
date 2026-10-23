@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  RapiAgent,
-  RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
-} from "@rapi/agent";
+import { RapiAgent, RecordingDeliveryAdapter } from "@rapi/agent";
 import { PostgresStore } from "@rapi/db";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -14,11 +10,7 @@ if (!databaseUrl || new URL(databaseUrl).pathname !== "/rapi_test")
 describe("private source scope", () => {
   it("delivers private items only to their owner's explicit subscription", async () => {
     const store = new PostgresStore(databaseUrl);
-    const agent = new RapiAgent(
-      store,
-      new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
-    );
+    const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
     try {
       await store.resetForTests();
       const at = new Date("2026-09-08T01:00:00Z");

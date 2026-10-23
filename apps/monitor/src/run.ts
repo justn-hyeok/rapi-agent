@@ -38,7 +38,6 @@ const chatFailureThreshold =
   Math.ceil((5 * 60) / config.MONITOR_INTERVAL_SECONDS) + 1;
 const tracker = new HealthTransitionTracker(3, 2, {
   chat: { failureThreshold: chatFailureThreshold },
-  omp: { failureThreshold: 1 },
 });
 const state = await loadState(config.MONITOR_STATE_FILE);
 tracker.restore(state.tracker);
@@ -127,14 +126,6 @@ async function checkEndpoint(
         : {}),
     };
   }
-}
-
-function healthUrl(readyUrl: string): string {
-  const url = new URL(readyUrl);
-  url.pathname = "/health";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
 }
 
 async function checkBackup(
@@ -277,7 +268,6 @@ async function check(): Promise<void> {
       checkEndpoint("bot", config.BOT_READY_URL),
       checkEndpoint("chat", config.CHAT_READY_URL),
       checkEndpoint("worker", config.WORKER_READY_URL),
-      checkEndpoint("omp", healthUrl(config.OMP_READY_URL)),
       checkBackup(),
     ];
     if (config.PUBLIC_AGENT_ENABLED)

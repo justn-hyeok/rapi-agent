@@ -52,7 +52,6 @@ test("public gateway denies private routes, forwards signed interactions and fai
     for (const path of [
       "/health",
       "/ready",
-      "/omp/callback",
       "/v1/answer",
       "/interactions/extra",
       "/%69nteractions",
