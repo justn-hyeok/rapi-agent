@@ -421,10 +421,14 @@ test("the api executor returns bounded text and maps timeouts and cancels", asyn
         r.signal?.addEventListener("abort", () => reject(new Error("aborted"))),
       ),
   };
+  // AbortSignal.timeout does not keep the event loop alive; in production the
+  // socket server does, here a ref'd timer stands in for it.
+  const keepAlive = setTimeout(() => undefined, 1_000);
   assert.equal(
     (await runPublicModel("q", hang, { timeoutMs: 20 })).reason,
     "timeout",
   );
+  clearTimeout(keepAlive);
   const controller = new AbortController();
   const cancelled = runPublicModel("q", hang, { signal: controller.signal });
   controller.abort();
