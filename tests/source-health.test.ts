@@ -40,41 +40,14 @@ test("tolerates a transient source failure but reports sustained failures", () =
   );
 });
 
-test("delegated crawler sources require an actual recent successful capture", () => {
-  assert.equal(
-    assessSourceHealth([
-      {
-        kind: "aside",
-        active: true,
-        failureCount: 0,
-        crawler: true,
-        lastSuccessAt: null,
-      },
-    ]).status,
-    "failed",
+test("html sources are collectable like rss sources", () => {
+  assert.deepEqual(
+    assessSourceHealth([{ kind: "html", active: true, failureCount: 0 }]),
+    { configured: 1, failing: 0, unsupported: 0, status: "ok" },
   );
   assert.equal(
-    assessSourceHealth([
-      {
-        kind: "aside",
-        active: true,
-        failureCount: 0,
-        crawler: true,
-        lastSuccessAt: new Date(),
-      },
-    ]).status,
-    "ok",
-  );
-  assert.equal(
-    assessSourceHealth([
-      {
-        kind: "rss",
-        active: true,
-        failureCount: 0,
-        crawler: true,
-        lastSuccessAt: new Date(Date.now() - 3600000),
-      },
-    ]).status,
+    assessSourceHealth([{ kind: "html", active: true, failureCount: 3 }])
+      .status,
     "failed",
   );
 });

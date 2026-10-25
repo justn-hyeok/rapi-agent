@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { type HtmlSourcePolicy } from "@rapi/core";
 
 export interface SourceHttpOptions {
   timeoutMs?: number;
@@ -164,6 +165,314 @@ export function parseFeed(xml: string): ExternalItem[] {
   throw new Error("Unsupported RSS/Atom document");
 }
 
+const VOID_TAGS = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "source",
+  "track",
+  "wbr",
+]);
+
+interface HtmlNode {
+  tag: string;
+  attrs: string;
+  parent: HtmlNode | null;
+  children: Array<HtmlNode | string>;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+function decodeEntities(value: string): string {
+  return value.replace(
+    /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+    (match, name: string) => {
+      if (name[0] === "#") {
+        const code =
+          name[1] === "x" || name[1] === "X"
+            ? Number.parseInt(name.slice(2), 16)
+            : Number.parseInt(name.slice(1), 10);
+        return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff
+          ? String.fromCodePoint(code)
+          : match;
+      }
+      return NAMED_ENTITIES[name.toLowerCase()] ?? match;
+    },
+  );
+}
+
+function attribute(attrs: string, name: string): string | undefined {
+  const match = new RegExp(
+    `(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`,
+    "i",
+  ).exec(attrs);
+  const value = match ? (match[1] ?? match[2] ?? match[3] ?? "") : undefined;
+  return value === undefined ? undefined : decodeEntities(value);
+}
+
+// A tolerant tag-stream tree: no script execution, no external parser.
+function buildHtmlTree(html: string): HtmlNode {
+  const stripped = html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
+  const root: HtmlNode = {
+    tag: "#root",
+    attrs: "",
+    parent: null,
+    children: [],
+  };
+  let current = root;
+  const tokens =
+    /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>|<!?[^>]*>|([^<]+|<)/g;
+  for (const match of stripped.matchAll(tokens)) {
+    if (match[4] !== undefined) {
+      current.children.push(match[4]);
+      continue;
+    }
+    if (match[2] === undefined) continue;
+    const tag = match[2].toLowerCase();
+    if (match[1]) {
+      for (let node: HtmlNode | null = current; node; node = node.parent)
+        if (node.tag === tag) {
+          current = node.parent ?? root;
+          break;
+        }
+      continue;
+    }
+    const attrs = match[3] ?? "";
+    const node: HtmlNode = { tag, attrs, parent: current, children: [] };
+    current.children.push(node);
+    if (!VOID_TAGS.has(tag) && !attrs.trimEnd().endsWith("/")) current = node;
+  }
+  return root;
+}
+
+function nodeText(node: HtmlNode): string {
+  const parts: string[] = [];
+  const walk = (current: HtmlNode): void => {
+    for (const child of current.children)
+      if (typeof child === "string") parts.push(child);
+      else {
+        parts.push(" ");
+        walk(child);
+        parts.push(" ");
+      }
+  };
+  walk(node);
+  return decodeEntities(parts.join("")).replace(/\s+/g, " ").trim();
+}
+
+function findNodes(
+  node: HtmlNode,
+  predicate: (node: HtmlNode) => boolean,
+  found: HtmlNode[] = [],
+): HtmlNode[] {
+  for (const child of node.children)
+    if (typeof child !== "string") {
+      if (predicate(child)) found.push(child);
+      findNodes(child, predicate, found);
+    }
+  return found;
+}
+
+const MONTHS: Record<string, number> = {
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
+};
+const MONTH_NAMES =
+  "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+
+function isoDate(year: number, month: number, day: number): string | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? date.toISOString()
+    : null;
+}
+
+// First date in free text: ISO, "Oct 18, 2026", "18 October 2026", "2026년 10월 18일".
+export function findDateText(
+  value: string,
+): { iso: string; matched: string } | null {
+  const candidates: Array<{
+    index: number;
+    iso: string | null;
+    matched: string;
+  }> = [];
+  const patterns: Array<[RegExp, (m: RegExpExecArray) => string | null]> = [
+    [
+      /\b(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?/g,
+      (m) => {
+        const parsed = Date.parse(m[0].replace(" ", "T"));
+        return /[T ]/.test(m[0]) && Number.isFinite(parsed)
+          ? new Date(parsed).toISOString()
+          : isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
+      },
+    ],
+    [
+      new RegExp(
+        `\\b(${MONTH_NAMES})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`,
+        "gi",
+      ),
+      (m) =>
+        isoDate(
+          Number(m[3]),
+          MONTHS[m[1]!.slice(0, 3).toLowerCase()]!,
+          Number(m[2]),
+        ),
+    ],
+    [
+      new RegExp(
+        `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_NAMES})\\.?,?\\s+(\\d{4})\\b`,
+        "gi",
+      ),
+      (m) =>
+        isoDate(
+          Number(m[3]),
+          MONTHS[m[2]!.slice(0, 3).toLowerCase()]!,
+          Number(m[1]),
+        ),
+    ],
+    [
+      /(\d{4})\s*(?:년|\.)\s*(\d{1,2})\s*(?:월|\.)\s*(\d{1,2})\s*(?:일|\.)?/g,
+      (m) => isoDate(Number(m[1]), Number(m[2]), Number(m[3])),
+    ],
+  ];
+  for (const [pattern, convert] of patterns)
+    for (const match of value.matchAll(pattern))
+      candidates.push({
+        index: match.index,
+        iso: convert(match as RegExpExecArray),
+        matched: match[0],
+      });
+  const first = candidates
+    .filter((candidate) => candidate.iso)
+    .sort((a, b) => a.index - b.index)[0];
+  return first ? { iso: first.iso!, matched: first.matched } : null;
+}
+
+function dateWithin(node: HtmlNode): string | null {
+  for (const time of findNodes(node, (n) => n.tag === "time")) {
+    const stamp = attribute(time.attrs, "datetime");
+    const found = stamp ? findDateText(stamp) : null;
+    if (found) return found.iso;
+  }
+  return findDateText(nodeText(node))?.iso ?? null;
+}
+
+// Extract post links from a server-rendered list page. Links must be
+// same-origin and match the policy; the nearest date text becomes publishedAt.
+export function parseHtmlList(
+  html: string,
+  baseUrl: string,
+  policy: Pick<HtmlSourcePolicy, "linkPattern"> &
+    Partial<Pick<HtmlSourcePolicy, "maxItems" | "exclude">>,
+): ExternalItem[] {
+  if (Buffer.byteLength(html) > 2_000_000)
+    throw new Error("HTML exceeds the 2 MB input limit");
+  const base = new URL(baseUrl);
+  const include = new RegExp(policy.linkPattern);
+  const excluded = (policy.exclude ?? []).map((pattern) => new RegExp(pattern));
+  const maxItems = policy.maxItems ?? 20;
+  const root = buildHtmlTree(html);
+  const matches = (anchor: HtmlNode): string | null => {
+    const href = attribute(anchor.attrs, "href");
+    if (!href) return null;
+    let url: URL;
+    try {
+      url = new URL(href, base);
+    } catch {
+      return null;
+    }
+    if (url.origin !== base.origin) return null;
+    if (!include.test(url.pathname)) return null;
+    if (excluded.some((pattern) => pattern.test(url.pathname))) return null;
+    url.hash = "";
+    return url.href;
+  };
+  const anchors = findNodes(root, (node) => node.tag === "a")
+    .map((anchor) => ({ anchor, url: matches(anchor) }))
+    .filter((entry): entry is { anchor: HtmlNode; url: string } => !!entry.url);
+  const urlsUnder = (node: HtmlNode): Set<string> =>
+    new Set(
+      findNodes(node, (n) => n.tag === "a").flatMap((a) => matches(a) ?? []),
+    );
+
+  const items = new Map<string, ExternalItem>();
+  for (const { anchor, url } of anchors) {
+    let item = items.get(url);
+    if (!item) {
+      if (items.size >= maxItems) continue;
+      item = {
+        externalId: url,
+        url,
+        title: "",
+        body: "",
+        author: null,
+        publishedAt: null,
+        metadata: { feedType: "html" },
+      };
+      items.set(url, item);
+    }
+    const anchorText = nodeText(anchor);
+    let publishedAt = dateWithin(anchor);
+    if (!publishedAt) {
+      // Climb while the container still holds only this post's link.
+      for (
+        let container = anchor.parent;
+        container && container.tag !== "#root";
+        container = container.parent
+      ) {
+        const urls = urlsUnder(container);
+        if (urls.size !== 1 || !urls.has(url)) break;
+        publishedAt = dateWithin(container);
+        if (publishedAt) break;
+      }
+    }
+    if (!item.publishedAt && publishedAt) item.publishedAt = publishedAt;
+    if (!item.title) {
+      const heading = findNodes(anchor, (n) => /^h[1-6]$/.test(n.tag))
+        .map(nodeText)
+        .find(Boolean);
+      let title = heading ?? anchorText;
+      const date = findDateText(title);
+      if (date) title = title.replace(date.matched, " ");
+      title = title.replace(/\s+/g, " ").trim();
+      item.title =
+        title ||
+        attribute(anchor.attrs, "title")?.trim() ||
+        attribute(anchor.attrs, "aria-label")?.trim() ||
+        "";
+    }
+  }
+  return [...items.values()].filter((item) => item.title);
+}
+
 export function parseGitHubEvent(
   payload: Record<string, unknown>,
 ): ExternalItem {
@@ -283,6 +592,36 @@ export class FeedSourceAdapter {
     const responseEtag = response.headers.get("etag") ?? undefined;
     return {
       items: parseFeed(body),
+      ...(responseEtag ? { etag: responseEtag } : {}),
+    };
+  }
+}
+
+export class HtmlSourceAdapter {
+  constructor(private readonly options: SourceHttpOptions = {}) {}
+
+  // Same limits and fetch path as the RSS adapter (shared readSource).
+  async fetch(
+    url: string,
+    policy: HtmlSourcePolicy,
+    etag?: string,
+    onPayload?: (payload: SourcePayload) => Promise<void>,
+  ): Promise<{ items: ExternalItem[]; etag?: string }> {
+    const { response, body } = await readSource(
+      url,
+      {
+        Accept: "text/html",
+        "User-Agent": "rapi-agent",
+        ...(etag ? { "If-None-Match": etag } : {}),
+      },
+      this.options,
+      onPayload,
+    );
+    if (response.status === 304)
+      return { items: [], ...(etag ? { etag } : {}) };
+    const responseEtag = response.headers.get("etag") ?? undefined;
+    return {
+      items: parseHtmlList(body, url, policy),
       ...(responseEtag ? { etag: responseEtag } : {}),
     };
   }

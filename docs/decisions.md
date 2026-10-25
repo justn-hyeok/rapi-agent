@@ -159,8 +159,26 @@ v0.1.3. Collection depended on a signed-in, awake Mac, and its only source
 feeds and APIs; sites without feeds get an approved VM HTTP/HTML extractor.
 Rapi does not collect through the owner's logged-in browser state.
 
-The `aside` source kind stays as the private, owner-bound browser source kind
+(Superseded by D-012 for the crawler parts.) The `aside` source kind stays as
+the private, owner-bound browser source kind
 used by the delegated crawler (`collection_policy.crawler.enabled`). Delivery
 keeps rejecting those items outside an explicit owner-only private subscription.
 An active `aside` source without an enabled crawler policy reports failed
 readiness as unsupported until it is disabled or converted.
+
+## D-012: Remove the crawler (accepted, 2026-10-26)
+
+Remove the separate Go service `rapi-crawler` and its rapi-agent side:
+its client package and collector class, the `CRAWLER_*` settings and the
+`collection_policy.crawler` handling. In 17 days it stored 2 items and its only
+active source was Anthropic news, so a separate service and a browser were
+running for one source, and that page needs no browser. Replacement: the `html`
+source kind (`collection_policy.html`: `linkPattern`, `maxItems`, `exclude`)
+reads a server-rendered list page of plain links without executing scripts.
+
+The `aside` source kind stays only as historical, private data. Existing aside
+sources are disabled (migration 0029), nothing creates or polls them, and every
+check that treats `aside` as non-public stays, so a future owner-only browser
+research feature can reuse the private-source concept. Tables
+`crawler_collection_jobs`, `_receipts` and `_revocations` are dropped; the
+rollback recreates them empty.

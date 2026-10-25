@@ -1,0 +1,10 @@
+# r1-remove-crawler UX notes
+
+- **No add-source UI exists.** `/수집원` and `/admin/sources` only show status, so the owner cannot add an `html` source from Discord or the web. Sources are added by code (`createSource`) or SQL; the Anthropic news source is seeded by migration 0029. A slash command to add an RSS/HTML source (with pattern validation, already in `parseHtmlSourcePolicy`) is still to be built.
+- **HTML items have no summary text.** `body` is empty, so the first card shows only title and link until the summarizer runs. The Discord "technical RSS" webhook posts only `rss` items; `html` items are intentionally not pushed there (an empty summary would look broken).
+- **Title may carry a category label.** If a list card puts a label ("Announcements") inside the same link as the title, the title includes it unless the card has an `h1`–`h6`. The dates inside the title are removed.
+- **Dates are date-only.** A date such as "Oct 18, 2026" becomes midnight UTC, so ordering within a day is not meaningful. A container with two post links gets no date rather than a guessed one.
+- **Layout changes break quietly.** If the site changes its markup, `parseHtmlList` returns fewer or zero items without an error, so the source looks healthy while collecting nothing. Source health only counts fetch failures.
+- **Fetch safety is the RSS fetch's, not stronger.** The shared fetch has a timeout and size limit but no SSRF guard or https enforcement of its own and follows redirects. `html` locators must be https at creation, and the link origin is checked against the configured URL (not the redirect target), but the owner should only add trusted pages.
+- **Cleanup drops old response snapshots.** Past raw responses kept for diagnosis are deleted except the latest per source. A response that fails to parse is still stored.
+- **Existing `aside` data stays but is now disabled.** Their items are still private and never delivered to public subscriptions; the owner no longer sees them refresh.

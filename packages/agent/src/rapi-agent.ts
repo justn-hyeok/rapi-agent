@@ -9,6 +9,7 @@ import type {
 } from "@rapi/core";
 import {
   canonicalizeUrl,
+  parseHtmlSourcePolicy,
   checksumPayload,
   classify,
   contentFingerprint,
@@ -32,6 +33,7 @@ import {
 } from "@rapi/core";
 import {
   FeedSourceAdapter,
+  HtmlSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
   fetchCollectedEvents,
@@ -523,11 +525,12 @@ export class RapiAgent {
   }
 
   createSource(
-    kind: "github" | "rss" | "webhook" | "aside" | "github_stars",
+    kind: "github" | "rss" | "html" | "webhook" | "aside" | "github_stars",
     locator: string,
     visibility: Visibility,
+    policy?: Record<string, unknown>,
   ): Promise<string> {
-    return this.store.createSource(kind, locator, visibility);
+    return this.store.createSource(kind, locator, visibility, policy);
   }
 
   async ingestExternalItem(
@@ -638,29 +641,39 @@ export class RapiAgent {
     github: GitHubSourceAdapter,
     onInserted?: (input: {
       sourceId: string;
-      sourceKind: "github" | "rss" | "webhook" | "aside" | "github_stars";
+      sourceKind:
+        | "github"
+        | "rss"
+        | "html"
+        | "webhook"
+        | "aside"
+        | "github_stars";
       itemId: string;
       item: ExternalItem;
     }) => Promise<void>,
     stars?: GitHubStarRecommender,
+    html: HtmlSourceAdapter = new HtmlSourceAdapter(),
   ): Promise<void> {
     const sources = await this.store.collectableSources();
     await this.collectIndependently(
       sources.map((source) => ({
         sourceId: source.id,
         collect: async () => {
-          if (source.kind === "rss") {
+          if (source.kind === "rss" || source.kind === "html") {
             const secret = source.locator.startsWith("env:");
-            const result = await feed.fetch(
-              resolveFeedLocator(source.locator),
-              source.etag ?? undefined,
-              (payload) =>
-                this.persistSourcePayload(
-                  source.id,
-                  secret
-                    ? { ...payload, body: redactUrlTokens(payload.body) }
-                    : payload,
-                ),
+            const locator = resolveFeedLocator(source.locator);
+            const result = await this.withFailureSnapshot(
+              source.id,
+              (onPayload) =>
+                source.kind === "html"
+                  ? html.fetch(
+                      locator,
+                      parseHtmlSourcePolicy(source.collection_policy),
+                      source.etag ?? undefined,
+                      onPayload,
+                    )
+                  : feed.fetch(locator, source.etag ?? undefined, onPayload),
+              secret,
             );
             for (const item of result.items) {
               const saved = await this.ingestExternalItem(source.id, item);
@@ -705,11 +718,15 @@ export class RapiAgent {
           const [owner, repository] = source.locator.split("/");
           if (!owner || !repository)
             throw new Error("GitHub source locator must be owner/repository");
-          const result = await github.fetchRepositoryEvents(
-            owner,
-            repository,
-            source.etag ?? undefined,
-            (payload) => this.persistSourcePayload(source.id, payload),
+          const result = await this.withFailureSnapshot(
+            source.id,
+            (onPayload) =>
+              github.fetchRepositoryEvents(
+                owner,
+                repository,
+                source.etag ?? undefined,
+                onPayload,
+              ),
           );
           for (const item of result.items) {
             const saved = await this.ingestExternalItem(source.id, item);
@@ -729,6 +746,32 @@ export class RapiAgent {
         },
       })),
     );
+  }
+
+  // The fetch hands over the raw response before parsing. A response that
+  // parses is already stored item by item (keyed by external id), so keeping
+  // the whole body too would add a row per poll whenever the body carries a
+  // changing value such as a build time. Only a response that fails is kept.
+  private async withFailureSnapshot<T>(
+    sourceId: string,
+    run: (onPayload: (payload: SourcePayload) => Promise<void>) => Promise<T>,
+    redact = false,
+  ): Promise<T> {
+    let received: SourcePayload | undefined;
+    try {
+      return await run(async (payload) => {
+        received = payload;
+      });
+    } catch (error) {
+      if (received)
+        await this.persistSourcePayload(
+          sourceId,
+          redact
+            ? { ...received, body: redactUrlTokens(received.body) }
+            : received,
+        ).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async persistSourcePayload(
