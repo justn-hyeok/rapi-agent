@@ -468,6 +468,11 @@ export async function processDeletion(client, id, config) {
           row.target_id,
         ]);
       await deleteUserEmails(client, row.target_id);
+      await deleteUserBilling(
+        client,
+        row.target_id,
+        privacyRef(key, "actor", row.target_id),
+      );
       await client.query("DELETE FROM learner_subscriptions WHERE user_id=$1", [
         row.target_id,
       ]);
@@ -816,6 +821,21 @@ export async function deleteUserEmails(client, userId) {
     [userId],
   );
   await client.query("DELETE FROM learner_emails WHERE user_id=$1", [userId]);
+}
+
+/**
+ * Entitlements go with the user. Orders are transaction records that Korean
+ * e-commerce law requires keeping, so they stay with the user id replaced by
+ * the same pseudonym other actor references get.
+ */
+export async function deleteUserBilling(client, userId, pseudonym) {
+  await client.query("DELETE FROM billing_entitlements WHERE user_id=$1", [
+    userId,
+  ]);
+  await client.query("UPDATE billing_orders SET user_id=$2 WHERE user_id=$1", [
+    userId,
+    pseudonym,
+  ]);
 }
 
 /**

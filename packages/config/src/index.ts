@@ -140,6 +140,14 @@ export const environmentSchema = z
     DELIVERY_ENABLED: booleanString.default(true),
     LEARNER_EXPERIMENT_ENABLED: booleanString,
     WEB_ENABLED: booleanString,
+    BILLING_ENABLED: booleanString,
+    BILLING_LIVE: booleanString,
+    TOSS_CLIENT_KEY: z.string().min(1).optional(),
+    TOSS_SECRET_KEY: z.string().min(1).optional(),
+    BILLING_PLANS_FILE: z
+      .string()
+      .regex(/^\/[^\0]+$/)
+      .optional(),
     DISCORD_OAUTH_CLIENT_ID: z.string().regex(/^\d+$/).optional(),
     DISCORD_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
     HARNESS_UPDATES_ENABLED: booleanString,
@@ -230,6 +238,33 @@ export const environmentSchema = z
         message:
           "WEB_ENABLED requires DISCORD_OAUTH_CLIENT_ID, DISCORD_OAUTH_CLIENT_SECRET, RAPI_PUBLIC_BASE_URL and WEBHOOK_ENCRYPTION_KEY",
       });
+    }
+    if (value.BILLING_ENABLED) {
+      const missing = [
+        ["TOSS_CLIENT_KEY", value.TOSS_CLIENT_KEY],
+        ["TOSS_SECRET_KEY", value.TOSS_SECRET_KEY],
+        ["RAPI_PUBLIC_BASE_URL", value.RAPI_PUBLIC_BASE_URL],
+      ]
+        .filter(([, setting]) => !setting)
+        .map(([name]) => name);
+      if (missing.length || !value.WEB_ENABLED)
+        context.addIssue({
+          code: "custom",
+          path: ["BILLING_ENABLED"],
+          message: `BILLING_ENABLED requires WEB_ENABLED and ${missing.join(", ") || "its Toss keys"}`,
+        });
+    }
+    if (value.BILLING_ENABLED && !value.BILLING_LIVE) {
+      // Without BILLING_LIVE only Toss test keys are accepted, so a real charge cannot happen by accident.
+      for (const key of ["TOSS_CLIENT_KEY", "TOSS_SECRET_KEY"] as const) {
+        const setting = value[key];
+        if (setting && !setting.startsWith("test_"))
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} must start with test_ unless BILLING_LIVE=true`,
+          });
+      }
     }
     if (value.EMAIL_ENABLED) {
       const missing = [

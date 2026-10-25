@@ -22,3 +22,4 @@ export * from "./domain/github-app.js";
 export * from "./domain/blog.js";
 export * from "./domain/chatbot.js";
 export * from "./domain/email.js";
+export * from "./domain/billing.js";

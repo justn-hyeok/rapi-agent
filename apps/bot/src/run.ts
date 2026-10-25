@@ -27,13 +27,15 @@ import {
   decideGuildButton,
   isGuildDecision,
   createWebPortal,
+  BillingService,
+  loadBillingPlans,
   HarnessUpdateService,
   CHATBOT_SUBSCRIPTION_PREFIX,
   handleChatbotSubscriptionComponent,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
-import { PublicAgentClient } from "@rapi/adapters";
+import { PublicAgentClient, createTossClient } from "@rapi/adapters";
 import {
   assertDiscordAccess,
   briefingLinkKey,
@@ -53,6 +55,7 @@ import {
   expectedMigrationNames,
   GitHubStore,
   BlogPostsStore,
+  BillingStore,
   HarnessUpdatesStore,
   ModelUsageStore,
   WebStore,
@@ -404,6 +407,24 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
   );
 }
 
+// Off unless BILLING_ENABLED (config guarantees the keys, WEB_ENABLED and the base URL).
+const billing =
+  config.BILLING_ENABLED &&
+  config.TOSS_CLIENT_KEY &&
+  config.TOSS_SECRET_KEY &&
+  config.WEBHOOK_ENCRYPTION_KEY
+    ? {
+        service: new BillingService({
+          store: new BillingStore(store),
+          toss: createTossClient({ secretKey: config.TOSS_SECRET_KEY }),
+          plans: await loadBillingPlans(config.BILLING_PLANS_FILE),
+          secret: config.WEBHOOK_ENCRYPTION_KEY,
+        }),
+        clientKey: config.TOSS_CLIENT_KEY,
+        live: config.BILLING_LIVE,
+      }
+    : undefined;
+
 const web = createWebPortal(
   config,
   allowlists,
@@ -417,6 +438,7 @@ const web = createWebPortal(
   {
     // Published guides show next to sent issues in /archive; withdrawn ones never do.
     blogPosts: new BlogPostsStore(store),
+    ...(billing ? { billing } : {}),
     ...(emailService
       ? {
           email: {

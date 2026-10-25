@@ -397,6 +397,7 @@ export function createDiscordInteractionServer(
         query: URLSearchParams;
         cookie?: string | undefined;
         form: URLSearchParams;
+        body?: string | undefined;
       }): Promise<
         | {
             status: number;
@@ -480,17 +481,23 @@ export function createDiscordInteractionServer(
       if (
         integrations?.web &&
         (request.method === "GET" || request.method === "POST") &&
-        /^\/(?:auth\/|me(?:[/?]|$)|admin(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
+        /^\/(?:auth\/|me(?:[/?]|$)|admin(?:[/?]|$)|billing(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
           request.url ?? "",
         )
       ) {
         const url = new URL(request.url!, "http://local");
         let form = new URLSearchParams();
+        let body: string | undefined;
         if (request.method === "POST") {
           const raw = await readBody(request);
-          if (raw.length > 4096)
+          // Toss's JSON webhook is larger than any form.
+          if (
+            raw.length >
+            (url.pathname === "/billing/webhook/toss" ? 65_536 : 4096)
+          )
             return json(response, 413, { error: "too large" });
-          form = new URLSearchParams(raw.toString("utf8"));
+          body = raw.toString("utf8");
+          form = new URLSearchParams(body);
         }
         const page = await integrations.web.handle({
           method: request.method,
@@ -498,12 +505,16 @@ export function createDiscordInteractionServer(
           query: url.searchParams,
           cookie: request.headers.cookie,
           form,
+          body,
         });
         if (page) {
           response.writeHead(page.status, page.headers);
           return response.end(page.body);
         }
       }
+      // Billing is off (or the web portal is): never fall through to the interaction handler.
+      if (/^\/billing(?:[/?]|$)/.test(request.url ?? ""))
+        return json(response, 404, { error: "not found" });
       const learnerLink = /^\/r\/([\w.-]{1,200})(?:\?|$)/.exec(
         request.url ?? "",
       );

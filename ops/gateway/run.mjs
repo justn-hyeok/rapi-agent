@@ -27,12 +27,16 @@ const webRoutes = [
   ["GET", /^\/admin$/],
   [
     "GET",
-    /^\/admin\/(?:subscribe|unsubscribe|sources|deliveries|status|usage|usage-policy|server-config|webhooks)$/,
+    /^\/admin\/(?:subscribe|unsubscribe|sources|deliveries|status|usage|usage-policy|server-config|webhooks|billing)$/,
   ],
   [
     "POST",
-    /^\/admin\/(?:subscribe|unsubscribe|usage-policy|server-config|webhooks)$/,
+    /^\/admin\/(?:subscribe|unsubscribe|usage-policy|server-config|webhooks|billing)$/,
   ],
+  // Paid period passes; the bot answers 404 for all of them unless BILLING_ENABLED is true.
+  ["GET", /^\/billing$/],
+  ["GET", /^\/billing\/(?:checkout|success|fail)$/],
+  ["POST", /^\/billing\/webhook\/toss$/],
   ["GET", /^\/archive$/],
   ["GET", /^\/archive\/(?:daily|weekly)-\d{4}-\d{2}-\d{2}$/],
   ["GET", /^\/archive\/blog\/(?=.{1,100}$)[a-z0-9]+(?:-[a-z0-9]+)*$/],
