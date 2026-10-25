@@ -12,10 +12,12 @@ import { messagePage } from "./web-layout.js";
 import type { WebAccount, WebRoute, WebRouteContext } from "./web-portal.js";
 
 const TOSS_SDK = "https://js.tosspayments.com/v2/standard";
+// The widget opens card-issuer and easy-pay pages (many domains) inside its
+// own frames, so frames, images and form posts are allowed for any https origin.
 const TOSS_ALLOW = {
-  frame: ["https://*.tosspayments.com"],
-  connect: ["https://*.tosspayments.com"],
-  img: ["https://*.tosspayments.com", "https://static.toss.im"],
+  frame: ["https:"],
+  connect: ["https://*.tosspayments.com", "https://*.toss.im"],
+  img: ["https:", "data:"],
 };
 
 export const WEB_BILLING_NAV: WebNavLink[] = [

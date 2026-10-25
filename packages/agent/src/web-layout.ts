@@ -106,23 +106,28 @@ export function webPage(input: WebPageInput): WebResponse {
   const csp = script
     ? [
         "default-src 'none'",
-        `style-src 'nonce-${nonce}'`,
+        // Third-party widgets (Toss) inject their own styles and post forms
+        // to card issuers, so script pages allow those; other pages do not.
+        "style-src 'unsafe-inline' https:",
+        "font-src https: data:",
         `script-src 'nonce-${nonce}' ${script.srcs.map((src) => new URL(src).origin).join(" ")}`,
         `frame-src ${script.allow.frame.join(" ")}`,
         `connect-src ${script.allow.connect.join(" ")}`,
         `img-src ${script.allow.img.join(" ")}`,
         "base-uri 'none'",
-        "form-action 'self'",
+        "form-action 'self' https:",
         "frame-ancestors 'none'",
       ].join("; ")
     : `default-src 'none'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
-  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${input.indexable ? "" : '<meta name="robots" content="noindex">'}<meta name="referrer" content="no-referrer"><title>${h(input.title)} · 라피</title><style nonce="${nonce}">${STYLE}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="/archive">라피</a><nav>${nav.map((link) => `<a href="${h(link.href)}">${h(link.label)}</a>`).join("")}${auth}</nav></header><main>${input.body}</main></div>${scriptTags}</body></html>`;
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${input.indexable ? "" : '<meta name="robots" content="noindex">'}<meta name="referrer" content="${script ? "strict-origin-when-cross-origin" : "no-referrer"}"><title>${h(input.title)} · 라피</title><style nonce="${nonce}">${STYLE}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="/archive">라피</a><nav>${nav.map((link) => `<a href="${h(link.href)}">${h(link.label)}</a>`).join("")}${auth}</nav></header><main>${input.body}</main></div>${scriptTags}</body></html>`;
   return {
     status: input.status ?? 200,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      "referrer-policy": script
+        ? "strict-origin-when-cross-origin"
+        : "no-referrer",
       "x-content-type-options": "nosniff",
       ...(input.indexable ? {} : { "x-robots-tag": "noindex" }),
       "content-security-policy": csp,

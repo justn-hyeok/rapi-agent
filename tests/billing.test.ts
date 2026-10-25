@@ -599,10 +599,17 @@ test("checkout CSP lists the Toss origins; every other page keeps the strict CSP
   assert.ok(
     csp.includes(`script-src 'nonce-${nonce}' https://js.tosspayments.com`),
   );
-  assert.ok(csp.includes("frame-src https://*.tosspayments.com"));
+  // The widget frames card-issuer and easy-pay pages on many https origins and
+  // posts forms to them; this was found by a real test payment.
+  assert.ok(csp.includes("frame-src https:"));
+  assert.ok(csp.includes("form-action 'self' https:"));
+  assert.ok(csp.includes("style-src 'unsafe-inline' https:"));
   assert.ok(csp.includes("connect-src https://*.tosspayments.com"));
-  assert.ok(csp.includes("img-src https://*.tosspayments.com"));
   assert.ok(csp.includes("frame-ancestors 'none'"));
+  assert.equal(
+    page.headers["referrer-policy"],
+    "strict-origin-when-cross-origin",
+  );
   assert.match(
     page.body,
     /<script src="https:\/\/js\.tosspayments\.com\/v2\/standard">/,
