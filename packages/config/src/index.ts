@@ -25,12 +25,9 @@ export const environmentSchema = z
       .enum(["development", "test", "production"])
       .default("development"),
     RAPI_LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
-    DATABASE_URL: z
-      .string()
-      .url()
-      .refine((url) => url.startsWith("postgresql://"), {
-        message: "DATABASE_URL must use postgresql://",
-      }),
+    DATABASE_URL: z.url().refine((url) => url.startsWith("postgresql://"), {
+      message: "DATABASE_URL must use postgresql://",
+    }),
     DB_POOL_MAX: z.coerce.number().int().min(1).max(20).default(5),
     DB_CONNECT_TIMEOUT_MS: z.coerce
       .number()
@@ -59,7 +56,7 @@ export const environmentSchema = z
     DISCORD_ALLOWED_CHANNEL_IDS: csvIds.optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     EMAIL_TRANSPORT: z.enum(["smtp", "api"]).optional(),
-    EMAIL_FROM: z.string().email().optional(),
+    EMAIL_FROM: z.email().optional(),
     EMAIL_TEST_RECIPIENTS: z.string().optional(),
     EMAIL_ENABLED: booleanString,
     EMAIL_PROVIDER: z.enum(["resend", "postmark"]).optional(),
@@ -68,7 +65,7 @@ export const environmentSchema = z
       .string()
       .regex(/^[\w-]{1,64}$/)
       .optional(),
-    EMAIL_REPLY_TO: z.string().email().optional(),
+    EMAIL_REPLY_TO: z.email().optional(),
     EMAIL_WEBHOOK_SECRET: z.string().min(8).optional(),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
@@ -85,7 +82,7 @@ export const environmentSchema = z
         }
       }, "WEBHOOK_ENCRYPTION_KEY must be 32 bytes encoded as base64")
       .optional(),
-    RAPI_PUBLIC_BASE_URL: z.string().url().optional(),
+    RAPI_PUBLIC_BASE_URL: z.url().optional(),
     PUBLIC_TUNNEL_VERIFIED_FILE: z
       .string()
       .default("/var/lib/rapi/tunnel-verified.json"),
@@ -103,31 +100,22 @@ export const environmentSchema = z
     PUBLIC_AGENT_BACKEND: z.enum(["codex", "api"]).default("codex"),
     CHATBOT_ENABLED: booleanString,
     CHATBOT_L2_ENABLED: booleanString,
-    PUBLIC_AGENT_READY_URL: z
-      .string()
-      .url()
-      .default("http://127.0.0.1:3500/ready"),
+    PUBLIC_AGENT_READY_URL: z.url().default("http://127.0.0.1:3500/ready"),
     PUBLIC_AGENT_HEALTH_PORT: z.coerce
       .number()
       .int()
       .min(1)
       .max(65535)
       .default(3500),
-    PUBLIC_GATEWAY_READY_URL: z
-      .string()
-      .url()
-      .default("http://127.0.0.1:3601/ready"),
-    CLOUDFLARE_TUNNEL_READY_URL: z
-      .string()
-      .url()
-      .default("http://127.0.0.1:3700/ready"),
+    PUBLIC_GATEWAY_READY_URL: z.url().default("http://127.0.0.1:3601/ready"),
+    CLOUDFLARE_TUNNEL_READY_URL: z.url().default("http://127.0.0.1:3700/ready"),
     RAPI_ADMIN_CHANNEL_ID: z.string().regex(/^\d+$/).optional(),
     DISCORD_LAYOUT_FILE: z
       .string()
       .default("/home/justn/rapi-agent/config/discord-channels.yaml"),
     WORKER_HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(3400),
     OPERATIONS_CHANNEL_ID: z.string().regex(/^\d+$/).optional(),
-    OPERATIONS_DISCORD_WEBHOOK_URL: z.string().url().optional(),
+    OPERATIONS_DISCORD_WEBHOOK_URL: z.url().optional(),
     OPERATIONS_DISCORD_WEBHOOK_CIPHERTEXT: z.string().min(1).optional(),
     DATABASE_SIZE_LIMIT_BYTES: z.coerce
       .number()
@@ -135,9 +123,9 @@ export const environmentSchema = z
       .positive()
       .default(500_000_000),
     MONITOR_INTERVAL_SECONDS: z.coerce.number().int().min(5).default(30),
-    BOT_READY_URL: z.string().url().default("http://127.0.0.1:3000/ready"),
-    CHAT_READY_URL: z.string().url().default("http://127.0.0.1:3100/ready"),
-    WORKER_READY_URL: z.string().url().default("http://127.0.0.1:3400/ready"),
+    BOT_READY_URL: z.url().default("http://127.0.0.1:3000/ready"),
+    CHAT_READY_URL: z.url().default("http://127.0.0.1:3100/ready"),
+    WORKER_READY_URL: z.url().default("http://127.0.0.1:3400/ready"),
     BACKUP_STATUS_FILE: z.string().default("backups/backup-status.json"),
     SOURCE_EXPIRY_STATUS_FILE: z.string().optional(),
     PRIVACY_STATUS_FILE: z.string().optional(),
@@ -149,7 +137,7 @@ export const environmentSchema = z
     GITHUB_READ_TOKEN: z.string().min(1).optional(),
     POLL_INTERVAL_SECONDS: z.coerce.number().int().min(30).default(300),
     DELIVERY_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(3600),
-    DELIVERY_ENABLED: booleanString.default("true"),
+    DELIVERY_ENABLED: booleanString.default(true),
     LEARNER_EXPERIMENT_ENABLED: booleanString,
     WEB_ENABLED: booleanString,
     DISCORD_OAUTH_CLIENT_ID: z.string().regex(/^\d+$/).optional(),
@@ -160,7 +148,7 @@ export const environmentSchema = z
       .regex(/^[\w.-]+\/[\w.-]+$/)
       .default("justn-hyeok/rapi-agent"),
     HARNESS_UPDATES_BASE_BRANCH: z.string().min(1).default("main"),
-    MODEL_API_BASE_URL: z.string().url().optional(),
+    MODEL_API_BASE_URL: z.url().optional(),
     MODEL_API_KEY: z.string().min(1).optional(),
     MODEL_DEFAULT: z.string().min(1).optional(),
     MODEL_MONTHLY_BUDGET_USD: z.coerce.number().positive().optional(),

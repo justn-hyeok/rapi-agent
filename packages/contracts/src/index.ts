@@ -35,7 +35,7 @@ export const taskPermissionSchema = z.enum([
 ]);
 
 const identifierSchema = z.string().min(1).max(200);
-const isoDateTimeSchema = z.string().datetime({ offset: true });
+const isoDateTimeSchema = z.iso.datetime({ offset: true });
 
 export const taskSpecificationSchema = z
   .object({
