@@ -174,6 +174,42 @@ test("reading stops at the configured post boundary before data reaches the mode
   assert.ok(!window.text.includes("456") && !window.text.includes("second"));
 });
 
+test("overlapping feed windows preserve the budget for unseen posts", async () => {
+  const url = (id: number) => `https://x.com/owner/status/${id}`;
+  const feed = (start: number, end: number) =>
+    Array.from({ length: end - start + 1 }, (_, i) => url(start + i)).join(
+      "\n",
+    );
+  const f = fixture({
+    action: "scroll",
+    loginRequired: false,
+    items: [{ url: url(20), title: "새 자료", body: "두 번째 화면의 새 글" }],
+  });
+  const browser = f.options.browser();
+  let snapshots = 0;
+  f.options.browser = () => ({
+    ...browser,
+    snapshot: async () => {
+      f.commands.push("snapshot");
+      return snapshots++ === 0 ? feed(1, 15) : feed(11, 21);
+    },
+  });
+  const result = await new BrowserResearchService(f.options).request(f.input);
+  assert.match(result, /1건.*비공개/);
+  assert.equal(f.requests.length, 2);
+  const secondWindow = f.requests[1]!.messages[0]!.content;
+  assert.ok(secondWindow.includes(url(20)));
+  assert.ok(!secondWindow.includes(url(21)));
+  assert.deepEqual(f.commands, [
+    "open",
+    "snapshot",
+    "scroll",
+    "snapshot",
+    "close",
+    "completed",
+  ]);
+});
+
 test("non-owner and non-Discord entry points cannot reserve or launch a browser", async () => {
   for (const overrides of [
     { userId: "other" },
