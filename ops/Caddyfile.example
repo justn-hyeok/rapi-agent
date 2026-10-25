@@ -1,5 +1,5 @@
 rapi.example.com {
-  @public path /health /interactions /omp/callback /webhooks/*
+  @public path /health /interactions /webhooks/*
   handle @public {
     reverse_proxy 127.0.0.1:3000
   }

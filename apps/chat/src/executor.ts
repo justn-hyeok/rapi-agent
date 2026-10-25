@@ -9,6 +9,16 @@ import {
   type GitObservation,
   type RunEvidence,
 } from "@rapi/contracts";
+import {
+  childEnvironment,
+  codexHarness,
+  selectHarness,
+  senpiHarness,
+  type Harness,
+  type HarnessId,
+  type HarnessReadiness,
+  withSenpiLoginHint,
+} from "./harness.js";
 const exec = promisify(execFile);
 export const MODEL = DEFAULT_CODEX_MODEL;
 export type ProcessResult = {
@@ -17,14 +27,10 @@ export type ProcessResult = {
   reason: "exit" | "cancel" | "timeout" | "spawn_error";
   output: string;
   blocked: boolean;
+  notice?: string;
 };
 export function codexEnvironment(): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !/TOKEN|SECRET|PASSWORD|API_KEY|DATABASE_URL|PRIVATE_KEY/i.test(key),
-    ),
-  );
+  return childEnvironment();
 }
 export async function runProcess(
   command: string,
@@ -34,6 +40,7 @@ export async function runProcess(
     timeoutMs: number;
     input?: string;
     env?: NodeJS.ProcessEnv;
+    cwd?: string;
   },
 ): Promise<ProcessResult> {
   if (options.signal.aborted)
@@ -49,6 +56,7 @@ export async function runProcess(
     let output = "";
     const child = spawn(command, args, {
       detached: true,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
       env: options.env ?? codexEnvironment(),
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -149,6 +157,8 @@ export async function cleanupArtifacts(workspace: string): Promise<void> {
 export type ExecuteInput = {
   prompt: string;
   model?: string;
+  modelExplicit?: boolean;
+  harness?: HarnessId;
   execute: boolean;
   signal: AbortSignal;
   timeoutMs: number;
@@ -156,16 +166,38 @@ export type ExecuteInput = {
 export interface Executor {
   run(input: ExecuteInput): Promise<ProcessResult>;
   observe(): Promise<GitObservation | undefined>;
+  readiness?(): Promise<Record<HarnessId, HarnessReadiness>>;
   verify(
     taskDigest: string,
     after: GitObservation,
   ): Promise<RunEvidence["verification"]>;
 }
+export type ExecutorOptions = {
+  harness?: HarnessId;
+  harnesses?: Record<HarnessId, Harness>;
+  senpiBinary?: string;
+  senpiHome?: string;
+};
 export class CodexExecutor implements Executor {
+  private readonly harnesses: Record<HarnessId, Harness>;
+  private readonly defaultHarness: HarnessId;
   constructor(
     readonly repository: string,
     readonly workspace: string,
-  ) {}
+    options: ExecutorOptions = {},
+  ) {
+    this.defaultHarness = options.harness ?? "codex";
+    this.harnesses = options.harnesses ?? {
+      codex: codexHarness(MODEL),
+      senpi: senpiHarness(options.senpiBinary, options.senpiHome),
+    };
+  }
+  async readiness(): Promise<Record<HarnessId, HarnessReadiness>> {
+    return {
+      codex: await this.harnesses.codex.readiness(),
+      senpi: await this.harnesses.senpi.readiness(),
+    };
+  }
   observe(): Promise<GitObservation | undefined> {
     return observeGit(this.repository);
   }
@@ -196,39 +228,54 @@ export class CodexExecutor implements Executor {
     const directory = await mkdtemp(join(this.workspace, "run-"));
     const outputPath = join(directory, "answer.txt");
     try {
-      const result = await runProcess(
-        "/usr/local/bin/codex",
-        [
-          "exec",
-          "--ignore-user-config",
-          "--ephemeral",
-          "--model",
-          input.model ?? MODEL,
-          ...(input.execute
-            ? ["--dangerously-bypass-approvals-and-sandbox"]
-            : ["--sandbox", "read-only"]),
-          "--color",
-          "never",
-          "--output-last-message",
-          outputPath,
-          "-C",
-          this.repository,
-          "-",
-        ],
-        {
-          signal: input.signal,
-          timeoutMs: input.timeoutMs,
-          input: input.prompt,
-        },
-      );
+      const senpi = await this.harnesses.senpi.readiness();
+      const selection = selectHarness({
+        execute: input.execute,
+        ...(input.harness ? { requested: input.harness } : {}),
+        fallback: this.defaultHarness,
+        senpiReady: senpi.binary && senpi.configured,
+      });
+      const harness = this.harnesses[selection.id];
+      const model =
+        selection.id === "senpi"
+          ? input.modelExplicit
+            ? input.model
+            : undefined
+          : (input.model ?? MODEL);
+      const built = harness.build({
+        prompt: input.prompt,
+        ...(model ? { model } : {}),
+        execute: input.execute,
+        repository: this.repository,
+        outputPath,
+      });
+      const result = await runProcess(built.command, built.args, {
+        signal: input.signal,
+        timeoutMs: input.timeoutMs,
+        env: built.env,
+        ...(built.cwd ? { cwd: built.cwd } : {}),
+        ...(built.stdin !== undefined ? { input: built.stdin } : {}),
+      });
+      if (!built.reportFile)
+        return {
+          ...result,
+          ...(selection.id === "senpi"
+            ? { output: withSenpiLoginHint(result) }
+            : {}),
+          ...(selection.notice ? { notice: selection.notice } : {}),
+        };
       let output = "";
       try {
-        if ((await stat(outputPath)).size <= 64000)
-          output = redactChat(await readFile(outputPath, "utf8")).trim();
+        if ((await stat(built.reportFile)).size <= 64000)
+          output = redactChat(await readFile(built.reportFile, "utf8")).trim();
       } catch {
         /* Missing output is not completion evidence. */
       }
-      return { ...result, output: output.slice(0, 16000) };
+      return {
+        ...result,
+        output: output.slice(0, 16000),
+        ...(selection.notice ? { notice: selection.notice } : {}),
+      };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

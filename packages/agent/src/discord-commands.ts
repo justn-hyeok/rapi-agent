@@ -1,14 +1,17 @@
 import {
-  assertDiscordAccess,
   assertDiscordLevel,
+  assertDiscordScope,
+  GUILD_NOT_ALLOWED_MESSAGE,
+  isGuildAllowed,
+  resolveDiscordAccess,
   splitDiscordMessage,
   type DiscordAccessLevel,
+  type DiscordAccessScope,
   type DiscordAllowlists,
   type DiscordIdentity,
   type SubscriptionInput,
 } from "@rapi/core";
 import { RapiAgent } from "./rapi-agent.js";
-import { parseTaskSelection, resolveProviderSelection } from "@rapi/contracts";
 
 export const slashCommands = [
   "brief",
@@ -24,12 +27,28 @@ export const slashCommands = [
   "server_config",
   "chat_enable",
   "chat_disable",
-  "task",
-  "approve",
   "cancel",
   "privacy",
   "schedule",
 ] as const;
+
+/**
+ * Slash commands that moved to the web (docs/product-direction.md, "slash 명령
+ * 정리"). With the web on they answer with a link to the page instead.
+ */
+export const DISCORD_WEB_PAGES: Partial<
+  Record<(typeof slashCommands)[number], string>
+> = {
+  subscribe: "/admin/subscribe",
+  unsubscribe: "/admin/unsubscribe",
+  sources: "/admin/sources",
+  deliveries: "/admin/deliveries",
+  status: "/admin/status",
+  usage: "/admin/usage",
+  usage_policy: "/admin/usage-policy",
+  server_config: "/admin/server-config",
+  webhook: "/admin/webhooks",
+};
 
 export interface DiscordCommand {
   name: (typeof slashCommands)[number];
@@ -44,9 +63,7 @@ export interface DiscordCommandResult {
 export function requiredCommandAccess(
   command: DiscordCommand["name"],
 ): DiscordAccessLevel {
-  if (
-    ["task", "approve", "cancel", "webhook", "server_config"].includes(command)
-  )
+  if (["cancel", "webhook", "server_config"].includes(command))
     return "superadmin";
   if (
     [
@@ -62,6 +79,28 @@ export function requiredCommandAccess(
   )
     return "admin";
   return "user";
+}
+
+const guildScopedCommands: ReadonlySet<DiscordCommand["name"]> = new Set([
+  "usage_policy",
+  "server_config",
+  "chat_enable",
+  "chat_disable",
+]);
+
+/** Slash names a guild-scoped admin can use in their own server. */
+const GUILD_ADMIN_COMMAND_LABELS = [
+  "/사용정책",
+  "/서버구성",
+  "/대화채널",
+  "/대화해제",
+];
+
+/** Whether a command only changes the guild it runs in, or reaches all of Rapi. */
+export function commandScope(
+  command: DiscordCommand["name"],
+): DiscordAccessScope {
+  return guildScopedCommands.has(command) ? "guild" : "global";
 }
 
 function requiredString(
@@ -132,6 +171,10 @@ export class DiscordCommandService {
         ): Promise<string>;
         export(guildId: string, format: "yaml" | "json"): Promise<string>;
       };
+      /** Public web origin when WEB_ENABLED; moved commands then point to it. */
+      webBaseUrl?: string;
+      /** Guilds the bot answers in; undefined means no restriction. */
+      guildAllowlist?: () => Promise<readonly string[] | undefined>;
       publicBrief?: (
         guildId: string,
         userId: string,
@@ -171,10 +214,37 @@ export class DiscordCommandService {
     identity: DiscordIdentity,
     command: DiscordCommand,
   ): Promise<DiscordCommandResult> {
-    const level = assertDiscordAccess(identity, this.allowlists);
-    assertDiscordLevel(level, requiredCommandAccess(command.name));
+    if (identity.guildId && this.operations?.guildAllowlist) {
+      if (
+        !isGuildAllowed(
+          identity.guildId,
+          await this.operations.guildAllowlist(),
+        )
+      )
+        throw new Error(GUILD_NOT_ALLOWED_MESSAGE);
+    }
+    const access = resolveDiscordAccess(identity, this.allowlists);
+    const level = access.level;
+    // A guild-scoped admin may run guild settings but nothing that reaches all of Rapi.
+    const guildAdmin =
+      access.scope === "guild" && commandScope(command.name) === "guild";
+    let required = requiredCommandAccess(command.name);
+    if (required !== "user" && commandScope(command.name) === "global")
+      assertDiscordScope(access, "global", GUILD_ADMIN_COMMAND_LABELS);
+    if (guildAdmin && required === "superadmin") required = "admin";
+    assertDiscordLevel(level, required);
     const ownerId = identity.userId;
+    const webPage = DISCORD_WEB_PAGES[command.name];
+    // A button from a preview made before the web was on may still apply it.
+    if (this.operations?.webBaseUrl && webPage && !command.options.viaButton)
+      return {
+        messages: [
+          `이 기능은 웹으로 옮겼어요. ${this.operations.webBaseUrl.replace(/\/+$/, "")}${webPage} 에서 이어서 해 주세요. (Discord 계정으로 로그인)`,
+        ],
+        data: { webNotice: true },
+      };
     switch (command.name) {
+      // Frozen: /일정 gets no new behavior (docs/product-direction.md).
       case "schedule": {
         if (command.options.action === "목록") {
           const events = await this.agent.upcomingEvents(ownerId, 30);
@@ -310,10 +380,15 @@ export class DiscordCommandService {
         const rows = await this.agent.store.searchPublic(
           requiredString(command.options, "query"),
         );
+        const text =
+          rows.map((row) => `${row.title}\n${row.url}`).join("\n\n") ||
+          "검색 결과가 없습니다.";
+        const webBase = this.operations?.webBaseUrl?.replace(/\/+$/, "");
         return {
           messages: splitDiscordMessage(
-            rows.map((row) => `${row.title}\n${row.url}`).join("\n\n") ||
-              "검색 결과가 없습니다.",
+            webBase
+              ? `${text}\n\n웹에서 지난 소식 보기: ${webBase}/archive`
+              : text,
           ),
         };
       }
@@ -355,7 +430,7 @@ export class DiscordCommandService {
               await this.operations.usage.policy(identity.guildId),
             ),
           };
-        assertDiscordLevel(level, "superadmin");
+        assertDiscordLevel(level, guildAdmin ? "admin" : "superadmin");
         const number = (name: string): number | undefined => {
           const value = command.options[name];
           if (value === undefined || value === null || value === "")
@@ -574,76 +649,23 @@ export class DiscordCommandService {
           ],
         };
       }
-      case "task": {
-        const supplied = command.options.specification as
-          | Record<string, unknown>
-          | undefined;
-        const content = optionalString(command.options, "content");
-        const requestedModel = optionalString(command.options, "model");
-        const parsed = content
-          ? parseTaskSelection(
-              content,
-              optionalString(command.options, "provider"),
-              requestedModel,
-            )
-          : undefined;
-        const specification =
-          supplied ??
-          (content
-            ? {
-                goal: parsed!.task,
-                requirements: [parsed!.task],
-                provider: parsed!.provider,
-                model: parsed!.model,
-                acceptance_criteria: [
-                  "요청한 변경을 완료한다.",
-                  "관련 검사를 통과한다.",
-                ],
-                permissions: ["repo:write", "commit:create"],
-                forbidden_actions: ["push", "pull request", "deploy"],
-                timeout_seconds: 1800,
-              }
-            : undefined);
-        if (!specification) throw new Error("작업 내용을 입력하세요.");
-        const selection = resolveProviderSelection(specification);
-        const task = await this.agent.createTask(ownerId, specification);
-        return {
-          messages: [
-            `작업을 준비했습니다. 실행하려면 /승인 을 입력하세요.\n작업 ID: ${task.taskId} · ${selection.provider} / ${selection.model ?? "공급자 기본 모델"}`,
-          ],
-          data: task,
-        };
-      }
-      case "approve": {
-        const latest = await this.agent.store.latestAwaitingTask(ownerId);
-        const taskId = optionalString(command.options, "taskId") ?? latest?.id;
-        if (!taskId) throw new Error("승인할 작업이 없습니다.");
-        const revision = command.options.revision
-          ? Number(command.options.revision)
-          : (latest?.revision ?? 1);
-        const permissions = Array.isArray(command.options.permissions)
-          ? command.options.permissions.map(String)
-          : (latest?.permissions ?? []);
-        await this.agent.approveTask(
-          taskId,
-          revision,
-          ownerId,
-          permissions,
-          optionalString(command.options, "messageRef") ?? "discord-command",
-        );
-        const dispatch = await this.agent.dispatchTask(taskId);
-        return {
-          messages: [
-            `작업을 승인하고 OMP에 전달했습니다: ${dispatch.receiptId} · ${dispatch.provider} / ${dispatch.model ?? "공급자 기본 모델"}`,
-          ],
-          data: dispatch,
-        };
-      }
       case "cancel": {
         const taskId =
           optionalString(command.options, "taskId") ??
           (await this.agent.store.latestCancellableTask(ownerId));
-        if (!taskId) throw new Error("취소할 작업이 없습니다.");
+        if (!taskId) {
+          // A running ChatOps run belongs to the chat process, which polls this flag.
+          const chatRun = await this.agent.store.requestChatOpsCancel(ownerId);
+          if (chatRun)
+            return {
+              messages: [
+                `실행 중인 ChatOps 작업 ${chatRun}의 중단을 요청했어요. 몇 초 안에 멈추고 채널에 결과가 올라와요.`,
+              ],
+            };
+          throw new Error(
+            "취소할 작업이 없습니다. 접수만 되고 아직 실행 전인 요청은 채널에서 ‘라피야! 멈춰’로 중단하세요.",
+          );
+        }
         await this.agent.cancelTask(taskId);
         return { messages: ["작업 중단과 취소 상태를 확인했습니다."] };
       }

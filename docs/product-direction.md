@@ -418,6 +418,8 @@ Discord에서 모든 것을 하지 않는다.
   Discord 경로를 남긴다(`docs/data-lifecycle.md`의 절차가 slash 기준이다).
 - `/구독`·`/구독해제`는 웹이 생기기 전까지 Discord에 남긴다.
 - README는 명령을 17개로 적고 있다. 실제 정의는 18개다(`apps/bot/src/discord-http.ts`).
+  - 갱신(W2): `/작업`·`/승인` 제거 뒤 정의는 16개이고 README를 맞췄다. 웹으로 옮긴 9개는
+    `WEB_ENABLED=true`일 때 웹 링크만 답한다. `/일정`은 코드 주석으로 동결을 표시했다.
 
 ## 기존 기능의 처리
 

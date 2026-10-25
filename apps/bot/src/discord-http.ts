@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from "node:crypto";
 import {
   createServer,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
@@ -9,6 +10,8 @@ import {
   RapiAgent,
   WebhookAuthenticationError,
   WebhookManager,
+  composeButtonMessage,
+  type ButtonOutcome,
   type DiscordCommand,
 } from "@rapi/agent";
 import { verifyWebhookSignature, type ExternalItem } from "@rapi/adapters";
@@ -51,6 +54,16 @@ const integerOption = (name: string, description: string) => ({
   min_value: 0,
 });
 
+const RETIRED_CHATOPS_COMMAND =
+  "이 명령은 없어졌어요. 개발 작업은 채널에서 `라피야! 로그인 오류 고쳐줘`처럼 요청하고, 진행 중인 작업은 `/취소`로 멈춥니다.";
+
+export const retiredDiscordCommands: Record<string, string | undefined> = {
+  작업: RETIRED_CHATOPS_COMMAND,
+  승인: RETIRED_CHATOPS_COMMAND,
+  task: RETIRED_CHATOPS_COMMAND,
+  approve: RETIRED_CHATOPS_COMMAND,
+};
+
 export const discordCommandAliases = {
   브리핑: "brief",
   검색: "search",
@@ -65,8 +78,6 @@ export const discordCommandAliases = {
   웹훅: "webhook",
   대화채널: "chat_enable",
   대화해제: "chat_disable",
-  작업: "task",
-  승인: "approve",
   취소: "cancel",
   데이터삭제: "privacy",
   일정: "schedule",
@@ -273,21 +284,6 @@ export const slashCommandDefinitions = [
     type: 1,
   },
   {
-    name: "작업",
-    description: "OMP 개발 작업을 준비합니다",
-    type: 1,
-    options: [
-      stringOption("내용", "할 일을 한글로 입력하세요"),
-      stringOption("공급자", "codex, cursor, commandcode (고트)", false),
-      stringOption("모델", "스파크, 아스트라 또는 정확한 모델 ID", false),
-    ],
-  },
-  {
-    name: "승인",
-    description: "가장 최근 작업을 승인하고 실행합니다",
-    type: 1,
-  },
-  {
     name: "취소",
     description: "가장 최근 진행 중인 작업을 취소합니다",
     type: 1,
@@ -361,7 +357,12 @@ export function createDiscordInteractionServer(
   integrations?: {
     webhook?: { agent: RapiAgent; secret: string };
     managedWebhook?: WebhookManager;
-    omp?: { agent: RapiAgent; secret: string };
+    github?: {
+      receive(
+        body: Buffer,
+        headers: IncomingHttpHeaders,
+      ): Promise<{ status: number; body: unknown }>;
+    };
     readiness?: () => Promise<unknown>;
     briefing?: {
       page(
@@ -388,6 +389,62 @@ export function createDiscordInteractionServer(
         token: string,
         input: { action?: unknown; key?: unknown },
       ): Promise<{ status: number; body: unknown }>;
+    };
+    web?: {
+      handle(request: {
+        method: string;
+        path: string;
+        query: URLSearchParams;
+        cookie?: string | undefined;
+        form: URLSearchParams;
+      }): Promise<
+        | {
+            status: number;
+            headers: Record<string, string | string[]>;
+            body: string;
+          }
+        | undefined
+      >;
+    };
+    blog?: {
+      /** Modal for [수정 요청]; null when the button is not a revise button. */
+      modal(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): object | null;
+      note(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+        note: string,
+      ): Promise<string>;
+    };
+    learner?: {
+      handle(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): Promise<{ content: string; components?: unknown[] }>;
+      link(token: string, userAgent: string): Promise<string | null>;
+    };
+    email?: {
+      page(
+        kind: "verify" | "unsub",
+        token: string,
+        method: "GET" | "POST",
+      ): Promise<{ status: number; html: string }>;
+      webhook(
+        provider: string,
+        headers: Record<string, string | string[] | undefined>,
+        rawBody: string,
+      ): Promise<{ status: number }>;
+      register(userId: string, address: string): Promise<string>;
+    };
+    /** Owner decision buttons; the result is written onto the pressed message. */
+    decision?: {
+      handles(customId: string): boolean;
+      handle(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): Promise<ButtonOutcome>;
     };
     component?: (
       identity: {
@@ -419,6 +476,89 @@ export function createDiscordInteractionServer(
           ...(ready && typeof ready === "object" ? ready : {}),
           revision: runtimeRevision,
         });
+      }
+      if (
+        integrations?.web &&
+        (request.method === "GET" || request.method === "POST") &&
+        /^\/(?:auth\/|me(?:[/?]|$)|admin(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
+          request.url ?? "",
+        )
+      ) {
+        const url = new URL(request.url!, "http://local");
+        let form = new URLSearchParams();
+        if (request.method === "POST") {
+          const raw = await readBody(request);
+          if (raw.length > 4096)
+            return json(response, 413, { error: "too large" });
+          form = new URLSearchParams(raw.toString("utf8"));
+        }
+        const page = await integrations.web.handle({
+          method: request.method,
+          path: url.pathname,
+          query: url.searchParams,
+          cookie: request.headers.cookie,
+          form,
+        });
+        if (page) {
+          response.writeHead(page.status, page.headers);
+          return response.end(page.body);
+        }
+      }
+      const learnerLink = /^\/r\/([\w.-]{1,200})(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (learnerLink && integrations?.learner) {
+        const target =
+          request.method === "GET"
+            ? await integrations.learner.link(
+                learnerLink[1]!,
+                request.headers["user-agent"] ?? "",
+              )
+            : null;
+        if (!target) return json(response, 404, { error: "not found" });
+        response.writeHead(302, {
+          location: target,
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+        });
+        return response.end();
+      }
+      const emailPage = /^\/e\/(verify|unsub)\/([\w.-]{1,200})(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (emailPage && integrations?.email) {
+        if (request.method !== "GET" && request.method !== "POST")
+          return json(response, 404, { error: "not found" });
+        if (request.method === "POST") await readBody(request);
+        const result = await integrations.email.page(
+          emailPage[1] as "verify" | "unsub",
+          emailPage[2]!,
+          request.method,
+        );
+        response.writeHead(result.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "x-content-type-options": "nosniff",
+          "x-robots-tag": "noindex",
+          "content-security-policy":
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        });
+        return response.end(result.html);
+      }
+      const emailWebhook = /^\/e\/webhook\/(resend|postmark)(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (emailWebhook && integrations?.email) {
+        if (request.method !== "POST")
+          return json(response, 404, { error: "not found" });
+        const raw = await readBody(request);
+        const outcome = await integrations.email.webhook(
+          emailWebhook[1]!,
+          request.headers,
+          raw.toString("utf8"),
+        );
+        return json(response, outcome.status, {});
       }
       const briefing =
         /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail|\/curation)?(?:\?|$)/.exec(
@@ -499,6 +639,10 @@ export function createDiscordInteractionServer(
       if (request.method !== "POST")
         return json(response, 404, { error: "not found" });
       const body = await readBody(request);
+      if (request.url === "/github/webhook" && integrations?.github) {
+        const result = await integrations.github.receive(body, request.headers);
+        return json(response, result.status, result.body);
+      }
       if (
         request.url?.startsWith("/webhooks/v1/") &&
         integrations?.managedWebhook
@@ -512,17 +656,6 @@ export function createDiscordInteractionServer(
           request.headers,
         );
         return json(response, 202, result);
-      }
-      if (request.url === "/omp/callback" && integrations?.omp) {
-        const signature = request.headers["x-omp-signature"];
-        if (typeof signature !== "string")
-          return json(response, 401, { error: "missing OMP signature" });
-        const applied = await integrations.omp.agent.receiveOmpCallback(
-          body,
-          signature,
-          integrations.omp.secret,
-        );
-        return json(response, 202, { applied });
       }
       if (request.url?.startsWith("/webhooks/") && integrations?.webhook) {
         const signature = request.headers["x-rapi-signature"];
@@ -566,9 +699,13 @@ export function createDiscordInteractionServer(
         user?: { id?: string };
         guild_id?: string;
         channel_id?: string;
+        message?: { content?: string };
         data?: {
           name?: string;
           custom_id?: string;
+          components?: Array<{
+            components?: Array<{ custom_id?: string; value?: string }>;
+          }>;
           options?: Array<{ name: string; value: unknown }>;
         };
       };
@@ -589,7 +726,241 @@ export function createDiscordInteractionServer(
           ? { guildPermissions: interaction.member.permissions }
           : {}),
       };
+      if (
+        interaction.type === 5 &&
+        interaction.data?.custom_id?.startsWith("blog_note:") &&
+        integrations?.blog &&
+        interaction.application_id &&
+        interaction.token
+      ) {
+        const note =
+          interaction.data.components
+            ?.flatMap((entry) => entry.components ?? [])
+            .find((field) => field.custom_id === "note")?.value ?? "";
+        const customId = interaction.data.custom_id;
+        const blog = integrations.blog;
+        // Regenerating the draft calls the model and outlives Discord's 3 second window.
+        json(response, 200, { type: 5, data: { flags: 64 } });
+        void blog
+          .note(identity, customId, note)
+          .catch((error: unknown) =>
+            error instanceof Error ? error.message : "수정하지 못했어요.",
+          )
+          .then(async (content) => {
+            const update = await fetch(
+              `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`,
+              {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  content,
+                  allowed_mentions: { parse: [] },
+                }),
+              },
+            );
+            await update.arrayBuffer();
+          })
+          .catch(() => undefined);
+        return;
+      }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id?.startsWith("blog_revise:") &&
+        integrations?.blog
+      ) {
+        try {
+          const modal = integrations.blog.modal(
+            identity,
+            interaction.data.custom_id,
+          );
+          if (modal) return json(response, 200, { type: 9, data: modal });
+        } catch (error) {
+          return json(response, 200, {
+            type: 4,
+            data: {
+              content: error instanceof Error ? error.message : "열 수 없어요.",
+              flags: 64,
+            },
+          });
+        }
+      }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id === "email_add" &&
+        integrations?.email
+      )
+        return json(response, 200, {
+          type: 9,
+          data: {
+            custom_id: "email_add_modal",
+            title: "메일로도 받기",
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 4,
+                    custom_id: "address",
+                    label: "받을 메일 주소",
+                    style: 1,
+                    min_length: 5,
+                    max_length: 254,
+                    required: true,
+                    placeholder: "name@example.com",
+                  },
+                ],
+              },
+            ],
+          },
+        });
+      if (
+        interaction.type === 5 &&
+        interaction.data?.custom_id === "email_add_modal" &&
+        integrations?.email
+      ) {
+        const address =
+          interaction.data.components
+            ?.flatMap((rowItem) => rowItem.components ?? [])
+            .find((field) => field.custom_id === "address")?.value ?? "";
+        // The provider call can outlast Discord's 3 second window.
+        if (interaction.application_id && interaction.token) {
+          const original = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`;
+          json(response, 200, { type: 5, data: { flags: 64 } });
+          void integrations.email
+            .register(userId, address)
+            .catch(
+              () =>
+                "메일 주소를 등록하지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
+            )
+            .then(async (content) => {
+              const update = await fetch(original, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  content,
+                  allowed_mentions: { parse: [] },
+                }),
+              });
+              await update.arrayBuffer();
+            })
+            .catch(() => undefined);
+          return;
+        }
+        const content = await integrations.email.register(userId, address);
+        return json(response, 200, {
+          type: 4,
+          data: { content, flags: 64, allowed_mentions: { parse: [] } },
+        });
+      }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id &&
+        integrations?.decision?.handles(interaction.data.custom_id)
+      ) {
+        const decision = integrations.decision;
+        const customId = interaction.data.custom_id;
+        const original = interaction.message?.content ?? "";
+        const run = async (): Promise<{
+          content: string;
+          components?: unknown[];
+          notice: boolean;
+        }> => {
+          try {
+            const outcome = await decision.handle(identity, customId);
+            if (outcome.notice)
+              return { content: outcome.notice, notice: true };
+            return {
+              content: composeButtonMessage(
+                original,
+                outcome,
+                userId,
+                new Date(),
+              ),
+              components: outcome.components ?? [],
+              notice: false,
+            };
+          } catch (error) {
+            return {
+              content:
+                error instanceof Error ? error.message : "처리하지 못했어요.",
+              notice: true,
+            };
+          }
+        };
+        if (!interaction.application_id || !interaction.token) {
+          const result = await run();
+          return json(
+            response,
+            200,
+            result.notice
+              ? {
+                  type: 4,
+                  data: {
+                    content: result.content,
+                    flags: 64,
+                    allowed_mentions: { parse: [] },
+                  },
+                }
+              : {
+                  type: 7,
+                  data: {
+                    content: result.content,
+                    components: result.components,
+                    allowed_mentions: { parse: [] },
+                  },
+                },
+          );
+        }
+        // Approving a guild or sending an issue outlives Discord's 3 second
+        // window, so acknowledge first and edit the pressed message afterwards.
+        const webhook = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`;
+        json(response, 200, { type: 6 });
+        void run()
+          .then(async (result) => {
+            const update = await (result.notice
+              ? fetch(webhook, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content: result.content,
+                    flags: 64,
+                    allowed_mentions: { parse: [] },
+                  }),
+                })
+              : fetch(`${webhook}/messages/@original`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content: result.content,
+                    components: result.components,
+                    allowed_mentions: { parse: [] },
+                  }),
+                }));
+            await update.arrayBuffer();
+          })
+          .catch(() => undefined);
+        return;
+      }
       if (interaction.type === 3 && interaction.data?.custom_id) {
+        const learnerId = interaction.data.custom_id;
+        if (learnerId.startsWith("learner_")) {
+          const learner = integrations?.learner;
+          if (!learner)
+            return json(response, 200, {
+              type: 4,
+              data: { content: "지금은 쓸 수 없는 버튼입니다.", flags: 64 },
+            });
+          const reply = await learner.handle(identity, learnerId);
+          return json(response, 200, {
+            type: 4,
+            data: {
+              content: reply.content,
+              flags: 64,
+              ...(reply.components ? { components: reply.components } : {}),
+              allowed_mentions: { parse: [] },
+            },
+          });
+        }
         if (!integrations?.component)
           return json(response, 400, { error: "component unavailable" });
         if (
@@ -650,8 +1021,17 @@ export function createDiscordInteractionServer(
           DiscordCommand["name"] | undefined
         >
       )[interaction.data.name];
-      if (!commandName)
+      if (!commandName) {
+        // Commands stay registered in Discord until the next registration run,
+        // so a retired one gets an answer instead of "interaction failed".
+        const retired = retiredDiscordCommands[interaction.data.name];
+        if (retired)
+          return json(response, 200, {
+            type: 4,
+            data: { content: retired, flags: 64 },
+          });
         return json(response, 400, { error: "unknown interaction command" });
+      }
       const suppliedOptions = interaction.data.options ?? [];
       const subcommand = suppliedOptions[0] as
         | {
@@ -710,7 +1090,6 @@ export function createDiscordInteractionServer(
       if (
         ((commandName === "webhook" && options.action === "테스트") ||
           commandName === "brief" ||
-          commandName === "approve" ||
           commandName === "cancel" ||
           commandName === "privacy" ||
           (commandName === "server_config" && options.action === "적용")) &&
@@ -792,7 +1171,9 @@ export function createDiscordInteractionServer(
               },
             ]
           : undefined;
-      const isPublic = ["search", "brief", "usage"].includes(commandName);
+      const isPublic =
+        ["search", "brief", "usage"].includes(commandName) &&
+        !result.data?.webNotice;
       json(response, 200, {
         type: 4,
         data: {

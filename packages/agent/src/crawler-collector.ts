@@ -35,7 +35,7 @@ const policySchema = z
     selector: z
       .object({
         query: z.string().min(1).optional(),
-        urls: z.array(z.string().url()).max(100).optional(),
+        urls: z.array(z.url()).max(100).optional(),
       })
       .default({}),
     intervalSeconds: z.number().int().min(30).default(900),

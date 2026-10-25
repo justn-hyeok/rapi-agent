@@ -24,7 +24,7 @@ Current evidence: build followed by check passed 101 tests in prior analysis;
 clean check failed with 951 lint errors, and CI failed likewise. Both typecheck
 and build were previously launched concurrently, so their first-run ordering is
 not independent proof; reproduce serially. Production failure counts are fixture
-target attempts, NOT a measured real-user delivery failure rate. MDX and OMP DB
+target attempts, NOT a measured real-user delivery failure rate. MDX and task DB
 success records are fixture evidence. Database backup/restore already exists,
 but it checks minimum table/migration counts rather than exact current schema.
 Source absence is not proof of a previously deployed process using latest dist.
@@ -83,8 +83,8 @@ Do not claim that an on-disk HEAD proves the running loaded code revision.
 | R41 | P1 | R40 | SMTP response classification distinguishes retryable, permanent, uncertain outcome | SMTP classification diff | response/crash matrix maps correctly | uncertain marked successful: reject | S / C |
 | R42 | P1 | R41 | Configure designated sender credential and consented test recipient | email configuration receipt | provider auth succeeds with secret-free receipt | auth failure: disable transport, keep old secret reference | D / O,X |
 | R43 | P1 | R39,R42 | Deliver same frozen batch to test email recipient | email receipt | human verifies item set equals Discord, text/HTML links work | duplication or mismatch blocks milestone | D,H / X,H |
-| R44 | P1 | R32 | Probe selected OMP provider authentication with bounded approved task | provider receipt | real request works, not just auth-file presence | auth needed: pause this path without substituting provider | R / X |
-| R45 | P1 | R44 | Execute one approved revision in disposable repository through slash/approval path | OMP receipt | report/test/revision correspond to same attempt | mismatch remains blocked, never completed | R,D,H / X,H |
+| R44 | P1 | R32 | Probe selected executor provider authentication with bounded approved task | provider receipt | real request works, not just auth-file presence | auth needed: pause this path without substituting provider | R / X |
+| R45 | P1 | R44 | Execute one approved revision in disposable repository through slash/approval path | executor receipt | report/test/revision correspond to same attempt | mismatch remains blocked, never completed | R,D,H / X,H |
 | R46 | P1 | R45 | Cancel one disposable active execution through real entrypoint | cancellation receipt | exact child exited and state agrees | unknown external descendants reported unknown | R,D,H / X,H |
 | R47 | P1 | R32 | MDX publisher parses frontmatter visibility structurally, not whole-body regex | MDX visibility diff | private body containing visibility: public never publishes | leaked private fixture: reject | S / C |
 | R48 | P1 | R47 | Render generated MDX in agreed existing blog integration with unsafe syntax escaped | rendered preview | public page renders, private absent from output/feed | integration crosses another repo: ask before writing | S,R / C plus scope approval |
@@ -141,11 +141,11 @@ not row order. Independent code tracks can run before gated operations.
   R09/R21/R29→approval→R22. Never delay urgent approved containment for CI work.
 - Product: R30→R31→R32→R33→R34→R35→R36→R37→R38→R39;
   SMTP R40→R41→R42 in parallel, then R39/R42→R43.
-- OMP R44→R45→R46; publication R47→R48→R49; recovery R50/R51;
+- external-executor R44→R45→R46 (removed 2026-10-24); publication R47→R48→R49; recovery R50/R51;
   converge R52→R53→R54→R55. Public scope adds R56→R58 and R57→R58→R59.
 - R60 requires every P0 and every selected P1 gate, including R59 if public.
   The dependency on selected scope is an explicit release predicate, not a
-  bypass of R56–R59. MDX/OMP remain product requirements unless user changes scope.
+  bypass of R56–R59. MDX remains a product requirements unless user changes scope.
 
 No seven-day wait is an already-approved acceptance condition. Record actual
 daily/weekly cadence boundaries and incident coverage; obtain a concrete user

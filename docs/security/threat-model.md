@@ -2,7 +2,7 @@
 
 ## 보호 대상
 
-- Discord, GitHub, 이메일, 모델 공급자, OMP 자격 증명
+- Discord, GitHub, 이메일, 모델 공급자 자격 증명
 - 비공개 원문과 사용자 식별자
 - 승인 revision, 권한 범위, 발송·실행 감사 기록
 - 공개 블로그의 공개 범위 무결성
@@ -10,8 +10,7 @@
 ## 신뢰 경계와 주요 위협
 
 외부 webhook, GitHub, feed, Discord 입력은 신뢰하지 않는다. 서명 검증, 크기 제한,
-schema 검증 뒤에만 core로 전달한다. OMP callback도 서명, receipt 연결, 단조 증가하는
-state version을 확인한다.
+schema 검증 뒤에만 core로 전달한다.
 
 가장 큰 위험은 입력을 통한 명령 주입, 이벤트 재전송, 권한 없는 Discord 사용자,
 승인 후 명세 변경, 비공개 데이터의 공개 승격, 로그의 자격 증명 노출이다. 이에 대해

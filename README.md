@@ -5,8 +5,8 @@
 
 Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업을 승인하는 기본
 인터페이스다. `rapi-core`는 채널과 실행 도구에 종속되지 않는 도메인 로직과
-상태를 담당한다. 개발 작업은 기존 slash 명령의 OMP 흐름과 자연어 ChatOps의 직접 Codex 실행을
-지원한다. 명확한 소유자 요청은 반복 승인 없이 수행한다.
+상태를 담당한다. 개발 작업은 자연어 ChatOps의 직접 Codex 실행 하나로 처리한다.
+명확한 소유자 요청은 반복 승인 없이 수행한다.
 
 ## 목표
 
@@ -33,7 +33,7 @@ Discord는 사용자가 라피와 대화하고 알림을 받고 중요한 작업
       Discord        이메일 뉴스레터      MDX 블로그
           │
           ▼
-   승인된 개발 작업 명세 ──▶ OMP
+   소유자 요청 ──▶ ChatOps (Codex 직접 실행)
 ```
 
 ## 핵심 원칙
@@ -83,7 +83,6 @@ main에 머지되고 GitHub CI가 통과하면 VM의 `rapi-auto-deploy.timer`가
 ```bash
 npm run start:bot
 npm run start:chat
-npm run start:omp
 npm run start:worker
 npm run start:monitor
 ```
@@ -96,28 +95,27 @@ npm run start:monitor
 Tunnel을 통과한다. allowlist gateway는 세 POST 경로만 전달하며 health와 내부 상태는
 loopback에 남긴다.
 
-`start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑·승인
+`start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑
 명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
-Discord와 이메일은 하나의 동결된 batch를 사용하며 OMP callback 상태는 PostgreSQL과
-Discord DM에 반영된다.
+Discord와 이메일은 하나의 동결된 batch를 사용한다.
 
-`start:omp`는 승인된 개발 작업을 전용 Git clone에 준비하고 선택한 공급자의 CLI로 실행한다 (기본 Codex).
-봇에는 receipt를 즉시 반환하고 실행 상태와 결과 증거를 HMAC 서명 callback으로
-전달한다. 실행기 자식 프로세스에는 Discord, 데이터베이스, callback 비밀값을
-전달하지 않는다. 기본 저장소, 허용 저장소 루트, 작업공간은
-`OMP_DEFAULT_REPOSITORY`, `OMP_ALLOWED_REPOSITORY_ROOTS`, `OMP_WORKSPACE_ROOT`로
-제한한다.
-
-Discord 명령은 모두 한글이며 작업 실행에는 JSON이 필요 없다.
-
-```text
-/작업 내용:로그인 오류 고치고 관련 테스트 돌려줘
-/승인
-```
+Discord 명령은 모두 한글이다. 개발 작업은 슬래시 명령 대신 `라피야! 로그인 오류 고쳐줘`처럼
+ChatOps로 요청한다.
 
 공개 명령은 `/브리핑`, `/검색`, `/사용량`이다. 운영 명령은 `/상태`, `/사용정책`,
-`/서버구성`, `/웹훅`, 구독·수집·발송·작업 명령이다. `/승인`과 `/취소`는 해당
-사용자의 가장 최근 작업을 대상으로 한다.
+`/서버구성`, `/웹훅`, 구독·수집·발송 명령이다. `/취소`는 이전 슬래시 작업 기록만 정리한다.
+실행 중인 ChatOps 작업은 채널에서 `라피야! 멈춰`로 중단한다.
+
+slash 명령 정의는 16개다(`apps/bot/src/discord-http.ts`). `/브리핑`, `/검색`, `/데이터삭제`, `/취소`,
+`/대화채널`, `/대화해제`는 Discord에 그대로 남고, `/일정`은 동결(새 기능 없음)이다. 나머지 9개
+(`/구독`, `/구독해제`, `/수집원`, `/발송내역`, `/상태`, `/사용량`, `/사용정책`, `/서버구성`, `/웹훅`)는
+웹의 `/admin` 아래 페이지로 옮겼다. `WEB_ENABLED=true`이면 이 9개 명령은 해당 웹 페이지 링크만
+(본인에게만 보이게) 답하고, 꺼져 있으면 지금처럼 동작한다. 웹 페이지는 같은 서비스 코드와 같은 권한 규칙을 쓴다:
+USER는 `/admin/usage`, ADMIN은 구독·수집원·발송내역·상태·사용정책, SUPERADMIN은 서버 구성·웹훅.
+웹에는 서버 맥락이 없어 서버 단위 설정은 서버를 직접 고르고, Discord 관리자 권한이나 역할은 웹에서 확인할 수
+없으므로 `DISCORD_*_USER_IDS`에 오른 계정만 쓸 수 있다. 웹은 Discord 로그인(`/auth/discord/login`),
+내 구독(`/me`, 메일 주소 등록 포함), 지난 소식과 발행된 가이드(`/archive`)도 제공한다.
+기능을 켜는 순서와 소유자 작업은 [운영 문서의 "기능 켜기 순서"](docs/operations.md#기능-켜기-순서)에 한 번만 정리했다.
 
 관리 구성은 `라피-질문`과 비공개 `라피-관리`에 ChatOps를 켠다. USER의 `라피야!`
 질문은 격리된 `gpt-5.6-luna`가 실시간 웹 검색으로 답하며 원문·세션을
@@ -148,13 +146,13 @@ CI, 외부 장애 감시와 백업·보관 정책의 현재 적용 범위를 기
 모든 수집은 VM에서 공식 피드·API로 수행한다.
 질문·관리자 답변 처리 중에는 Discord의 ‘입력 중’ 표시를 갱신한다.
 검증 기록: [typing indicator evidence](docs/evidence/typing-indicator-20260928.md).
-역할 등록, 라피 질문·관리 채널, 고정 interaction 진입점과 17개 slash 명령을 적용했고,
+역할 등록, 라피 질문·관리 채널, 고정 interaction 진입점과 16개 slash 명령을 적용했고,
 전용 실행기를 거친 실제 공개 질문 응답과 역할 등록 버튼을 확인했다.
 운영 증거와 검증 범위는 [공개 커뮤니티 적용 기록](docs/evidence/community-live-20260928.md)에 있다.
 
 MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhook 수집,
 정규화·중복 후보·분류·요약, Discord 권한과 명령, Discord/SMTP 발송, 공개 범위가
-보호된 MDX, revision 승인 기반 OMP 실행, 재시작·백업 복구 검증을 포함한다.
+보호된 MDX, 재시작·백업 복구 검증을 포함한다.
 완료 조건별 증거는 [MVP 검증 기록](docs/mvp-verification.md)과
 `tests/manifests/mvp.yaml`에 있다.
 
@@ -163,8 +161,7 @@ MVP 수직 슬라이스가 구현됐다. PostgreSQL 영속화, GitHub/RSS/webhoo
 Discord access uses three ordered tiers. `USER` can search public material, receive public
 briefings, inspect personal usage, and ask public questions. `ADMIN` additionally uses
 operational status, subscriptions, source and delivery management. `SUPERADMIN` can also
-run and cancel natural-language code changes and create, approve, or cancel OMP
-tasks. `DISCORD_ALLOWED_USER_IDS` remains a legacy superadmin list;
+run and cancel natural-language code changes. `DISCORD_ALLOWED_USER_IDS` remains a legacy superadmin list;
 `DISCORD_SUPERADMIN_USER_IDS`, `DISCORD_ADMIN_USER_IDS`, `DISCORD_USER_IDS`,
 `DISCORD_ADMIN_ROLE_IDS`, and `DISCORD_USER_ROLE_IDS` add explicit assignments.
 User IDs take precedence over role IDs, and a Discord role never grants
@@ -190,26 +187,16 @@ Administrator는 ADMIN이 되지만 역할로 SUPERADMIN이 되지는 않는다.
 프로세스를 실제 종료하며, 재시작 때 남은 작업은 interrupted로 표시한다.
 관리 채널의 질문은 읽기 전용이고, 명확한 수정·배포는 기본 모델
 `gpt-5.6-sol`로 직접 수행한다. `스파크`, `아스트라`, `솔`, `테라`,
-`루나` 별칭이나 정확한 모델 ID를 현재 요청에 지정할 수 있다. `/작업` 명령에도
-선택 항목 `모델`이 있으며 OMP가 해당 모델을 그대로 사용한다.
+`루나` 별칭이나 정확한 모델 ID를 현재 요청에 지정할 수 있다.
 완료 보고를 검증 성공으로 간주하지 않는다. 전체 UX, 자원 한도와 운영 한계는
 [ChatOps capability 문서](docs/chatops-capabilities.md)를 참고한다.
 
 검증: `npm run check`, `npm run test:e2e`, `npm run audit:prod`.
 E2E는 자동으로 폐기되는 별도 PostgreSQL의 `rapi_test`만 사용한다.
 
-OMP supports `/작업 내용:커서로 오류 고쳐줘`, `/작업 내용:고트로 오류 고쳐줘`,
-and `/작업 내용:오류 고쳐줘 공급자:commandcode 모델:vendor/model`.
-The optional `공급자` option overrides a leading provider directive. Omitted provider
-means Codex with `gpt-5.6-sol`; Cursor and Command Code use their own default
-model when `모델` is omitted. Selection applies only to the current task revision.
-Set optional `COMMAND_CODE_API_KEY` in `.env` and restart the OMP service for Command Code.
-For Cursor, run `cursor-agent login` as the OMP service user; OAuth stays in
-`~/.cursor`. See [provider operations](docs/operations.md#omp-provider-setup).
-
 ## 상태와 관리형 웹훅
 
-`/상태`는 ADMIN에게 봇, DB, ChatOps, worker, OMP와 백업의 최근 상태를 보여준다.
+`/상태`는 ADMIN에게 봇, DB, ChatOps, worker와 백업의 최근 상태를 보여준다.
 독립 monitor는 연속 장애와 복구만 지정 Discord 운영 채널에 알린다.
 `/웹훅`은 SUPERADMIN이 GitHub·범용 수신과 Discord 발송 연결을 등록, 조회, 시험,
 중지, 재개할 수 있게 한다. 수신 이벤트는 PostgreSQL에 원자적으로 저장한 뒤 내구성

@@ -9,7 +9,6 @@ import {
   CrawlerCollector,
   RapiAgent,
   RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
 } from "@rapi/agent";
 
 const integrationEnabled = !!process.env.CRAWLER_TEST_ENDPOINT;
@@ -30,11 +29,7 @@ test(
     const store = new PostgresStore(isolated.toString(), {
       privacyHmacKey: "a".repeat(64),
     });
-    const agent = new RapiAgent(
-      store,
-      new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
-    );
+    const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
     const client = new CrawlerClient(
       process.env.CRAWLER_TEST_ENDPOINT!,
       process.env.CRAWLER_CALLER_TOKEN!,

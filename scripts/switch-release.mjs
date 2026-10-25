@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { verifyRelease } from "./release-artifact.mjs";
 
 const execute = promisify(execFile);
-const ports = { bot: 3000, chat: 3100, omp: 3200, monitor: 3300, worker: 3400 };
+const ports = { bot: 3000, chat: 3100, monitor: 3300, worker: 3400 };
 
 // A release is ready when the new revision is serving. External source
 // outages (a feed or crawl target failing) are reported by the monitor, but
@@ -53,7 +53,6 @@ export function configuredHealthPorts(environment) {
   const keys = {
     bot: "PORT",
     chat: "CHAT_HEALTH_PORT",
-    omp: "OMP_PORT",
     monitor: "MONITOR_PORT",
     worker: "WORKER_HEALTH_PORT",
   };
@@ -433,7 +432,9 @@ if (
     candidatePath: RAPI_CANDIDATE_RELEASE,
     expectedSha: RAPI_RELEASE_SHA,
     receiptPath: RAPI_SWITCH_RECEIPT,
-    services: RAPI_SWITCH_SERVICES.split(","),
+    // The release that removed OMP is deployed by the previous release's
+    // auto-deploy.sh, which still lists omp.
+    services: RAPI_SWITCH_SERVICES.split(",").filter((name) => name !== "omp"),
     driver: systemdDriver(configuredHealthPorts(serviceEnvironment)),
   });
 }

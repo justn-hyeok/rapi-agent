@@ -34,6 +34,8 @@ do {
     if (requests.length || maintenance) await requirePrivacyBackup();
     for (const request of requests)
       await processDeletion(client, request.id, config);
+    // Thread context lives at most 24 hours; do not wait for the daily sweep.
+    await client.query("DELETE FROM chatbot_turns WHERE expires_at<=now()");
     const completed = await finishDeletionBackups(client, config);
     const files = (
       await client.query(

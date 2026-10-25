@@ -97,13 +97,13 @@
 - 주요 이메일 클라이언트용 최소 렌더링 smoke가 통과한다.
 - `private` 문서는 공개 빌드와 sitemap/feed에 포함되지 않는다.
 
-## Phase 5 — 개발 작업과 OMP 연결
+## Phase 5 — 개발 작업 실행 (외부 실행기 연결은 2026-10-24 ChatOps로 대체)
 
 ### 산출물
 
 - `TaskRequest`와 versioned task specification
 - 위험 분류와 승인 정책 engine
-- OMP execution adapter와 callback/receipt 수집
+- 외부 execution adapter와 callback/receipt 수집 (제거됨)
 - GitHub issue/PR/project 결과 연결
 - Discord 진행 상태와 완료 보고
 
@@ -111,7 +111,7 @@
 
 - 같은 승인과 task revision으로 실행을 중복 dispatch하지 않는다.
 - 승인 후 명세가 바뀌면 기존 승인이 자동 무효화된다.
-- OMP 실패, blocked, 완료 상태가 Discord와 DB에 동일하게 반영된다.
+- 실행 실패, blocked, 완료 상태가 Discord와 DB에 동일하게 반영된다.
 - 결과 보고서에 대상 revision, 테스트, commit/PR 근거가 연결된다.
 - 라피 프로세스에는 직접 코드 수정 경로가 없다.
 
@@ -141,7 +141,7 @@
 - 작업 격리, 승인 gate, 취소, timeout
 - 로그·metric·trace와 장애 진단 가능성
 - 배포·업그레이드·rollback 난이도
-- OMP dispatch/callback 통합 비용
+- 외부 실행기 dispatch/callback 통합 비용
 - 보안 경계와 secret 취급
 - 프로젝트 유지보수성과 lock-in
 

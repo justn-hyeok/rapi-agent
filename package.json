@@ -24,6 +24,7 @@
     "backup": "./scripts/backup.sh",
     "encrypt:webhook": "node scripts/encrypt-secret.mjs",
     "discord:rotate-token": "./scripts/rotate-discord-token.sh",
+    "learner:post-guide": "node --env-file=.env --import tsx scripts/post-learner-guide.ts",
     "discord:register-commands": "node --env-file=.env --import tsx scripts/register-discord-commands.ts",
     "tunnel:configure": "./scripts/configure-cloudflare-tunnel.sh",
     "web-proxy:install": "./scripts/install-web-proxy.sh",
@@ -34,7 +35,6 @@
     "restore:smoke": "./scripts/restore-smoke.sh",
     "start:bot": "node --env-file=.env --import tsx apps/bot/src/run.ts",
     "start:chat": "node --env-file=.env --import tsx apps/chat/src/run.ts",
-    "start:omp": "node --env-file=.env --import tsx apps/omp/src/run.ts",
     "start:monitor": "node --env-file=.env --import tsx apps/monitor/src/run.ts",
     "start:public-agent": "node --import tsx apps/public-agent/src/run.ts",
     "start:worker": "node --env-file=.env --import tsx workers/runtime/src/run.ts",
@@ -56,7 +56,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "yaml": "^2.9.0",
-    "zod": "3.24.2"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -68,5 +68,8 @@
     "tsx": "4.19.3",
     "typescript": "5.7.3",
     "typescript-eslint": "8.70.0"
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }

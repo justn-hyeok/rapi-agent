@@ -5,17 +5,9 @@ import {
   parseProviderDirective,
   parseTaskSelection,
   resolveProvider,
-  redactChat,
   DEFAULT_CODEX_MODEL,
   taskSpecificationSchema,
 } from "@rapi/contracts";
-import {
-  buildProviderCommand,
-  providerEnvironment,
-  providerReadiness,
-  providerFailure,
-} from "../apps/omp/src/providers.js";
-import { specificationSchema } from "../apps/omp/src/specification.js";
 
 test("provider directives are anchored, unquoted and current-request only", () => {
   for (const [alias, provider] of Object.entries({
@@ -111,8 +103,8 @@ const specification = {
   result_report_ref: "report",
   required_evidence: [],
 };
-test("shared and runtime schemas agree on provider defaults and validation", () => {
-  for (const schema of [specificationSchema, taskSpecificationSchema]) {
+test("the task specification schema applies provider defaults and validation", () => {
+  for (const schema of [taskSpecificationSchema]) {
     assert.equal(schema.parse(specification).provider, "codex");
     assert.equal(schema.parse(specification).model, DEFAULT_CODEX_MODEL);
     for (const provider of ["cursor", "commandcode"]) {
@@ -135,161 +127,4 @@ test("shared and runtime schemas agree on provider defaults and validation", () 
       false,
     );
   }
-});
-
-test("provider commands preserve prompts as one argument and map write permissions", () => {
-  const prompt = 'Fix "quotes"; $(do-not-run)\nnext line';
-  for (const provider of ["codex", "cursor", "commandcode"] as const) {
-    for (const write of [false, true]) {
-      const result = buildProviderCommand(
-        { provider, permissions: write ? ["repo:write"] : ["repo:read"] },
-        "/workspace",
-        "/report",
-        prompt,
-      );
-      const flag = {
-        codex: "--approve-for-me",
-        cursor: "--force",
-        commandcode: "--yolo",
-      }[provider];
-      assert.equal(result.args.includes(flag), write);
-      for (const other of ["--approve-for-me", "--force", "--yolo"].filter(
-        (f) => f !== flag,
-      ))
-        assert.ok(!result.args.includes(other));
-      assert.equal(result.args.includes("--model"), provider === "codex");
-      if (provider === "codex") {
-        assert.equal(result.input, prompt);
-        assert.ok(result.args.includes(DEFAULT_CODEX_MODEL));
-        assert.ok(result.args.includes("--output-last-message"));
-        assert.equal(result.args.includes("read-only"), !write);
-      } else {
-        assert.ok(result.args.includes(prompt));
-        assert.equal(result.stdoutReport, true);
-        assert.equal(result.input, undefined);
-        if (provider === "cursor") assert.ok(result.args.includes("--trust"));
-      }
-      const explicit = buildProviderCommand(
-        { provider, model: "vendor/Model:1", permissions: [] },
-        "/workspace",
-        "/report",
-        prompt,
-      );
-      assert.equal(
-        explicit.args[explicit.args.indexOf("--model") + 1],
-        "vendor/Model:1",
-      );
-      if (provider === "commandcode")
-        for (const option of [
-          "--no-session",
-          "--skip-onboarding",
-          "--no-auto-update",
-        ])
-          assert.ok(result.args.includes(option));
-    }
-  }
-});
-
-test("secrets route only to Command Code and are redacted from generic output", () => {
-  const env = {
-    PATH: "/bin",
-    HOME: "/home/test",
-    COMMAND_CODE_API_KEY: "test-command-secret",
-    CURSOR_CREDENTIALS: "test-cursor-secret",
-    CURSOR_AUTH: "test-cursor-auth",
-    DISCORD_BOT_TOKEN: "test-discord-secret",
-    DATABASE_URL: "test-db-secret",
-  };
-  for (const provider of [
-    undefined,
-    "codex",
-    "cursor",
-    "commandcode",
-  ] as const) {
-    const child = providerEnvironment(provider, env);
-    assert.equal(child.HOME, env.HOME);
-    assert.equal(
-      child.COMMAND_CODE_API_KEY,
-      provider === "commandcode" ? env.COMMAND_CODE_API_KEY : undefined,
-    );
-    for (const key of [
-      "CURSOR_CREDENTIALS",
-      "CURSOR_AUTH",
-      "DISCORD_BOT_TOKEN",
-      "DATABASE_URL",
-    ])
-      assert.equal(child[key], undefined);
-  }
-  assert.equal(
-    providerEnvironment("commandcode", { CMD_API_KEY: "legacy-key" })
-      .COMMAND_CODE_API_KEY,
-    "legacy-key",
-  );
-  assert.equal(
-    redactChat(
-      '{"accessToken":"oauth-value","cursorCredentials":"credential-value"}',
-    ),
-    '{"accessToken":"[REDACTED]","cursorCredentials":"[REDACTED]"}',
-  );
-  const previous = {
-    COMMAND_CODE_API_KEY: process.env.COMMAND_CODE_API_KEY,
-    CURSOR_CREDENTIALS: process.env.CURSOR_CREDENTIALS,
-  };
-  try {
-    process.env.COMMAND_CODE_API_KEY = env.COMMAND_CODE_API_KEY;
-    process.env.CURSOR_CREDENTIALS = env.CURSOR_CREDENTIALS;
-    assert.ok(
-      !redactChat(
-        `${env.COMMAND_CODE_API_KEY} ${env.CURSOR_CREDENTIALS}`,
-      ).includes("test-"),
-    );
-    assert.ok(
-      !redactChat(
-        "COMMAND_CODE_API_KEY=unknown-secret CURSOR_CREDENTIALS=unknown-oauth",
-      ).includes("unknown-"),
-    );
-  } finally {
-    for (const [key, value] of Object.entries(previous))
-      if (value === undefined) Reflect.deleteProperty(process.env, key);
-      else process.env[key] = value;
-  }
-});
-
-test("readiness checks binary and provider authentication state", async () => {
-  const exists = async () => {};
-  const missing = async () => {
-    throw new Error("missing");
-  };
-  const loggedIn = async () => ({
-    stdout: "✓ Logged in as test@example.com\n",
-  });
-  const loggedOut = async () => ({ stdout: "Not logged in\n" });
-  assert.deepEqual(
-    await providerReadiness(
-      "commandcode",
-      { COMMAND_CODE_API_KEY: "fake" },
-      exists,
-    ),
-    { binary: true, configured: true, authentication: "not_verified" },
-  );
-  assert.equal(
-    (await providerReadiness("commandcode", {}, exists)).configured,
-    false,
-  );
-  assert.equal((await providerReadiness("cursor", {}, missing)).binary, false);
-  assert.equal(
-    (await providerReadiness("cursor", { HOME: "/fake" }, exists, loggedIn))
-      .configured,
-    true,
-  );
-  assert.equal(
-    (await providerReadiness("cursor", { HOME: "/fake" }, exists, loggedOut))
-      .configured,
-    false,
-  );
-  assert.match(providerFailure("cursor", 1), /cursor-agent login/);
-  assert.match(
-    providerFailure("commandcode", 1),
-    /COMMAND_CODE_API_KEY.*restart/,
-  );
 });

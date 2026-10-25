@@ -3,7 +3,10 @@ export interface UsageWindow {
   endsAt: Date;
 }
 
-function zonedParts(date: Date, timezone: string): Record<string, number> {
+export function zonedParts(
+  date: Date,
+  timezone: string,
+): Record<string, number> {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
     year: "numeric",
@@ -21,7 +24,7 @@ function zonedParts(date: Date, timezone: string): Record<string, number> {
   );
 }
 
-function zonedDateToUtc(
+export function zonedDateToUtc(
   year: number,
   month: number,
   day: number,

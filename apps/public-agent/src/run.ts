@@ -3,6 +3,8 @@ import { constants } from "node:fs";
 import { createServer } from "node:http";
 import { dirname } from "node:path";
 import { runPublicCodex } from "./executor.js";
+import { runPublicModel } from "./api-executor.js";
+import { createGatewayModelClient } from "./gateway-client.js";
 
 const socketPath =
   process.env.PUBLIC_AGENT_SOCKET ?? "/run/rapi-public-agent/agent.sock";
@@ -13,6 +15,13 @@ const runtimeDirectory =
 const codexBinary =
   process.env.PUBLIC_CODEX_BINARY ?? "/opt/rapi-public-agent/codex";
 const codexHome = process.env.CODEX_HOME ?? "/var/lib/rapi-public/codex";
+// "codex" (default) keeps the subscription-login CLI with web search; "api" makes
+// a plain model call with no tools and no search.
+const backend = process.env.PUBLIC_AGENT_BACKEND ?? "codex";
+if (backend !== "codex" && backend !== "api")
+  throw new Error("PUBLIC_AGENT_BACKEND must be codex or api");
+const modelClient =
+  backend === "api" ? createGatewayModelClient(process.env) : undefined;
 const concurrency = Number(process.env.PUBLIC_AGENT_CONCURRENCY ?? "2");
 const healthPort = Number(process.env.PUBLIC_AGENT_HEALTH_PORT ?? "3500");
 const uploadTimeoutMs = Number(
@@ -70,6 +79,7 @@ function json(
 }
 
 async function ready(): Promise<boolean> {
+  if (backend === "api") return modelClient !== undefined;
   try {
     await access(codexBinary, constants.X_OK);
     await access(
@@ -109,10 +119,25 @@ const server = createServer(async (request, response) => {
   // requests all pass the capacity check and start too many paid executions.
   active += 1;
   let prompt: string;
+  let feature: "archive_qa" | "public_qa" | undefined;
   try {
-    const parsed = JSON.parse(await body(request)) as { prompt?: unknown };
+    const parsed = JSON.parse(await body(request)) as {
+      prompt?: unknown;
+      feature?: unknown;
+    };
     if (typeof parsed.prompt !== "string") throw new Error("invalid_prompt");
+    if (
+      parsed.feature !== undefined &&
+      parsed.feature !== "archive_qa" &&
+      parsed.feature !== "public_qa"
+    )
+      throw new Error("invalid_feature");
+    // Chatbot requests carry untrusted text; they must never reach the
+    // web-searching CLI backend.
+    if (parsed.feature !== undefined && backend !== "api")
+      throw new Error("backend_not_api");
     prompt = parsed.prompt;
+    feature = parsed.feature;
   } catch (error) {
     active -= 1;
     json(response, 400, {
@@ -125,25 +150,37 @@ const server = createServer(async (request, response) => {
     if (!response.writableEnded) controller.abort();
   });
   try {
-    const result = await runPublicCodex(prompt, {
-      workspace,
-      runtimeDirectory,
-      binary: codexBinary,
-      env: {
-        PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        LANG: "C.UTF-8",
-        HOME: "/var/lib/rapi-public",
-        CODEX_HOME: codexHome,
-      },
-      signal: controller.signal,
-      onStarted: () => {
-        response.writeHead(200, {
-          "content-type": "application/x-ndjson",
-          "cache-control": "no-store",
-        });
-        response.write(`${JSON.stringify({ type: "started" })}\n`);
-      },
-    });
+    const onStarted = (): void => {
+      response.writeHead(200, {
+        "content-type": "application/x-ndjson",
+        "cache-control": "no-store",
+      });
+      response.write(`${JSON.stringify({ type: "started" })}\n`);
+    };
+    if (backend === "api" && !modelClient) {
+      json(response, 500, { error: "model_not_configured" });
+      return;
+    }
+    const result =
+      backend === "api" && modelClient
+        ? await runPublicModel(prompt, modelClient, {
+            ...(feature ? { feature } : {}),
+            signal: controller.signal,
+            onStarted,
+          })
+        : await runPublicCodex(prompt, {
+            workspace,
+            runtimeDirectory,
+            binary: codexBinary,
+            env: {
+              PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              LANG: "C.UTF-8",
+              HOME: "/var/lib/rapi-public",
+              CODEX_HOME: codexHome,
+            },
+            signal: controller.signal,
+            onStarted,
+          });
     if (!result.started) {
       json(response, 500, { error: result.reason });
       return;
