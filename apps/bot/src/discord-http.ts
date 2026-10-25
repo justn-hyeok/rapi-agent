@@ -54,6 +54,16 @@ const integerOption = (name: string, description: string) => ({
   min_value: 0,
 });
 
+const RETIRED_CHATOPS_COMMAND =
+  "이 명령은 없어졌어요. 개발 작업은 채널에서 `라피야! 로그인 오류 고쳐줘`처럼 요청하고, 진행 중인 작업은 `/취소`로 멈춥니다.";
+
+export const retiredDiscordCommands: Record<string, string | undefined> = {
+  작업: RETIRED_CHATOPS_COMMAND,
+  승인: RETIRED_CHATOPS_COMMAND,
+  task: RETIRED_CHATOPS_COMMAND,
+  approve: RETIRED_CHATOPS_COMMAND,
+};
+
 export const discordCommandAliases = {
   브리핑: "brief",
   검색: "search",
@@ -1011,8 +1021,17 @@ export function createDiscordInteractionServer(
           DiscordCommand["name"] | undefined
         >
       )[interaction.data.name];
-      if (!commandName)
+      if (!commandName) {
+        // Commands stay registered in Discord until the next registration run,
+        // so a retired one gets an answer instead of "interaction failed".
+        const retired = retiredDiscordCommands[interaction.data.name];
+        if (retired)
+          return json(response, 200, {
+            type: 4,
+            data: { content: retired, flags: 64 },
+          });
         return json(response, 400, { error: "unknown interaction command" });
+      }
       const suppliedOptions = interaction.data.options ?? [];
       const subcommand = suppliedOptions[0] as
         | {

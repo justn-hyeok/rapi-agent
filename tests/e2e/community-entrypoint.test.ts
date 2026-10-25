@@ -124,7 +124,7 @@ test("signed Discord requests enforce USER/ADMIN/SUPERADMIN and isolate quota fa
     );
     assert.match(
       (await invoke("staff", ["ADMIN"], "작업")).data.content,
-      /SUPERADMIN/,
+      /없어졌어요/,
     );
     assert.equal(
       (await invoke("staff", ["ADMIN"], "브리핑")).data.content,
