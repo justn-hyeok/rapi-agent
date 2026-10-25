@@ -17,7 +17,11 @@ import {
 import { ChatOpsStore } from "@rapi/db";
 import { routeIntent } from "./router.js";
 import type { Executor, ProcessResult } from "./executor.js";
-import { ownerHarnessDirective, type HarnessId } from "./harness.js";
+import {
+  ownerHarnessDirective,
+  parseBlogDraftDirective,
+  type HarnessId,
+} from "./harness.js";
 import type { DiscordTyping } from "./typing.js";
 
 export function memoryPack(memories: ChatMemory[]): string {
@@ -154,6 +158,14 @@ export class ChatOrchestrator {
     readonly typing?: DiscordTyping,
     readonly homeGuildId?: string,
     readonly workspaces?: WorkspaceResolver,
+    /** Owner-only blog draft requests; absent while BLOG_DRAFTS_ENABLED is off. */
+    readonly blog?: {
+      requestDraft(
+        identity: { userId: string; guildId?: string },
+        topic: string,
+        requestId: string,
+      ): Promise<string>;
+    },
   ) {}
   private withTyping<T>(channel: string, work: () => Promise<T>): Promise<T> {
     // Typing is a Discord feature; GitHub threads have no such channel.
@@ -184,6 +196,38 @@ export class ChatOrchestrator {
         scope.channel,
         "무엇을 도와드릴까요? 질문을 함께 보내주세요.",
       );
+      return;
+    }
+    const redacted = redactChat(request).slice(0, 20000);
+    const blogTopic =
+      accessLevel === "superadmin" && this.blog
+        ? parseBlogDraftDirective(redacted)
+        : null;
+    if (blogTopic !== null && this.blog) {
+      if (!chatOpsExecutionAllowed(scope.guild, this.homeGuildId)) {
+        await this.reply(
+          scope.channel,
+          "블로그 초안은 운영자 서버에서만 요청할 수 있습니다.",
+        );
+        return;
+      }
+      try {
+        await this.reply(
+          scope.channel,
+          await this.withTyping(scope.channel, () =>
+            this.blog!.requestDraft(
+              { userId: scope.owner, guildId: scope.guild },
+              blogTopic,
+              message.id,
+            ),
+          ),
+        );
+      } catch (error) {
+        await this.reply(
+          scope.channel,
+          error instanceof Error ? error.message : "초안을 만들지 못했어요.",
+        );
+      }
       return;
     }
     const interpreted = this.interpret(request, accessLevel);

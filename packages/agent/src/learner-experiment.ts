@@ -49,6 +49,18 @@ export interface LearnerExperimentOptions {
   /** Public origin whose gateway forwards `/r/<token>` to the bot. */
   baseUrl: string;
   pauseMs?: number;
+  /** Called once an approved issue has been sent (blog archive); failures are ignored. */
+  onIssueSent?: (issue: {
+    id: string;
+    cadence: LearnerCadence;
+    periodKey: string;
+    items: Array<{
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>;
+  }) => Promise<void>;
 }
 
 export interface LearnerIdentity {
@@ -353,6 +365,7 @@ export class LearnerExperiment {
         );
     }
     await this.store.learnerFinishIssue(issue.id);
+    await this.options.onIssueSent?.(issue).catch(() => undefined);
     const counts = await this.store.learnerDeliveryCounts(issue.id);
     return `발송했어요. 성공 ${counts.sent}명 · 실패 ${counts.failed}명`;
   }
@@ -480,6 +493,7 @@ export function createLearnerExperiment(
   },
   store: LearnerStore,
   delivery: DeliveryAdapter,
+  hooks: Pick<LearnerExperimentOptions, "onIssueSent"> = {},
 ): LearnerExperiment | undefined {
   if (
     !config.LEARNER_EXPERIMENT_ENABLED ||
@@ -492,5 +506,6 @@ export function createLearnerExperiment(
     superadminIds: config.DISCORD_SUPERADMIN_USER_IDS,
     linkSecret: config.WEBHOOK_ENCRYPTION_KEY,
     baseUrl: config.RAPI_PUBLIC_BASE_URL,
+    ...(hooks.onIssueSent ? { onIssueSent: hooks.onIssueSent } : {}),
   });
 }

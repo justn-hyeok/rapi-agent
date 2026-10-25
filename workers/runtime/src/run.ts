@@ -19,6 +19,7 @@ import {
   superadminDmNotifier,
 } from "@rapi/adapters";
 import {
+  createBlogService,
   createCommunityFeeds,
   createGitHubReport,
   createHarnessUpdates,
@@ -32,6 +33,7 @@ import {
 import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
 import {
+  BlogPostsStore,
   GitHubStore,
   HarnessUpdatesStore,
   ModelUsageStore,
@@ -143,7 +145,6 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
     )
   : undefined;
 
-const learner = createLearnerExperiment(config, store, discord);
 // No ModelClient is wired yet (lane C6); the report then stays deterministic.
 const githubReport =
   config.GITHUB_APP_ENABLED &&
@@ -162,6 +163,20 @@ const githubReport =
         model: undefined,
       })
     : undefined;
+// The model client (lane C6) is not wired yet, so drafts stay unavailable here;
+// issue posts need no model call.
+const blog = createBlogService(
+  config,
+  new BlogPostsStore(store),
+  store,
+  discord,
+);
+const learner = createLearnerExperiment(
+  config,
+  store,
+  discord,
+  blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {},
+);
 const harnessUpdates = createHarnessUpdates(
   config,
   new HarnessUpdatesStore(store),
@@ -182,7 +197,8 @@ const loops: Record<
   | "curation"
   | "learner"
   | "harness"
-  | "github",
+  | "github"
+  | "blog",
   LoopState
 > = {
   collection: {},
@@ -192,6 +208,7 @@ const loops: Record<
   learner: {},
   harness: {},
   github: {},
+  blog: {},
 };
 
 async function runLoop(
@@ -293,6 +310,13 @@ const learnerTimer = learner
   ? setInterval(
       () => void runLoop("learner", () => learner.runDue(new Date())),
       60_000,
+    )
+  : undefined;
+
+const blogTimer = blog
+  ? setInterval(
+      () => void runLoop("blog", () => blog.runDue(new Date())),
+      5 * 60_000,
     )
   : undefined;
 
@@ -409,6 +433,7 @@ const healthServer = createLocalHealthServer(
               name !== "learner" &&
               name !== "harness" &&
               name !== "github" &&
+              name !== "blog" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -435,6 +460,7 @@ const shutdown = (): void => {
   if (learnerTimer) clearInterval(learnerTimer);
   if (harnessTimer) clearInterval(harnessTimer);
   if (githubTimer) clearInterval(githubTimer);
+  if (blogTimer) clearInterval(blogTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();

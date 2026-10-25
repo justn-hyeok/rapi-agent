@@ -168,6 +168,17 @@ export const environmentSchema = z
     GITHUB_APP_ALLOWED_OWNERS: csvLogins.optional(),
     GITHUB_APP_OWNER_LOGINS: csvLogins.optional(),
     GITHUB_REPORT_TARGET: z.enum(["dm", "issue"]).default("dm"),
+    BLOG_PUBLISH_ENABLED: booleanString,
+    BLOG_DRAFTS_ENABLED: booleanString,
+    BLOG_REPO: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/)
+      .default("justn-hyeok/rapi-agent"),
+    BLOG_BASE_BRANCH: z.string().min(1).default("main"),
+    RAPI_BLOG_WITHDRAWALS_FILE: z
+      .string()
+      .regex(/^\/[^\0]+$/)
+      .optional(),
     COMMUNITY_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     TECHNICAL_RSS_WEBHOOK_NAME: z.string().default("technical-rss-output"),
   })
@@ -252,6 +263,13 @@ export const environmentSchema = z
           message: `GITHUB_APP_ENABLED requires ${missing.join(", ")}`,
         });
     }
+    for (const flag of ["BLOG_PUBLISH_ENABLED", "BLOG_DRAFTS_ENABLED"] as const)
+      if (value[flag] && !value.DISCORD_SUPERADMIN_USER_IDS?.length)
+        context.addIssue({
+          code: "custom",
+          path: [flag],
+          message: `${flag} requires DISCORD_SUPERADMIN_USER_IDS`,
+        });
     if (value.RAPI_PUBLIC_BASE_URL && !value.WEBHOOK_ENCRYPTION_KEY) {
       context.addIssue({
         code: "custom",

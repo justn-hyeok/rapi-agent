@@ -73,6 +73,25 @@ describe("environment configuration", () => {
     );
   });
 
+  it("keeps blog publishing and drafts off and requires a SUPERADMIN when on", () => {
+    const config = loadEnvironment(validEnvironment);
+    assert.equal(config.BLOG_PUBLISH_ENABLED, false);
+    assert.equal(config.BLOG_DRAFTS_ENABLED, false);
+    for (const flag of ["BLOG_PUBLISH_ENABLED", "BLOG_DRAFTS_ENABLED"]) {
+      assert.throws(() =>
+        loadEnvironment({ ...validEnvironment, [flag]: "true" }),
+      );
+      assert.equal(
+        loadEnvironment({
+          ...validEnvironment,
+          [flag]: "true",
+          DISCORD_SUPERADMIN_USER_IDS: "100",
+        })[flag as "BLOG_PUBLISH_ENABLED"],
+        true,
+      );
+    }
+  });
+
   it("parses allowlists before application startup", () => {
     const config = loadEnvironment({
       ...validEnvironment,

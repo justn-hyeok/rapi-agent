@@ -171,3 +171,11 @@ export function ownerHarnessDirective(
     ? parseHarnessDirective(input)
     : { task: input };
 }
+
+// Owner-only blog draft request: "블로그 초안: 주제" or "blog draft: topic".
+export function parseBlogDraftDirective(input: string): string | null {
+  const match = input
+    .trim()
+    .match(/^(?:블로그\s*초안|blog\s*draft)\s*[:：]\s*([\s\S]*)$/i);
+  return match ? match[1]!.trim() : null;
+}

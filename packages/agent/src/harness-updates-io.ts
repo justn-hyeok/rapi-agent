@@ -117,7 +117,7 @@ export const run: Exec = (command, args, options) =>
   });
 
 const SECRET_KEY = /TOKEN|SECRET|PASSWORD|API_KEY|DATABASE_URL|PRIVATE_KEY/i;
-const childEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+export const childEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !SECRET_KEY.test(key)),
   ),

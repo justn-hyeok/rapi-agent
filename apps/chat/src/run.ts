@@ -1,7 +1,11 @@
 import { mkdir, readFile } from "node:fs/promises";
 import WebSocket from "ws";
-import { GitHubAppClient, PublicAgentClient } from "@rapi/adapters";
-import { PublicCommunityService } from "@rapi/agent";
+import {
+  DiscordDeliveryAdapter,
+  GitHubAppClient,
+  PublicAgentClient,
+} from "@rapi/adapters";
+import { createBlogService, PublicCommunityService } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
   assertDiscordAccess,
@@ -18,7 +22,12 @@ import {
   parseRapiInvocation,
   redactChat,
 } from "@rapi/contracts";
-import { PostgresStore, ChatOpsStore, GitHubStore } from "@rapi/db";
+import {
+  BlogPostsStore,
+  PostgresStore,
+  ChatOpsStore,
+  GitHubStore,
+} from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
 import { establishesGatewaySession } from "./gateway-state.js";
@@ -171,6 +180,14 @@ const chat = new ChatOrchestrator(
         executorOptions,
       })
     : undefined,
+  // Drafting needs the shared model client (lane C6); until it is wired the
+  // service answers that drafts are unavailable.
+  createBlogService(
+    { ...config, BLOG_PUBLISH_ENABLED: false },
+    new BlogPostsStore(store),
+    store,
+    new DiscordDeliveryAdapter(config.DISCORD_BOT_TOKEN),
+  ),
 );
 const intake =
   githubApp && githubStore && githubPolicy

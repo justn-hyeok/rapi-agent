@@ -249,7 +249,7 @@ export function renderMdx(
   return [...frontmatter, `# ${escapeMdx(title)}`, "", ...body].join("\n");
 }
 
-function escapeMdx(value: string): string {
+export function escapeMdx(value: string): string {
   // Treat source text as text, including JSX, expressions and Markdown syntax.
   return value.replace(
     /[&<>[\]{}\\`*_#!|]/g,
@@ -257,7 +257,7 @@ function escapeMdx(value: string): string {
   );
 }
 
-function mdxUrl(value: string): string {
+export function mdxUrl(value: string): string {
   return canonicalizeUrl(value).replace(
     /[()<>"'{}\\]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,

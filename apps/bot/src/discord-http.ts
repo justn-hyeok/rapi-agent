@@ -394,6 +394,18 @@ export function createDiscordInteractionServer(
         | undefined
       >;
     };
+    blog?: {
+      /** Modal for [수정 요청]; null when the button is not a revise button. */
+      modal(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): object | null;
+      note(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+        note: string,
+      ): Promise<string>;
+    };
     learner?: {
       handle(
         identity: { userId: string; guildId?: string },
@@ -621,6 +633,9 @@ export function createDiscordInteractionServer(
           name?: string;
           custom_id?: string;
           options?: Array<{ name: string; value: unknown }>;
+          components?: Array<{
+            components?: Array<{ custom_id?: string; value?: string }>;
+          }>;
         };
       };
       verifiedInteraction = true;
@@ -640,6 +655,64 @@ export function createDiscordInteractionServer(
           ? { guildPermissions: interaction.member.permissions }
           : {}),
       };
+      if (
+        interaction.type === 5 &&
+        interaction.data?.custom_id?.startsWith("blog_note:") &&
+        integrations?.blog &&
+        interaction.application_id &&
+        interaction.token
+      ) {
+        const note =
+          interaction.data.components
+            ?.flatMap((entry) => entry.components ?? [])
+            .find((field) => field.custom_id === "note")?.value ?? "";
+        const customId = interaction.data.custom_id;
+        const blog = integrations.blog;
+        // Regenerating the draft calls the model and outlives Discord's 3 second window.
+        json(response, 200, { type: 5, data: { flags: 64 } });
+        void blog
+          .note(identity, customId, note)
+          .catch((error: unknown) =>
+            error instanceof Error ? error.message : "수정하지 못했어요.",
+          )
+          .then(async (content) => {
+            const update = await fetch(
+              `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`,
+              {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  content,
+                  allowed_mentions: { parse: [] },
+                }),
+              },
+            );
+            await update.arrayBuffer();
+          })
+          .catch(() => undefined);
+        return;
+      }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id?.startsWith("blog_revise:") &&
+        integrations?.blog
+      ) {
+        try {
+          const modal = integrations.blog.modal(
+            identity,
+            interaction.data.custom_id,
+          );
+          if (modal) return json(response, 200, { type: 9, data: modal });
+        } catch (error) {
+          return json(response, 200, {
+            type: 4,
+            data: {
+              content: error instanceof Error ? error.message : "열 수 없어요.",
+              flags: 64,
+            },
+          });
+        }
+      }
       if (interaction.type === 3 && interaction.data?.custom_id) {
         const learnerId = interaction.data.custom_id;
         if (learnerId.startsWith("learner_")) {
@@ -690,7 +763,7 @@ export function createDiscordInteractionServer(
           return json(response, 400, { error: "component unavailable" });
         if (
           (interaction.data.custom_id.startsWith("server_config_apply:") ||
-            /^harness_update_(?:apply|revert):/.test(
+            /^(?:harness_update_(?:apply|revert)|blog_(?:publish|withdraw)):/.test(
               interaction.data.custom_id,
             )) &&
           interaction.application_id &&

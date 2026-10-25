@@ -15,6 +15,8 @@ import {
   PublicCommunityService,
   RapiAgent,
   createCommunityFeeds,
+  BlogService,
+  createBlogService,
   createHarnessUpdates,
   createLearnerExperiment,
   createWebPortal,
@@ -39,6 +41,7 @@ import {
   compareMigrationNames,
   expectedMigrationNames,
   GitHubStore,
+  BlogPostsStore,
   HarnessUpdatesStore,
   ModelUsageStore,
   WebStore,
@@ -138,7 +141,20 @@ const agent = new RapiAgent(
       }
     : undefined,
 );
-const learner = createLearnerExperiment(config, store, discord);
+// Drafts need the shared model client (lane C6); until it is wired here only
+// the button flow for posts the worker created is available.
+const blog = createBlogService(
+  config,
+  new BlogPostsStore(store),
+  store,
+  discord,
+);
+const learner = createLearnerExperiment(
+  config,
+  store,
+  discord,
+  blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {},
+);
 const harnessUpdates = createHarnessUpdates(
   config,
   new HarnessUpdatesStore(store),
@@ -384,6 +400,15 @@ const server = createDiscordInteractionServer(
           },
         }
       : {}),
+    ...(blog
+      ? {
+          blog: {
+            modal: (identity, customId) => blog.reviseModal(identity, customId),
+            note: (identity, customId, note) =>
+              blog.handleNote(identity, customId, note),
+          },
+        }
+      : {}),
     component: async (identity, customId) => {
       if (
         customId.startsWith("guild_allow:") ||
@@ -425,6 +450,12 @@ const server = createDiscordInteractionServer(
           return "서버를 허용했습니다. slash 명령 등록은 실패했으니 나중에 다시 등록해 주세요.";
         }
         return "서버를 허용했습니다. slash 명령도 등록했습니다.";
+      }
+      if (BlogService.handles(customId)) {
+        // Pressed in the owner's DM; only a SUPERADMIN may decide.
+        assertDiscordAccess(identity, allowlists, "superadmin");
+        if (!blog) return "지금은 쓸 수 없는 버튼입니다.";
+        return blog.handleComponent(identity, customId);
       }
       if (HarnessUpdateService.handles(customId)) {
         // Pressed in the owner's DM; only a SUPERADMIN may decide.
