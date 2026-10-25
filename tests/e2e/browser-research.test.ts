@@ -82,7 +82,8 @@ test("browser results are private aside items excluded from polling and public s
     const row = (
       await db.pool.query<{ kind: string; owner: string; visibility: string }>(
         `SELECT s.kind,s.collection_policy->>'ownerId' AS owner,i.visibility
-       FROM sources s JOIN source_items i ON i.source_id=s.id WHERE s.id=$1`,
+         FROM sources s JOIN raw_events r ON r.source_id=s.id
+         JOIN source_items i ON i.raw_event_id=r.id WHERE s.id=$1`,
         [source],
       )
     ).rows[0]!;
