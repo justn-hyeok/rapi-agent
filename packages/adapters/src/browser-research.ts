@@ -217,8 +217,9 @@ export class AgentResearchBrowser implements ResearchBrowser {
         "set",
         cookie.name,
         cookie.value,
-        "--domain",
-        cookie.domain,
+        ...(cookie.domain.startsWith(".")
+          ? ["--domain", cookie.domain]
+          : ["--url", `https://${cookie.domain}/`]),
         "--path",
         cookie.path,
         ...(cookie.secure ? ["--secure"] : []),
