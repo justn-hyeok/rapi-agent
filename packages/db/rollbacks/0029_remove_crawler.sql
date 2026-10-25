@@ -1,7 +1,7 @@
 -- Recreates the crawler tables empty. It does not re-enable aside sources and does not
 -- restore deleted response snapshots. The seeded html source is disabled because
 -- the older worker cannot collect that kind.
-CREATE TABLE crawler_collection_jobs (
+CREATE TABLE IF NOT EXISTS crawler_collection_jobs (
  id uuid PRIMARY KEY,
  source_id uuid NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
  crawler_job_id uuid,
@@ -13,26 +13,27 @@ CREATE TABLE crawler_collection_jobs (
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX crawler_collection_one_active_source ON crawler_collection_jobs(source_id)
+CREATE UNIQUE INDEX IF NOT EXISTS crawler_collection_one_active_source ON crawler_collection_jobs(source_id)
  WHERE state NOT IN ('succeeded','partial','failed','cancelled','expired','revoked');
-CREATE TABLE crawler_collection_receipts (
+CREATE TABLE IF NOT EXISTS crawler_collection_receipts (
  collection_id uuid NOT NULL REFERENCES crawler_collection_jobs(id) ON DELETE CASCADE,
  crawler_item_id uuid NOT NULL,
  source_item_id uuid,
  PRIMARY KEY(collection_id,crawler_item_id)
 );
 -- Preserve remote cleanup work even when privacy deletion cascades local bindings.
-CREATE TABLE crawler_collection_revocations (
+CREATE TABLE IF NOT EXISTS crawler_collection_revocations (
  crawler_job_id uuid PRIMARY KEY,
  requested_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE FUNCTION enqueue_crawler_source_revocation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION enqueue_crawler_source_revocation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  INSERT INTO crawler_collection_revocations(crawler_job_id)
  SELECT crawler_job_id FROM crawler_collection_jobs WHERE source_id=OLD.id AND crawler_job_id IS NOT NULL
  ON CONFLICT DO NOTHING;
  RETURN OLD;
 END $$;
+DROP TRIGGER IF EXISTS crawler_source_delete ON sources;
 CREATE TRIGGER crawler_source_delete BEFORE DELETE ON sources
  FOR EACH ROW EXECUTE FUNCTION enqueue_crawler_source_revocation();
 ALTER TABLE crawler_collection_revocations ENABLE ROW LEVEL SECURITY;

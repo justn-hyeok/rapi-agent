@@ -276,3 +276,102 @@ test("a candidate may not fail more sources than the running release", async () 
     server.close();
   }
 });
+
+test("a failed schema rollback still points back to the previous release and starts it", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "rapi-switch-")));
+  try {
+    async function stage(name: string, sha: string, migrations: string[]) {
+      const path = join(root, name);
+      await mkdir(join(path, "packages/db/migrations"), { recursive: true });
+      for (const migration of migrations)
+        await writeFile(
+          join(path, "packages/db/migrations", migration),
+          "SELECT 1;\n",
+        );
+      await writeFile(
+        join(path, "release-manifest.json"),
+        JSON.stringify({
+          sha,
+          tree: sha,
+          stagedPath: path,
+          verifiedAt: new Date().toISOString(),
+          gates: [
+            "npm ci",
+            "check",
+            "web-proxy:test",
+            "test:e2e",
+            "restart:smoke",
+            "restore:smoke",
+            "audit:prod",
+          ],
+          switched: false,
+          files: await releaseFileDigests(path),
+          migrations,
+        }),
+      );
+      return path;
+    }
+    const oldSha = "1".repeat(40);
+    const newSha = "2".repeat(40);
+    const previous = await stage("previous", oldSha, ["0001_a.sql"]);
+    const candidate = await stage("candidate", newSha, [
+      "0001_a.sql",
+      "0002_b.sql",
+    ]);
+    const current = join(root, "current");
+    await symlink(previous, current);
+    let running = true;
+    const events: string[] = [];
+    const driver: ServiceDriver = {
+      async active() {
+        return running ? ["bot"] : [];
+      },
+      async stop() {
+        running = false;
+        events.push("stop");
+      },
+      async start() {
+        running = true;
+        events.push(`start ${await realpath(current)}`);
+      },
+      async ready(_services, sha) {
+        const manifest = JSON.parse(
+          await readFile(join(current, "release-manifest.json"), "utf8"),
+        ) as { sha: string };
+        if (!running || manifest.sha !== sha) throw new Error("not ready");
+      },
+    };
+    const receiptPath = join(root, "receipt.json");
+    await assert.rejects(
+      switchRelease({
+        currentPath: current,
+        candidatePath: candidate,
+        expectedSha: newSha,
+        services: ["bot"],
+        driver,
+        receiptPath,
+        schemaMigration: {
+          namesAdded: ["0002_b.sql"],
+          upgrade: async () => {
+            throw new Error("canceling statement due to user request");
+          },
+          rollback: async () => {
+            throw new Error('relation "x" already exists');
+          },
+        },
+      }),
+      /rollback partial/,
+    );
+    assert.equal(await realpath(current), previous);
+    assert.equal(running, true);
+    assert.equal(events.at(-1), `start ${previous}`);
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+      rollback: string;
+      rollbackError: string;
+    };
+    assert.equal(receipt.rollback, "partial");
+    assert.match(receipt.rollbackError, /already exists/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

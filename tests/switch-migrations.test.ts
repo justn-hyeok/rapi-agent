@@ -103,6 +103,7 @@ test("switch migrations require a rollback and undo in reverse order", async () 
     ["0002_b.sql", "0003_c.sql"],
   );
   const queries: string[] = [];
+  let applied = ["0002_b.sql"];
   const plan = await additiveSchemaMigration({
     currentPath: current,
     candidatePath: good,
@@ -111,7 +112,9 @@ test("switch migrations require a rollback and undo in reverse order", async () 
       query: async (sql: string, values?: unknown[]) => {
         queries.push(values ? `${sql} ${JSON.stringify(values)}` : sql.trim());
         return {
-          rows: sql.startsWith("SELECT name") ? [{ name: "0002_b.sql" }] : [],
+          rows: sql.startsWith("SELECT name")
+            ? applied.map((name) => ({ name }))
+            : [],
         };
       },
       end: async () => undefined,
@@ -123,6 +126,7 @@ test("switch migrations require a rollback and undo in reverse order", async () 
   assert.ok(!queries.includes("-- up 0002_b.sql"));
   assert.ok(queries.includes("-- up 0003_c.sql"));
   queries.length = 0;
+  applied = ["0002_b.sql", "0003_c.sql"];
   await plan!.rollback();
   const downs = queries.filter((q) => q.startsWith("-- down"));
   assert.deepEqual(downs, ["-- down 0003_c.sql", "-- down 0002_b.sql"]);
@@ -132,6 +136,14 @@ test("switch migrations require a rollback and undo in reverse order", async () 
         q.includes('"0003_c.sql"') &&
         q.startsWith("DELETE FROM schema_migrations"),
     ),
+  );
+  // A migration that never committed (failed or cancelled) is not rolled back.
+  queries.length = 0;
+  applied = ["0002_b.sql"];
+  await plan!.rollback();
+  assert.deepEqual(
+    queries.filter((q) => q.startsWith("-- down")),
+    ["-- down 0002_b.sql"],
   );
 });
 
