@@ -181,11 +181,22 @@ export async function switchRelease({
       try {
         // A failed start can leave a partial set running. Drain it before rollback.
         await driver.stop(active);
-        if (migrationAttempted) await schemaMigration.rollback();
+        // A schema rollback failure must not leave production stopped: still
+        // point back to the previous release and start it, then report.
+        let schemaError;
+        if (migrationAttempted)
+          await schemaMigration.rollback().catch((error) => {
+            schemaError = error;
+          });
         if (switched) await point(previousPath);
         await driver.start(active);
         await driver.ready(active, previous.sha);
-        receipt.rollback = "verified";
+        if (schemaError) {
+          receipt.rollback = "partial";
+          receipt.rollbackError = `schema rollback failed: ${
+            schemaError instanceof Error ? schemaError.message : "unknown"
+          }`;
+        } else receipt.rollback = "verified";
       } catch (rollbackError) {
         receipt.rollback = "failed";
         receipt.rollbackError =
@@ -369,7 +380,16 @@ export async function additiveSchemaMigration({
       }),
     rollback: () =>
       withClient(async (client) => {
+        // Only undo what was committed: a migration that failed or was cancelled
+        // rolled back with its own transaction, and running its rollback would
+        // fail (e.g. recreating tables that still exist) and block recovery.
+        const applied = new Set(
+          (await client.query("SELECT name FROM schema_migrations")).rows.map(
+            (row) => row.name,
+          ),
+        );
         for (const name of [...added].reverse()) {
+          if (!applied.has(name)) continue;
           await client.query("BEGIN");
           try {
             await client.query(rollbacks.get(name));

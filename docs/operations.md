@@ -657,5 +657,6 @@ GITHUB_REPORT_TARGET=dm
 `0029_remove_crawler.sql`은 `aside` 수집원을 모두 `disabled`로 바꾸고 `crawler_collection_*` 테이블 세 개를 지우며, 응답 전체 스냅샷으로 쌓인 `raw_events` 중복(수집원별 최신 1건 제외, `source_items`가 참조하지 않는 것만)을 삭제한다. 피드가 없는 Anthropic 뉴스는 `kind='html'` 수집원으로 시드한다. 롤백은 테이블을 빈 채로 되살리고 `html` 수집원을 비활성화한다.
 
 배포 뒤 VM에서: `rapi-crawler-controller`, `rapi-crawler-browser`, `rapi-crawler-auto-deploy.timer`를 stop·disable하고, `.env`에서 `CRAWLER_*`를 지우고, `rapi-crawler` 저장소를 보관(archive)한다.
+그다음 쌓인 응답 스냅샷을 서비스를 멈추지 않고 지운다: `node --env-file=/home/justn/rapi-agent/.env scripts/cleanup-response-snapshots.mjs`(건수 확인) → `--apply` → `VACUUM (ANALYZE) raw_events`. 마이그레이션 안에서 지우면 3 GB 테이블에서 배포 전환이 몇 분 이상 멈춘다(2026-10-25 실제로 13분 중단).
 
 `html` 수집원은 `collection_policy.html`에 `linkPattern`(경로 정규식, 200자 미만), `maxItems`(기본 20), `exclude`(경로 정규식 목록)를 둔다. 추가는 `createSource("html", url, "public", { html: {...} })`로 하며, 현재 관리자 화면(`/수집원`, `/admin/sources`)에는 수집원 추가 기능이 없다(상태 조회만).
