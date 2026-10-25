@@ -33,7 +33,7 @@ DELETE FROM raw_events re
 -- Anthropic news has no feed; it is read as an HTML list page.
 INSERT INTO sources (id, kind, locator, collection_policy)
 VALUES (gen_random_uuid(), 'html', 'https://www.anthropic.com/news',
-  '{"visibility":"public","html":{"linkPattern":"^/news/[a-z0-9-]+$","exclude":["^/news/(announcements|features|events)$"]}}'::jsonb)
+  '{"visibility":"public","html":{"linkPattern":"^/news/[a-z0-9-]+$","exclude":["^/news/(announcements|features|events|partnerships|policy|product|safeguards|security)$"]}}'::jsonb)
 ON CONFLICT (kind, locator) DO NOTHING;
 INSERT INTO schema_migrations(name) VALUES('0029_remove_crawler.sql');
 COMMIT;
