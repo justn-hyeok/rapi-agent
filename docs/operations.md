@@ -405,3 +405,74 @@ npm run discord:register-commands   # 슬래시 명령 재등록: /작업, /승�
 
 VM `.env`의 `OMP_*`와 `COMMAND_CODE_API_KEY`는 더 이상 읽지 않으므로 지워도 된다
 (남아 있어도 설정 검증은 알 수 없는 키를 무시한다).
+
+## GitHub App 만들기 (선택)
+
+소유자 본인 레포에서 `@rapi`로 일을 시키고(반응형), 매주 월요일 09:00(Asia/Seoul)에 레포
+요약을 받는(능동형) 기능이다. 기본은 꺼져 있다. `GITHUB_APP_ENABLED=true`를 쓰기 전에는
+봇이 `/github/webhook`을 열지 않고 404로 답한다(게이트웨이는 경로만 전달한다).
+
+### 1. GitHub에서 App 등록 (소유자만 가능)
+
+Settings → Developer settings → GitHub Apps → New GitHub App.
+
+- **Homepage URL**: 아무 주소(레포 주소 등).
+- **Webhook URL**: `<RAPI_PUBLIC_BASE_URL>/github/webhook` (Cloudflare Tunnel 뒤의 공개 게이트웨이가
+  이 경로만 `POST`로 봇에 전달한다).
+- **Webhook secret**: 16자 이상 임의 문자열. `.env`의 `GITHUB_APP_WEBHOOK_SECRET`과 같아야 한다.
+- **Repository permissions**: Contents **Read & write**, Pull requests **Read & write**,
+  Issues **Read & write**, Metadata **Read-only**, Checks **Read-only**.
+- **Subscribe to events**: `Issues`, `Issue comment`, `Pull request review comment`.
+- **Where can this GitHub App be installed?**: **Only on this account**.
+- 만든 뒤 App ID를 적어 두고 **Generate a private key**로 `.pem`을 받는다.
+- **Install App**에서 본인 계정의 **필요한 레포만**(Only select repositories) 선택해 설치한다.
+
+### 2. VM에 비밀값 두기
+
+```bash
+# 개인 키: 서비스 계정만 읽도록 (레포 밖, Git에 넣지 않는다)
+sudo install -d -m 700 -o justn -g justn /home/justn/secrets
+install -m 600 rapi-github-app.pem /home/justn/secrets/rapi-github-app.pem
+```
+
+`.env`에 추가하고 `rapi-bot`, `rapi-chat`, `rapi-worker`를 재시작한다.
+
+```bash
+GITHUB_APP_ENABLED=true
+GITHUB_APP_ID=<App ID>
+GITHUB_APP_PRIVATE_KEY_PATH=/home/justn/secrets/rapi-github-app.pem
+GITHUB_APP_WEBHOOK_SECRET=<위 웹훅 시크릿>
+GITHUB_APP_ALLOWED_OWNERS=<설치 계정 로그인, 쉼표 구분>
+GITHUB_APP_OWNER_LOGINS=<@rapi를 부를 수 있는 로그인, 쉼표 구분>
+# 선택: 리포트를 레포 이슈에도 남기려면 issue
+GITHUB_REPORT_TARGET=dm
+```
+
+`DISCORD_SUPERADMIN_USER_IDS`가 필요하다(리포트 DM 수신자). 마이그레이션
+`0024_github_app.sql`을 먼저 적용한다(`npm run db:migrate`).
+
+### 3. 동작과 안전장치
+
+- 웹훅은 `X-Hub-Signature-256`을 상수 시간으로 검증하고 `X-GitHub-Delivery`로 중복을 거른다.
+  설치 계정이 `GITHUB_APP_ALLOWED_OWNERS`에 없으면 403이다.
+- `@rapi`를 부른 사람이 `GITHUB_APP_OWNER_LOGINS`에 없으면 조용히 무시한다(공개 레포에서 낯선
+  사람이 App의 댓글을 유발하지 못하게 답글도 달지 않는다).
+- 요청은 Discord와 같은 ChatOps 엔진·같은 실행 기록(`chatops_runs`)으로 처리된다. 수신 즉시 👀
+  반응이 붙고 진행·결과가 같은 스레드 댓글로 올라오며 작업 ID가 함께 표시된다. `@rapi 멈춰`로 중단한다.
+- 변경 요청은 새 클론에서 실행하고, 하네스에는 토큰이 전달되지 않는다. 라피가 `rapi/<작업ID>`
+  브랜치만 푸시하고 PR을 연다. 기본 브랜치에는 푸시하지 않는다(코드에서 거부). 질문은 PR 없이
+  댓글로 답한다.
+- 설치 토큰은 해당 레포 하나로 한정되고 만료 직전까지만 캐시한다.
+- 주간 리포트는 지난 7일의 머지된 PR, 열린 이슈, 검사 실패 PR, 14일 이상 멈춘 PR을 GitHub API로
+  모아 SUPERADMIN에게 DM으로 보낸다. 직접 호출하는 모델 요약(`repo_report`)은 `ModelClient`가
+  연결돼 있을 때만 붙고, 없거나 예산이 소진돼도 리포트는 그대로 나간다.
+
+### 4. 확인
+
+```bash
+# 웹훅 전달: App 설정 → Advanced → Recent Deliveries에서 202(접수) 또는 200(무시/중복)
+# 레포 이슈에 "@rapi 이 레포 구조를 설명해줘" 댓글 → 👀 → 답 댓글
+```
+
+끄려면 `GITHUB_APP_ENABLED=false`로 되돌리고 서비스를 재시작한다. App 설치 자체를 지우면 GitHub 쪽에서도
+토큰이 즉시 무효화된다.

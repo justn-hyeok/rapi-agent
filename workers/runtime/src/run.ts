@@ -12,6 +12,7 @@ import {
   GitHubStarRecommender,
   ApiSummarizer,
   CodexSummarizer,
+  GitHubAppClient,
   GitHubRepositoryInfo,
   SmtpDeliveryAdapter,
   createModelClient,
@@ -19,6 +20,7 @@ import {
 } from "@rapi/adapters";
 import {
   createCommunityFeeds,
+  createGitHubReport,
   createHarnessUpdates,
   createLearnerExperiment,
   CompositeDeliveryAdapter,
@@ -29,7 +31,13 @@ import {
 } from "@rapi/agent";
 import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
-import { HarnessUpdatesStore, ModelUsageStore, PostgresStore } from "@rapi/db";
+import {
+  GitHubStore,
+  HarnessUpdatesStore,
+  ModelUsageStore,
+  PostgresStore,
+} from "@rapi/db";
+import { readFile } from "node:fs/promises";
 import { requireHealthyDeliveryResults } from "./delivery-loop.js";
 import { deliveryReadiness } from "./delivery-readiness.js";
 import { shouldRunDelivery } from "./delivery-schedule.js";
@@ -136,6 +144,24 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
   : undefined;
 
 const learner = createLearnerExperiment(config, store, discord);
+// No ModelClient is wired yet (lane C6); the report then stays deterministic.
+const githubReport =
+  config.GITHUB_APP_ENABLED &&
+  config.GITHUB_APP_ID &&
+  config.GITHUB_APP_PRIVATE_KEY_PATH
+    ? createGitHubReport(config, {
+        store: new GitHubStore(store),
+        app: new GitHubAppClient({
+          appId: config.GITHUB_APP_ID,
+          privateKey: await readFile(
+            config.GITHUB_APP_PRIVATE_KEY_PATH,
+            "utf8",
+          ),
+        }),
+        delivery,
+        model: undefined,
+      })
+    : undefined;
 const harnessUpdates = createHarnessUpdates(
   config,
   new HarnessUpdatesStore(store),
@@ -150,7 +176,13 @@ type LoopState = {
   deliveryOutcome?: "delivered" | "idle";
 };
 const loops: Record<
-  "collection" | "delivery" | "webhook" | "curation" | "learner" | "harness",
+  | "collection"
+  | "delivery"
+  | "webhook"
+  | "curation"
+  | "learner"
+  | "harness"
+  | "github",
   LoopState
 > = {
   collection: {},
@@ -159,6 +191,7 @@ const loops: Record<
   curation: {},
   learner: {},
   harness: {},
+  github: {},
 };
 
 async function runLoop(
@@ -270,6 +303,14 @@ const harnessTimer = harnessUpdates
       10 * 60_000,
     )
   : undefined;
+// The report is claimed per week, so a frequent check is cheap and restart-safe.
+const githubTimer = githubReport
+  ? setInterval(
+      () => void runLoop("github", () => githubReport.runDue(new Date())),
+      10 * 60_000,
+    )
+  : undefined;
+if (githubReport) void runLoop("github", () => githubReport.runDue(new Date()));
 if (harnessUpdates)
   void runLoop("harness", () => harnessUpdates.runDue(new Date()));
 
@@ -367,6 +408,7 @@ const healthServer = createLocalHealthServer(
               name !== "curation" &&
               name !== "learner" &&
               name !== "harness" &&
+              name !== "github" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -392,6 +434,7 @@ const shutdown = (): void => {
   if (curationTimer) clearInterval(curationTimer);
   if (learnerTimer) clearInterval(learnerTimer);
   if (harnessTimer) clearInterval(harnessTimer);
+  if (githubTimer) clearInterval(githubTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();

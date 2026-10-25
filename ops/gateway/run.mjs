@@ -11,6 +11,7 @@ const healthPort = Number(process.env.RAPI_GATEWAY_HEALTH_PORT ?? "3601");
 const targetPort = Number(process.env.PORT ?? "3000");
 const allowed = [
   /^\/interactions$/,
+  /^\/github\/webhook$/,
   /^\/webhooks\/v1\/[^/?#]+$/,
   /^\/webhooks\/[^/?#]+$/,
 ];

@@ -11,3 +11,4 @@ export * from "./learner-experiment.js";
 export * from "./harness-updates.js";
 export * from "./harness-updates-io.js";
 export * from "./web-portal.js";
+export * from "./github-app.js";

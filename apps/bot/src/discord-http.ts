@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from "node:crypto";
 import {
   createServer,
+  type IncomingHttpHeaders,
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
@@ -344,6 +345,12 @@ export function createDiscordInteractionServer(
   integrations?: {
     webhook?: { agent: RapiAgent; secret: string };
     managedWebhook?: WebhookManager;
+    github?: {
+      receive(
+        body: Buffer,
+        headers: IncomingHttpHeaders,
+      ): Promise<{ status: number; body: unknown }>;
+    };
     readiness?: () => Promise<unknown>;
     briefing?: {
       page(
@@ -550,6 +557,10 @@ export function createDiscordInteractionServer(
       if (request.method !== "POST")
         return json(response, 404, { error: "not found" });
       const body = await readBody(request);
+      if (request.url === "/github/webhook" && integrations?.github) {
+        const result = await integrations.github.receive(body, request.headers);
+        return json(response, result.status, result.body);
+      }
       if (
         request.url?.startsWith("/webhooks/v1/") &&
         integrations?.managedWebhook

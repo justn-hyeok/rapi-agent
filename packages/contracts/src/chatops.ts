@@ -27,8 +27,8 @@ export const runPhaseSchema = z.enum([
 export type RunPhase = z.infer<typeof runPhaseSchema>;
 export const scopeSchema = z
   .object({
-    guild: z.string().min(1).max(100),
-    channel: z.string().min(1).max(100),
+    guild: z.string().min(1).max(200),
+    channel: z.string().min(1).max(200),
     owner: z.string().min(1).max(100),
   })
   .strict();

@@ -9,6 +9,7 @@ import {
 } from "@rapi/adapters";
 import {
   DiscordLayoutManager,
+  GitHubWebhookReceiver,
   CompositeDeliveryAdapter,
   DiscordCommandService,
   PublicCommunityService,
@@ -37,6 +38,7 @@ import { loadEnvironment } from "@rapi/config";
 import {
   compareMigrationNames,
   expectedMigrationNames,
+  GitHubStore,
   HarnessUpdatesStore,
   ModelUsageStore,
   WebStore,
@@ -345,6 +347,21 @@ const server = createDiscordInteractionServer(
       ? { webhook: { agent, secret: config.WEBHOOK_SECRET } }
       : {}),
     ...(webhookManager ? { managedWebhook: webhookManager } : {}),
+    ...(config.GITHUB_APP_ENABLED &&
+    config.GITHUB_APP_WEBHOOK_SECRET &&
+    config.GITHUB_APP_ALLOWED_OWNERS &&
+    config.GITHUB_APP_OWNER_LOGINS
+      ? {
+          github: new GitHubWebhookReceiver({
+            store: new GitHubStore(store),
+            secret: config.GITHUB_APP_WEBHOOK_SECRET,
+            policy: {
+              allowedOwners: config.GITHUB_APP_ALLOWED_OWNERS,
+              ownerLogins: config.GITHUB_APP_OWNER_LOGINS,
+            },
+          }),
+        }
+      : {}),
     briefing: {
       page: (batchId, token) => agent.briefingPage(batchId, token),
       feedback: (batchId, token, input) =>

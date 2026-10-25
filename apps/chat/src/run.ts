@@ -1,6 +1,6 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import WebSocket from "ws";
-import { PublicAgentClient } from "@rapi/adapters";
+import { GitHubAppClient, PublicAgentClient } from "@rapi/adapters";
 import { PublicCommunityService } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
@@ -18,12 +18,18 @@ import {
   parseRapiInvocation,
   redactChat,
 } from "@rapi/contracts";
-import { PostgresStore, ChatOpsStore } from "@rapi/db";
+import { PostgresStore, ChatOpsStore, GitHubStore } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
 import { establishesGatewaySession } from "./gateway-state.js";
 import { DiscordTyping } from "./typing.js";
 import { countDirectReply, isDirectMessage } from "./direct-message.js";
+import {
+  GitHubIntake,
+  cleanupGithubClones,
+  githubSender,
+  githubWorkspaces,
+} from "./github.js";
 
 const config = loadEnvironment();
 const homeGuildId = resolveHomeGuildId(
@@ -87,15 +93,45 @@ const lock = await lease.query<{ acquired: boolean }>(
 if (!lock.rows[0]?.acquired) throw new Error("ChatOps instance already active");
 await runs.recover();
 await cleanupArtifacts(chatWorkspace);
-const executor = new CodexExecutor(repository, chatWorkspace, {
+const executorOptions = {
   harness: config.CHATOPS_HARNESS,
   senpiBinary: config.SENPI_BIN,
   senpiHome: config.SENPI_HOME,
-});
+};
+const executor = new CodexExecutor(repository, chatWorkspace, executorOptions);
+// GitHub App (off unless explicitly enabled): requests arrive through the
+// webhook inbox and run through this same orchestrator.
+const githubPolicy =
+  config.GITHUB_APP_ENABLED &&
+  config.GITHUB_APP_ID &&
+  config.GITHUB_APP_PRIVATE_KEY_PATH &&
+  config.GITHUB_APP_ALLOWED_OWNERS &&
+  config.GITHUB_APP_OWNER_LOGINS
+    ? {
+        allowedOwners: config.GITHUB_APP_ALLOWED_OWNERS,
+        ownerLogins: config.GITHUB_APP_OWNER_LOGINS,
+      }
+    : undefined;
+const githubApp = githubPolicy
+  ? new GitHubAppClient({
+      appId: config.GITHUB_APP_ID!,
+      privateKey: await readFile(config.GITHUB_APP_PRIVATE_KEY_PATH!, "utf8"),
+    })
+  : undefined;
+const githubStore = githubApp ? new GitHubStore(store) : undefined;
+const sendGithub = githubApp ? githubSender(githubApp) : undefined;
+if (githubApp) {
+  await githubStore!.failClaimed();
+  await cleanupGithubClones(chatWorkspace);
+}
 const chat = new ChatOrchestrator(
   runs,
   executor,
   async (channel, content) => {
+    if (sendGithub && channel.startsWith("github:")) {
+      await sendGithub(channel, content);
+      return;
+    }
     for (const chunk of splitDiscordMessage(redactChat(content)))
       await sendMessage(channel, chunk);
   },
@@ -126,7 +162,39 @@ const chat = new ChatOrchestrator(
     });
   }),
   homeGuildId,
+  githubApp && githubStore && githubPolicy
+    ? githubWorkspaces({
+        app: githubApp,
+        store: githubStore,
+        policy: githubPolicy,
+        workspace: chatWorkspace,
+        executorOptions,
+      })
+    : undefined,
 );
+const intake =
+  githubApp && githubStore && githubPolicy
+    ? new GitHubIntake({
+        store: githubStore,
+        app: githubApp,
+        chat,
+        policy: githubPolicy,
+      })
+    : undefined;
+let intakeBusy = false;
+const intakeTimer = intake
+  ? setInterval(() => {
+      if (intakeBusy) return;
+      intakeBusy = true;
+      void (async () => {
+        while (await intake.runOnce());
+      })()
+        .catch(() => process.stderr.write("GitHub intake failed\n"))
+        .finally(() => {
+          intakeBusy = false;
+        });
+    }, 3000)
+  : undefined;
 lease.on("error", () => {
   void chat.shutdown().finally(() => process.exit(1));
 });
@@ -493,6 +561,7 @@ const shutdown = (): void => {
   if (heartbeat) clearInterval(heartbeat);
   if (heartbeatStart) clearTimeout(heartbeatStart);
   if (reconnect) clearTimeout(reconnect);
+  if (intakeTimer) clearInterval(intakeTimer);
   socket?.close(1000);
   healthServer.close();
   void chat.shutdown().finally(async () => {

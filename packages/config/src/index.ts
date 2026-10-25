@@ -6,6 +6,14 @@ const csvIds = z
   .transform((value) => value.split(",").map((part) => part.trim()))
   .pipe(z.array(z.string().regex(/^\d+$/)).min(1));
 
+const csvLogins = z
+  .string()
+  .min(1)
+  .transform((value) => value.split(",").map((part) => part.trim()))
+  .pipe(
+    z.array(z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/)).min(1),
+  );
+
 const booleanString = z
   .enum(["true", "false"])
   .default("false")
@@ -153,6 +161,13 @@ export const environmentSchema = z
     MODEL_FOR_BLOG_DRAFT: z.string().min(1).optional(),
     MODEL_FOR_REPO_REPORT: z.string().min(1).optional(),
     SUMMARIZER_BACKEND: z.enum(["codex", "api"]).default("codex"),
+    GITHUB_APP_ENABLED: booleanString,
+    GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
+    GITHUB_APP_PRIVATE_KEY_PATH: z.string().min(1).optional(),
+    GITHUB_APP_WEBHOOK_SECRET: z.string().min(16).optional(),
+    GITHUB_APP_ALLOWED_OWNERS: csvLogins.optional(),
+    GITHUB_APP_OWNER_LOGINS: csvLogins.optional(),
+    GITHUB_REPORT_TARGET: z.enum(["dm", "issue"]).default("dm"),
     COMMUNITY_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     TECHNICAL_RSS_WEBHOOK_NAME: z.string().default("technical-rss-output"),
   })
@@ -219,6 +234,24 @@ export const environmentSchema = z
         message:
           "SUMMARIZER_BACKEND=api requires MODEL_API_BASE_URL, MODEL_API_KEY and MODEL_DEFAULT (or MODEL_FOR_SUMMARY)",
       });
+    if (value.GITHUB_APP_ENABLED) {
+      const missing = (
+        [
+          "GITHUB_APP_ID",
+          "GITHUB_APP_PRIVATE_KEY_PATH",
+          "GITHUB_APP_WEBHOOK_SECRET",
+          "GITHUB_APP_ALLOWED_OWNERS",
+          "GITHUB_APP_OWNER_LOGINS",
+          "DISCORD_SUPERADMIN_USER_IDS",
+        ] as const
+      ).filter((key) => !value[key]);
+      if (missing.length)
+        context.addIssue({
+          code: "custom",
+          path: ["GITHUB_APP_ENABLED"],
+          message: `GITHUB_APP_ENABLED requires ${missing.join(", ")}`,
+        });
+    }
     if (value.RAPI_PUBLIC_BASE_URL && !value.WEBHOOK_ENCRYPTION_KEY) {
       context.addIssue({
         code: "custom",
