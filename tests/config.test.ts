@@ -173,3 +173,49 @@ describe("environment configuration", () => {
     );
   });
 });
+
+describe("model gateway configuration", () => {
+  it("is off by default and keeps the codex summarizer", () => {
+    const config = loadEnvironment(validEnvironment);
+    assert.equal(config.MODEL_API_BASE_URL, undefined);
+    assert.equal(config.MODEL_API_KEY, undefined);
+    assert.equal(config.MODEL_MONTHLY_BUDGET_USD, undefined);
+    assert.equal(config.SUMMARIZER_BACKEND, "codex");
+  });
+
+  it("allows plain http only on loopback", () => {
+    assert.equal(
+      loadEnvironment({
+        ...validEnvironment,
+        MODEL_API_BASE_URL: "http://127.0.0.1:4000/v1",
+      }).MODEL_API_BASE_URL,
+      "http://127.0.0.1:4000/v1",
+    );
+    assert.throws(
+      () =>
+        loadEnvironment({
+          ...validEnvironment,
+          MODEL_API_BASE_URL: "http://gateway.example.com/v1",
+        }),
+      /HTTPS/,
+    );
+  });
+
+  it("requires a configured client for the api summarizer", () => {
+    assert.throws(
+      () => loadEnvironment({ ...validEnvironment, SUMMARIZER_BACKEND: "api" }),
+      /SUMMARIZER_BACKEND/,
+    );
+    assert.equal(
+      loadEnvironment({
+        ...validEnvironment,
+        SUMMARIZER_BACKEND: "api",
+        MODEL_API_BASE_URL: "https://api.openai.com/v1",
+        MODEL_API_KEY: "k",
+        MODEL_DEFAULT: "gpt-4o-mini",
+        MODEL_MONTHLY_BUDGET_USD: "20",
+      }).MODEL_MONTHLY_BUDGET_USD,
+      20,
+    );
+  });
+});

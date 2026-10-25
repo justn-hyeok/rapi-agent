@@ -1,0 +1,22 @@
+# LiteLLM proxy config for Rapi (example). Copy to /etc/rapi/litellm.yaml and edit.
+# Secrets come from the environment (see rapi-litellm.service.example), never this file.
+model_list:
+  # The name on the left is what MODEL_DEFAULT / MODEL_FOR_<FEATURE> use.
+  - model_name: rapi-default
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: rapi-claude
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  # LiteLLM adds x-litellm-response-cost to each response; Rapi records it per call.
+  drop_params: true
+  num_retries: 0 # Rapi retries 429/5xx itself with bounded backoff.
+  request_timeout: 120
+
+general_settings:
+  # Clients (Rapi) must present this key; it is MODEL_API_KEY on the Rapi side.
+  master_key: os.environ/LITELLM_MASTER_KEY

@@ -7,3 +7,6 @@ export * from "./github-stars.js";
 export * from "./summarizer.js";
 export * from "./events.js";
 export * from "./model-client.js";
+export * from "./openai-compatible-client.js";
+export * from "./metered-model-client.js";
+export * from "./model-factory.js";

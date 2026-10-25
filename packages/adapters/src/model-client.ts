@@ -41,6 +41,8 @@ export interface ModelUsage {
   outputTokens: number;
   /** Estimated cost in micro-USD (1e-6 USD). */
   costMicroUsd: number;
+  /** Where the cost came from; `unknown` = model missing from the price table (cost 0). */
+  costSource?: "gateway" | "table" | "unknown";
 }
 
 export interface ModelResponse {

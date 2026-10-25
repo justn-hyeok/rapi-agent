@@ -346,6 +346,50 @@ DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 �
   복사해 실행하고 끝나면 지운다.
 - 워커와 봇 둘 다 같은 환경변수를 읽으므로 워커와 `rapi-bot`을 재시작한다.
 
+## LiteLLM 켜기 (선택)
+
+라피 내부 모델 호출(요약 등)은 `packages/adapters`의 `OpenAiCompatibleModelClient` 하나를
+거친다. 이 클라이언트는 LiteLLM, OpenAI, Anthropic의 OpenAI 호환 엔드포인트 어디든
+가리킬 수 있고, `MeteredModelClient`가 모든 호출을 `model_usage`에 기록하며 월 상한을
+적용한다. `MODEL_API_BASE_URL`과 `MODEL_API_KEY`가 모두 없으면 꺼져 있고(코드는
+`null`을 받아 기존 동작을 유지), 배포만으로는 아무것도 바뀌지 않는다.
+
+소유자만 할 수 있는 일:
+
+1. VM에 LiteLLM 설치: `python3 -m venv /opt/rapi-litellm && /opt/rapi-litellm/bin/pip
+   install 'litellm[proxy]'`.
+2. `ops/litellm/config.example.yaml`을 `/etc/rapi/litellm.yaml`로 복사해 모델 목록을 고른다.
+3. `/etc/rapi/litellm.env`(chmod 600)에 `LITELLM_MASTER_KEY`(임의의 긴 값)와 공급자
+   키(`OPENAI_API_KEY` 등)를 넣는다. 저장소에는 넣지 않는다.
+4. `ops/systemd/rapi-litellm.service.example`을 `/etc/systemd/system/rapi-litellm.service`로
+   복사하고 `systemctl enable --now rapi-litellm`. 바인드는 `127.0.0.1:4000`이다.
+5. `.env`에 설정하고 워커와 `rapi-bot`을 재시작한다:
+   `MODEL_API_BASE_URL=http://127.0.0.1:4000/v1`, `MODEL_API_KEY=<LITELLM_MASTER_KEY>`,
+   `MODEL_DEFAULT=rapi-default`, 선택으로 `MODEL_FOR_PUBLIC_QA` 등 기능별 모델과
+   `MODEL_MONTHLY_BUDGET_USD`.
+6. 요약을 API로 돌리려면 `SUMMARIZER_BACKEND=api`(기본은 `codex`). 이 값은
+   위 변수가 모두 있어야 설정 검증을 통과한다.
+
+동작:
+
+- 비용은 LiteLLM의 `x-litellm-response-cost` 헤더를 우선 쓰고, 없으면
+  `ops/model-prices.json`의 가격표로 계산한다. 가격표에 없는 모델은 비용 0으로 기록되고
+  행의 `note`에 `unknown_price`가 남는다. 가격표 값은 공급자 가격 페이지로 확인한다.
+- 상한은 달력 월(Asia/Seoul) 기준이다. 80%에서 SUPERADMIN 전원에게 DM(월 1회), 100%에서
+  `archive_qa`·`public_qa`·`chatbot`·`rewrite`를 멈추고 DM(월 1회)한다. `summary`,
+  `blog_draft`, `repo_report`는 계속 돈다. DM이 한 명에게도 가지 않으면 다음 호출에서
+  다시 시도한다.
+- `/사용량`(운영진)과 `/상태`에 이번 달·지난달 기능별 모델 비용이 붙는다.
+- 사용량 조회: `SELECT feature, count(*), sum(cost_micro_usd)/1e6 AS usd FROM model_usage
+  WHERE at >= date_trunc('month', now() AT TIME ZONE 'Asia/Seoul') GROUP BY 1;`
+- 마이그레이션 `0026_model_usage.sql`을 먼저 적용한다(`npm run db:migrate`).
+
+아직 연결하지 않은 것: Codex CLI를 LiteLLM 뒤로 보내려면 Codex가 Responses API
+(`wire_api = "responses"`)를 쓰므로 LiteLLM의 `/v1/responses` 지원과 Codex 설정이
+필요하다. 현재 chat(ChatOps)과 public-agent는 계속 Codex 구독 로그인으로 실행되며 이
+클라이언트를 쓰지 않는다. public-agent는 DB·키 접근이 없는 격리 프로세스라 의도적으로
+연결하지 않았다.
+
 ## OMP 제거
 
 2026-10-24부터 코드 실행 경로는 ChatOps(Codex 직접 실행) 하나다. `rapi-omp` 서비스,

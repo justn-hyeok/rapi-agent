@@ -136,6 +136,19 @@ export const environmentSchema = z
       .regex(/^[\w.-]+\/[\w.-]+$/)
       .default("justn-hyeok/rapi-agent"),
     HARNESS_UPDATES_BASE_BRANCH: z.string().min(1).default("main"),
+    MODEL_API_BASE_URL: z.string().url().optional(),
+    MODEL_API_KEY: z.string().min(1).optional(),
+    MODEL_DEFAULT: z.string().min(1).optional(),
+    MODEL_MONTHLY_BUDGET_USD: z.coerce.number().positive().optional(),
+    MODEL_PRICES_FILE: z.string().min(1).optional(),
+    MODEL_FOR_SUMMARY: z.string().min(1).optional(),
+    MODEL_FOR_REWRITE: z.string().min(1).optional(),
+    MODEL_FOR_ARCHIVE_QA: z.string().min(1).optional(),
+    MODEL_FOR_PUBLIC_QA: z.string().min(1).optional(),
+    MODEL_FOR_CHATBOT: z.string().min(1).optional(),
+    MODEL_FOR_BLOG_DRAFT: z.string().min(1).optional(),
+    MODEL_FOR_REPO_REPORT: z.string().min(1).optional(),
+    SUMMARIZER_BACKEND: z.enum(["codex", "api"]).default("codex"),
     COMMUNITY_GUILD_ID: z.string().regex(/^\d+$/).optional(),
     TECHNICAL_RSS_WEBHOOK_NAME: z.string().default("technical-rss-output"),
   })
@@ -163,6 +176,31 @@ export const environmentSchema = z
         message: "HARNESS_UPDATES_ENABLED requires DISCORD_SUPERADMIN_USER_IDS",
       });
     }
+    if (value.MODEL_API_BASE_URL) {
+      // The key travels in a header: plain HTTP is only acceptable on loopback.
+      const url = new URL(value.MODEL_API_BASE_URL);
+      if (
+        url.protocol !== "https:" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["MODEL_API_BASE_URL"],
+          message: "MODEL_API_BASE_URL must use HTTPS unless it is loopback",
+        });
+    }
+    if (
+      value.SUMMARIZER_BACKEND === "api" &&
+      (!value.MODEL_API_BASE_URL ||
+        !value.MODEL_API_KEY ||
+        !(value.MODEL_FOR_SUMMARY || value.MODEL_DEFAULT))
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["SUMMARIZER_BACKEND"],
+        message:
+          "SUMMARIZER_BACKEND=api requires MODEL_API_BASE_URL, MODEL_API_KEY and MODEL_DEFAULT (or MODEL_FOR_SUMMARY)",
+      });
     if (value.RAPI_PUBLIC_BASE_URL && !value.WEBHOOK_ENCRYPTION_KEY) {
       context.addIssue({
         code: "custom",

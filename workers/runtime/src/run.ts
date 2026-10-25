@@ -10,9 +10,12 @@ import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
+  ApiSummarizer,
   CodexSummarizer,
   GitHubRepositoryInfo,
   SmtpDeliveryAdapter,
+  createModelClient,
+  superadminDmNotifier,
 } from "@rapi/adapters";
 import {
   createCommunityFeeds,
@@ -26,7 +29,7 @@ import {
 } from "@rapi/agent";
 import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
-import { HarnessUpdatesStore, PostgresStore } from "@rapi/db";
+import { HarnessUpdatesStore, ModelUsageStore, PostgresStore } from "@rapi/db";
 import { requireHealthyDeliveryResults } from "./delivery-loop.js";
 import { deliveryReadiness } from "./delivery-readiness.js";
 import { shouldRunDelivery } from "./delivery-schedule.js";
@@ -65,10 +68,21 @@ const delivery = new CompositeDeliveryAdapter({
   discord_channel: discord,
   email,
 });
+// Null unless MODEL_API_BASE_URL and MODEL_API_KEY are set; callers fall back to the CLI.
+const modelClient = createModelClient(
+  config,
+  new ModelUsageStore(store),
+  superadminDmNotifier(discord, config.DISCORD_SUPERADMIN_USER_IDS ?? []),
+);
 const summarizer =
   process.env.SUMMARY_MODEL === "off"
     ? undefined
-    : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
+    : config.SUMMARIZER_BACKEND === "api" && modelClient
+      ? new ApiSummarizer(
+          modelClient,
+          `api:${config.MODEL_FOR_SUMMARY ?? config.MODEL_DEFAULT}`,
+        )
+      : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
 const agent = new RapiAgent(
   store,
   delivery,

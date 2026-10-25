@@ -1,0 +1,21 @@
+{
+  "_note": "Fallback prices in micro-USD (1e-6 USD) per 1M tokens, used only when the gateway reports no cost. Verify against the provider price page before relying on it; a model missing here is metered at cost 0 and flagged 'unknown_price'.",
+  "models": {
+    "gpt-4o-mini": {
+      "inputMicroUsdPerMillion": 150000,
+      "outputMicroUsdPerMillion": 600000
+    },
+    "gpt-4o": {
+      "inputMicroUsdPerMillion": 2500000,
+      "outputMicroUsdPerMillion": 10000000
+    },
+    "gpt-4.1-mini": {
+      "inputMicroUsdPerMillion": 400000,
+      "outputMicroUsdPerMillion": 1600000
+    },
+    "gpt-4.1": {
+      "inputMicroUsdPerMillion": 2000000,
+      "outputMicroUsdPerMillion": 8000000
+    }
+  }
+}

@@ -1,8 +1,11 @@
 import type { DeliveryAdapter, DeliveryResult } from "@rapi/core";
 import {
   DiscordDeliveryAdapter,
+  ApiSummarizer,
   CodexSummarizer,
   SmtpDeliveryAdapter,
+  createModelClient,
+  superadminDmNotifier,
 } from "@rapi/adapters";
 import {
   DiscordLayoutManager,
@@ -21,7 +24,10 @@ import { PublicAgentClient } from "@rapi/adapters";
 import {
   assertDiscordAccess,
   briefingLinkKey,
+  budgetMonth,
   createGuildGate,
+  formatModelCostReport,
+  microUsdFromUsd,
   isGuildAllowed,
   resolveHomeGuildId,
   summarizeReadiness,
@@ -31,6 +37,7 @@ import {
   compareMigrationNames,
   expectedMigrationNames,
   HarnessUpdatesStore,
+  ModelUsageStore,
   PostgresStore,
 } from "@rapi/db";
 import {
@@ -85,12 +92,40 @@ const delivery = new CompositeDeliveryAdapter({
   discord_channel: discord,
   email,
 });
+const modelUsage = new ModelUsageStore(store);
+// Null unless MODEL_API_BASE_URL and MODEL_API_KEY are set; callers fall back to the CLI.
+const modelClient = createModelClient(
+  config,
+  modelUsage,
+  superadminDmNotifier(discord, config.DISCORD_SUPERADMIN_USER_IDS ?? []),
+);
+// Owner-facing model cost lines; empty while the API client is off.
+async function modelCostReport(): Promise<string> {
+  if (!modelClient) return "";
+  const month = budgetMonth(new Date());
+  const previous = budgetMonth(new Date(month.startsAt.getTime() - 1));
+  return formatModelCostReport({
+    thisMonth: await modelUsage.costByFeature(month.startsAt, month.endsAt),
+    lastMonth: await modelUsage.costByFeature(
+      previous.startsAt,
+      previous.endsAt,
+    ),
+    budgetMicroUsd: config.MODEL_MONTHLY_BUDGET_USD
+      ? microUsdFromUsd(config.MODEL_MONTHLY_BUDGET_USD)
+      : undefined,
+  });
+}
 const agent = new RapiAgent(
   store,
   delivery,
   process.env.SUMMARY_MODEL === "off"
     ? undefined
-    : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL),
+    : config.SUMMARIZER_BACKEND === "api" && modelClient
+      ? new ApiSummarizer(
+          modelClient,
+          `api:${config.MODEL_FOR_SUMMARY ?? config.MODEL_DEFAULT}`,
+        )
+      : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL),
   undefined,
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
     ? {
@@ -211,6 +246,7 @@ const commands = new DiscordCommandService(agent, allowlists, {
       const stale =
         Date.now() - new Date(monitor.updatedAt).getTime() >
         config.MONITOR_INTERVAL_SECONDS * 3000;
+      const costs = await modelCostReport().catch(() => "");
       return [
         `라피 상태: ${stale ? "확인 불가" : "감시 중"}`,
         ...monitor.components.map(
@@ -225,6 +261,7 @@ const commands = new DiscordCommandService(agent, allowlists, {
               ? ` · DB ${component.details.percent}%`
               : ""),
         ),
+        ...(costs ? [costs] : []),
       ].join("\n");
     } catch {
       // Fall back to a direct database check before the monitor has written state.
@@ -240,12 +277,16 @@ const commands = new DiscordCommandService(agent, allowlists, {
   usage: {
     status: async (guildId, userId, tier) => {
       const usage = await store.aiUsageStatus(guildId, userId);
+      // Cost is owner information; ordinary users only see their own counts.
+      const costs =
+        tier === "staff" ? await modelCostReport().catch(() => "") : "";
       return [
         tier === "staff"
           ? "내 AI 사용량: 운영진 무제한"
           : `내 AI 사용량: ${usage.used}회 · 남음 ${usage.remaining}회`,
         `서버 전체: ${usage.globalUsed}회 · 남음 ${usage.globalRemaining}회`,
         `초기화: ${usage.resetAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (Asia/Seoul)`,
+        ...(costs ? [costs] : []),
       ].join("\n");
     },
     policy: async (guildId) => {
