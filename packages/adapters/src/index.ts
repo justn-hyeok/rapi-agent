@@ -6,3 +6,4 @@ export * from "./public-agent.js";
 export * from "./github-stars.js";
 export * from "./summarizer.js";
 export * from "./events.js";
+export * from "./model-client.js";
