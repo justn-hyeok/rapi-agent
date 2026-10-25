@@ -1,8 +1,8 @@
 {
   "senpi": {
-    "version": "2026.10.21-3",
+    "version": "2026.10.25-2",
     "repo": "code-yeongyu/senpi",
     "asset": "pi-linux-x64.tar.gz",
-    "sha256": "a51b1136bbf997676d8fe28c7e32f428758d3fcad2f2f19d0ade1cc4eeafe73f"
+    "sha256": "d4a4398b5f5f405c6e08df7a4d3b80e6ab62d4299e6c3d7197e61d098e00e40c"
   }
 }
