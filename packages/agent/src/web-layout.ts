@@ -22,6 +22,17 @@ export interface WebNavLink {
   role?: WebRole;
 }
 
+/**
+ * A page that needs script. Only the checkout page uses it: the nonce'd inline
+ * script plus the listed external hosts loosen the CSP for that page alone.
+ */
+export interface WebPageScript {
+  /** External script URLs; each becomes a `<script src>` and a script-src entry. */
+  srcs: string[];
+  inline: string;
+  allow: { frame: string[]; connect: string[]; img: string[] };
+}
+
 export interface WebPageInput {
   title: string;
   body: string;
@@ -32,6 +43,7 @@ export interface WebPageInput {
   /** Public pages (the archive) may be indexed; everything else is noindex. */
   indexable?: boolean;
   headers?: Record<string, string | string[]>;
+  script?: WebPageScript | undefined;
 }
 
 const STYLE = `
@@ -70,7 +82,7 @@ label.field{display:block;margin:8px 0}
 .tag{font-size:.8rem;color:var(--muted)}
 `;
 
-/** Renders a full page and the strict-CSP headers; scripts are never emitted. */
+/** Renders a full page and the strict-CSP headers; scripts are emitted only for `input.script`. */
 export function webPage(input: WebPageInput): WebResponse {
   const nonce = randomBytes(16).toString("base64");
   const nav: WebNavLink[] = [
@@ -87,16 +99,38 @@ export function webPage(input: WebPageInput): WebResponse {
   const auth = account
     ? `<span class="muted">${h(account.displayName ?? account.username)}</span><form method="post" action="/logout"><input type="hidden" name="csrf" value="${h(account.csrf)}"><button class="link" type="submit">로그아웃</button></form>`
     : `<a href="/auth/discord/login">Discord로 로그인</a>`;
-  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${input.indexable ? "" : '<meta name="robots" content="noindex">'}<meta name="referrer" content="no-referrer"><title>${h(input.title)} · 라피</title><style nonce="${nonce}">${STYLE}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="/archive">라피</a><nav>${nav.map((link) => `<a href="${h(link.href)}">${h(link.label)}</a>`).join("")}${auth}</nav></header><main>${input.body}</main></div></body></html>`;
+  const script = input.script;
+  const scriptTags = script
+    ? `${script.srcs.map((src) => `<script src="${h(src)}"></script>`).join("")}<script nonce="${nonce}">${script.inline}</script>`
+    : "";
+  const csp = script
+    ? [
+        "default-src 'none'",
+        // Third-party widgets (Toss) inject their own styles and post forms
+        // to card issuers, so script pages allow those; other pages do not.
+        "style-src 'unsafe-inline' https:",
+        "font-src https: data:",
+        `script-src 'nonce-${nonce}' ${script.srcs.map((src) => new URL(src).origin).join(" ")}`,
+        `frame-src ${script.allow.frame.join(" ")}`,
+        `connect-src ${script.allow.connect.join(" ")}`,
+        `img-src ${script.allow.img.join(" ")}`,
+        "base-uri 'none'",
+        "form-action 'self' https:",
+        "frame-ancestors 'none'",
+      ].join("; ")
+    : `default-src 'none'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+  const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">${input.indexable ? "" : '<meta name="robots" content="noindex">'}<meta name="referrer" content="${script ? "strict-origin-when-cross-origin" : "no-referrer"}"><title>${h(input.title)} · 라피</title><style nonce="${nonce}">${STYLE}</style></head><body><div class="wrap"><header class="top"><a class="brand" href="/archive">라피</a><nav>${nav.map((link) => `<a href="${h(link.href)}">${h(link.label)}</a>`).join("")}${auth}</nav></header><main>${input.body}</main></div>${scriptTags}</body></html>`;
   return {
     status: input.status ?? 200,
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
-      "referrer-policy": "no-referrer",
+      "referrer-policy": script
+        ? "strict-origin-when-cross-origin"
+        : "no-referrer",
       "x-content-type-options": "nosniff",
       ...(input.indexable ? {} : { "x-robots-tag": "noindex" }),
-      "content-security-policy": `default-src 'none'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+      "content-security-policy": csp,
       ...input.headers,
     },
     body: html,

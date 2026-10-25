@@ -2,6 +2,7 @@ import {
   WEB_OAUTH_STATE_SECONDS,
   WEB_SESSION_DAYS,
   escapeHtml as h,
+  formatBillingDate,
   hashWebSessionId,
   isLearnerCadence,
   newWebOAuthState,
@@ -31,6 +32,11 @@ import type {
   WebStore,
 } from "@rapi/db";
 import type { EmailAddressStatus } from "./email-service.js";
+import {
+  WEB_BILLING_NAV,
+  webBillingRoutes,
+  type WebBillingOptions,
+} from "./web-billing.js";
 import { renderBlogMdx } from "./web-blog.js";
 import {
   WEB_ADMIN_NAV,
@@ -56,6 +62,7 @@ const CADENCE_LABEL: Record<LearnerCadence, string> = {
   weekly: "매주",
 };
 const ARCHIVE_LIMIT = 60;
+const BILLING_PATH = /^\/(?:billing(?:\/|$)|admin\/billing$)/;
 
 export interface WebRequest {
   method: string;
@@ -65,6 +72,8 @@ export interface WebRequest {
   cookie?: string | undefined;
   /** Parsed urlencoded body of a POST; empty otherwise. */
   form: URLSearchParams;
+  /** Raw body of a POST (the unsigned Toss webhook is JSON). */
+  body?: string | undefined;
 }
 
 /**
@@ -107,6 +116,14 @@ export interface WebEmailPort {
   remove(userId: string): Promise<boolean>;
 }
 
+/** The `/me` plan line; present only when `BILLING_ENABLED` and the billing routes are mounted. */
+export interface WebBillingPort {
+  /** The live entitlement as `{ planName, validUntil }`, or null for the free plan. */
+  status(
+    userId: string,
+  ): Promise<{ planName: string; validUntil: Date } | null>;
+}
+
 export type WebPortalStore = Pick<
   WebStore,
   | "upsertAccount"
@@ -133,6 +150,8 @@ export interface WebPortalOptions {
   emailEnabled: boolean;
   /** Present when the email channel is configured; enables the `/me` address card. */
   email?: WebEmailPort;
+  /** Present only when billing is on; without it every billing path answers 404. */
+  billing?: WebBillingPort;
   fetch?: typeof fetch;
   now?: () => Date;
   /** Routes added by later lanes (admin pages). */
@@ -171,7 +190,7 @@ export interface WebRoute {
 }
 
 export const WEB_PATH_PATTERN =
-  /^\/(?:auth\/|me(?:\/|$)|admin(?:\/|$)|archive(?:\/|$)|u\/|logout$)/;
+  /^\/(?:auth\/|me(?:\/|$)|admin(?:\/|$)|billing(?:\/|$)|archive(?:\/|$)|u\/|logout$)/;
 
 export class WebPortal {
   private readonly sessionKey: Buffer;
@@ -208,6 +227,13 @@ export class WebPortal {
   /** Returns undefined for paths this portal does not own. */
   async handle(request: WebRequest): Promise<WebResponse | undefined> {
     if (!WEB_PATH_PATTERN.test(request.path)) return undefined;
+    // Billing is invisible while off: its paths are not routed at all.
+    if (!this.options.billing && BILLING_PATH.test(request.path))
+      return {
+        status: 404,
+        headers: { "cache-control": "no-store" },
+        body: "",
+      };
     const now = this.now();
     let methodMismatch = false;
     for (const route of this.routes) {
@@ -526,6 +552,9 @@ export class WebPortal {
     const email = this.options.email;
     const address = email ? await email.status(user.userId) : null;
     const subscription = await this.store.learnerSubscription(user.userId);
+    const plan = this.options.billing
+      ? await this.options.billing.status(user.userId)
+      : undefined;
     const active = subscription?.active === true;
     const cadence = subscription?.cadence ?? "weekly";
     const notices: Record<string, string> = {
@@ -544,6 +573,7 @@ export class WebPortal {
     const body = `<h1>내 구독</h1>
 ${notice ? `<p class="note">${h(notice)}</p>` : ""}
 <div class="card"><p><strong>${h(user.displayName ?? user.username)}</strong> <span class="muted">${h(user.role)}</span></p>
+${plan === undefined ? "" : `<p>요금제: ${plan ? `${h(plan.planName)} (${h(formatBillingDate(plan.validUntil))}까지)` : "무료"} <a href="/billing">요금제 보기</a></p>`}
 <p>학습자 소식: ${active ? `<strong>${CADENCE_LABEL[cadence]} 받는 중</strong>` : "구독 안 함"}</p></div>
 ${this.options.learnerEnabled ? "" : '<p class="note">학습자 소식 발송이 아직 꺼져 있어요. 지금 구독해도 발송은 시작된 뒤부터예요.</p>'}
 <form method="post" action="/me/subscription" class="card">
@@ -791,6 +821,7 @@ export function createWebPortal(
     WEBHOOK_ENCRYPTION_KEY?: string | undefined;
     LEARNER_EXPERIMENT_ENABLED: boolean;
     EMAIL_ENABLED: boolean;
+    BILLING_ENABLED?: boolean;
   },
   allowlists: DiscordAllowlists,
   store: WebStore,
@@ -799,6 +830,8 @@ export function createWebPortal(
   extras: {
     blogPosts?: Pick<BlogPostsStore, "listPublishedBlogPosts" | "getBlogPost">;
     email?: WebEmailPort;
+    /** Mounted only when `BILLING_ENABLED`; see `webBillingRoutes`. */
+    billing?: Omit<WebBillingOptions, "baseUrl">;
   } = {},
 ): WebPortal | undefined {
   if (
@@ -809,6 +842,29 @@ export function createWebPortal(
     !config.WEBHOOK_ENCRYPTION_KEY
   )
     return undefined;
+  const billing =
+    config.BILLING_ENABLED && extras.billing
+      ? {
+          routes: webBillingRoutes({
+            ...extras.billing,
+            baseUrl: config.RAPI_PUBLIC_BASE_URL,
+          }),
+          port: {
+            status: async (userId: string) => {
+              const entitlement =
+                await extras.billing!.service.entitlement(userId);
+              return entitlement
+                ? {
+                    planName: extras.billing!.service.planName(
+                      entitlement.planId,
+                    ),
+                    validUntil: entitlement.validUntil,
+                  }
+                : null;
+            },
+          },
+        }
+      : undefined;
   return new WebPortal(
     store,
     learner,
@@ -822,7 +878,19 @@ export function createWebPortal(
       learnerEnabled: config.LEARNER_EXPERIMENT_ENABLED,
       emailEnabled: config.EMAIL_ENABLED && extras.email !== undefined,
       ...(config.EMAIL_ENABLED && extras.email ? { email: extras.email } : {}),
-      ...(admin ? { routes: webAdminRoutes(admin), nav: WEB_ADMIN_NAV } : {}),
+      ...(billing ? { billing: billing.port } : {}),
+      ...(admin || billing
+        ? {
+            routes: [
+              ...(admin ? webAdminRoutes(admin) : []),
+              ...(billing?.routes ?? []),
+            ],
+            nav: [
+              ...(admin ? WEB_ADMIN_NAV : []),
+              ...(billing ? WEB_BILLING_NAV : []),
+            ],
+          }
+        : {}),
     },
   );
 }

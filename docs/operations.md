@@ -451,6 +451,83 @@ public-agent는 DB·키 접근이 없는 격리 프로세스라 이 클라이언
 - 끄려면 `EMAIL_ENABLED=false`로 되돌리고 봇을 재시작한다. 저장된 주소는 남는다
   (`/데이터삭제`와 보존기간 규칙으로 지워진다. `docs/data-lifecycle.md` 참고).
 
+## 결제 (꺼짐)
+
+유료 이용권은 Toss Payments로 결제하도록 만들어 두었고 **꺼진 채로 배포된다**. 사업자 등록(통신판매업 신고)
+전에는 아무것도 팔 수 없으므로, `BILLING_ENABLED=false`인 동안은 다음이 모두 참이다.
+
+- `/billing/*`, `/admin/billing`, `POST /billing/webhook/toss`는 전부 404를 돌려준다.
+- 가격은 어떤 페이지에도 나오지 않고, `/me`에도 요금제 줄이 없다.
+- 기능 확인(`allowsFeature`)은 항상 통과한다. 지금은 어떤 기능도 막지 않는다(`/me` 표시에만 쓴다).
+
+### 모델
+
+- 한 번 결제하면 정해진 기간을 쓰는 **기간권**이다. 자동 갱신은 없다. Toss 정기결제(자동결제·빌링키)는
+  별도 계약이 필요해서 만들지 않았다.
+- 플랜은 `ops/billing-plans.json`(`BILLING_PLANS_FILE`로 바꿈)에 있다. 기본 플랜 `supporter`의 1,000원은
+  테스트용 자리표시이고 실제 가격이 아니다. `priceKrw: 0`인 플랜은 "준비 중"으로만 보이고 살 수 없다.
+  결제된 주문이 있는 플랜을 파일에서 지우면 그 주문의 환불·재확인이 막히므로 지우지 말고 `priceKrw: 0`으로 둔다.
+- 다시 사면 `max(지금, 만료일)`부터 기간이 이어진다. 환불하면 그 주문이 준 기간만큼 줄고, 남는 기간이 없으면
+  이용권이 사라진다.
+- 금액은 항상 플랜 파일에서 서버가 정한다. 결제 성공 주소의 `amount`는 저장된 주문 금액과 같을 때만
+  승인 요청을 보낸다. 다르면 승인하지 않고 주문을 실패로 닫는다.
+
+### 설정
+
+| 변수 | 뜻 |
+| --- | --- |
+| `BILLING_ENABLED` | 기본 false. 켜려면 `WEB_ENABLED`, `RAPI_PUBLIC_BASE_URL`, 아래 두 키가 모두 필요하다. |
+| `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` | Toss 개발자센터의 키. 시크릿 키는 `.env`에만 둔다. |
+| `BILLING_LIVE` | 기본 false. false면 `test_`로 시작하지 않는 키는 설정 검증이 거부해서 실수로 실결제가 일어나지 않는다. 사업자 등록 뒤에만 true로 한다. |
+| `BILLING_PLANS_FILE` | 플랜 파일 절대 경로(기본 `ops/billing-plans.json`). |
+
+Toss는 계정 없이 테스트 환경에서 쓸 수 있는 문서용 키를 공개한다(위젯 클라이언트 키
+`test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm`, 위젯 시크릿 키 `test_gsk_docs_OaPz8L5KdmQXkzRz3y47BMw6`).
+`.env.example` 주석에만 적었고 코드의 기본값은 아니다.
+
+### 테스트 모드로 해 보기
+
+1. `npm run db:migrate`로 `0028`을 적용한다.
+2. `.env`에 `WEB_ENABLED=true`(3번 단계가 끝난 상태), `BILLING_ENABLED=true`, 위 문서용 키를 넣고 봇과 게이트웨이를
+   재시작한다. `BILLING_LIVE`는 비워 둔다.
+3. 로그인 → `/billing` → `[구매하기]`. 결제창 위에 "테스트 결제" 배지가 보여야 한다. 토스 테스트 안내에 따라 카드
+   정보를 넣으면 실제 청구는 일어나지 않는다(테스트 키).
+4. 성공 화면 → `/me`에 `요금제: 서포터 (YYYY-MM-DD까지)`가 보이는지, 새로고침해도 같은 화면인지 확인한다.
+5. SUPERADMIN으로 `/admin/billing` → `[환불]` → 확인. 주문이 "환불됨"이 되고 `/me`가 "무료"로 돌아오는지 본다.
+6. 결제창이 비어 있으면 브라우저 콘솔의 CSP 오류를 본다. 결제 페이지만 `js.tosspayments.com`(script),
+   `*.tosspayments.com`(frame/connect/img)와 `static.toss.im`(img)을 허용한다. 토스 위젯이 다른 출처를 더 쓰면
+   `packages/agent/src/web-billing.ts`의 `TOSS_ALLOW`에 추가한다. 이 허용 목록은 실제 브라우저로 확인하지
+   못했다(테스트는 헤더 문자열만 검사한다).
+
+웹훅 URL은 `${RAPI_PUBLIC_BASE_URL}/billing/webhook/toss`다. Toss 일반 결제 웹훅에는 서명이 없어서, 라피는 본문을
+힌트로만 쓰고 `paymentKey`로 Toss에 다시 조회한 결과로만 주문을 바꾼다. 조회가 실패하면 503을 돌려 Toss가 다시
+보내게 한다. 승인 요청 도중 네트워크가 끊겨 주문이 `pending`으로 남은 경우도 이 웹훅이 정리한다.
+
+### 개인정보 삭제와 거래 기록
+
+`내 정보` 삭제를 확정하면 `billing_entitlements` 행은 지우고, `billing_orders`의 `user_id`는 다른 행위자
+참조와 같은 HMAC 가명으로 바꾼다. **주문 기록은 지우지 않는다.** 전자상거래 관련 법령이 대금결제·거래 기록의
+보존(통상 5년)을 요구하기 때문이다. 정확한 기간과 범위는 사업자 등록 때 세무·법률 확인을 받아 확정한다.
+자동 보존기간 정리는 주문을 건드리지 않는다. 보존기간이 끝난 주문을 지우는 작업은 아직 없다(TODO).
+
+### 사업자 등록 뒤 소유자가 할 일
+
+1. 통신판매업 신고(구매안전서비스 이용확인증이 필요할 수 있다).
+2. Toss Payments 가맹 계약을 맺고 라이브 키를 받는다.
+3. Toss 개발자센터에서 웹훅 URL(`/billing/webhook/toss`)을 등록하고 `PAYMENT_STATUS_CHANGED` 이벤트를 켠다.
+4. 아래 법적 페이지를 먼저 만든다.
+5. `.env`에 라이브 키를 넣고 `BILLING_LIVE=true`로 바꾼 뒤 봇을 재시작한다. 먼저 1,000원 같은 최소 금액으로 직접 결제와
+   환불을 한 번 해 본다.
+6. `ops/billing-plans.json`의 `supporter`를 실제 가격으로 바꾼다(지금 값은 자리표시다).
+
+### 켜기 전에 있어야 할 법적 페이지 (TODO, 문구는 쓰지 않았다)
+
+- [ ] 이용약관
+- [ ] 환불·청약철회 정책(디지털 이용권의 철회 제한 안내 포함)
+- [ ] 개인정보 처리방침에 결제 정보 항목 추가
+- [ ] 푸터의 사업자 정보(상호, 대표자, 사업자등록번호, 통신판매업 신고번호, 주소, 연락처)
+- [ ] 결제 화면에 약관·환불 정책 링크
+
 ## OMP 제거
 
 2026-10-24부터 코드 실행 경로는 ChatOps(Codex 직접 실행) 하나다. `rapi-omp` 서비스,
@@ -555,6 +632,7 @@ GITHUB_REPORT_TARGET=dm
 | 7 | `CHATBOT_ENABLED`, `CHATBOT_L2_ENABLED` | 6번, `0025`, 블로그 색인은 `RAPI_PUBLIC_BASE_URL`(https) | 봇 `.env`와 실행기 env 둘 다 `api`인지 확인 | `docs/ux-notes/q5-chatbot.md` |
 | 8 | `GITHUB_APP_ENABLED` | `GITHUB_APP_ID/PRIVATE_KEY_PATH/WEBHOOK_SECRET/ALLOWED_OWNERS/OWNER_LOGINS`, `0024` | GitHub App 등록·설치·웹훅 URL | [GitHub App 만들기](#github-app-만들기-선택) |
 | 9 | `HARNESS_UPDATES_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0020` | VM의 `gh` 로그인, 제안 PR 검토 | [하네스 버전 갱신](#하네스-버전-갱신-선택) |
+| 10 | `BILLING_ENABLED` (+ `BILLING_LIVE`) | 3번, `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY`, `RAPI_PUBLIC_BASE_URL`, `0028`. 사업자 등록 전에는 테스트 키만 | 사업자 등록(통신판매업 신고), Toss 가맹 계약·라이브 키, 웹훅 URL 등록, 법적 페이지, 게이트웨이 재시작 | [결제 (꺼짐)](#결제-꺼짐) |
 
 켜고 나서 한 번씩 확인할 것:
 

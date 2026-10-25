@@ -98,4 +98,9 @@ export function sweepMetadata(
   applied: boolean;
 }>;
 export function deleteUserEmails(client: Client, userId: string): Promise<void>;
+export function deleteUserBilling(
+  client: Client,
+  userId: string,
+  pseudonym: string,
+): Promise<void>;
 export function expireEmails(client: Client, now: Date): Promise<void>;

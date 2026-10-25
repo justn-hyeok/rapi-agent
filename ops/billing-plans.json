@@ -1,0 +1,13 @@
+{
+  "_note": "priceKrw 1000 is a placeholder for testing the Toss test environment, not a real price. A plan with priceKrw 0 is shown as 준비 중 and cannot be bought.",
+  "plans": [
+    {
+      "id": "supporter",
+      "name": "서포터",
+      "description": "라피를 후원하는 30일 이용권 (테스트용 자리표시)",
+      "priceKrw": 1000,
+      "periodDays": 30,
+      "features": []
+    }
+  ]
+}
