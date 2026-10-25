@@ -16,13 +16,22 @@ const allowed = [
   /^\/webhooks\/[^/?#]+$/,
 ];
 
-// Web pages (Discord login, /me, archive, tokenless unsubscribe). The bot answers 404 for
+// Web pages (Discord login, /me, /admin pages, archive, tokenless unsubscribe). The bot answers 404 for
 // all of them unless WEB_ENABLED is true; the strict shapes here keep everything else out.
 const webRoutes = [
   ["GET", /^\/auth\/discord\/(?:login|callback)$/],
   ["POST", /^\/logout$/],
   ["GET", /^\/me$/],
   ["POST", /^\/me\/subscription$/],
+  ["GET", /^\/admin$/],
+  [
+    "GET",
+    /^\/admin\/(?:subscribe|unsubscribe|sources|deliveries|status|usage|usage-policy|server-config|webhooks)$/,
+  ],
+  [
+    "POST",
+    /^\/admin\/(?:subscribe|unsubscribe|usage-policy|server-config|webhooks)$/,
+  ],
   ["GET", /^\/archive$/],
   ["GET", /^\/archive\/(?:daily|weekly)-\d{4}-\d{2}-\d{2}$/],
   ["GET", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],

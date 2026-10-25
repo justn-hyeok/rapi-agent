@@ -63,6 +63,18 @@ class DisabledDeliveryAdapter implements DeliveryAdapter {
 
 const config = loadEnvironment();
 
+function webEnabled(
+  value: typeof config,
+): value is typeof config & { RAPI_PUBLIC_BASE_URL: string } {
+  return (
+    value.WEB_ENABLED &&
+    !!value.DISCORD_OAUTH_CLIENT_ID &&
+    !!value.DISCORD_OAUTH_CLIENT_SECRET &&
+    !!value.RAPI_PUBLIC_BASE_URL &&
+    !!value.WEBHOOK_ENCRYPTION_KEY
+  );
+}
+
 const store = new PostgresStore(config.DATABASE_URL, {
   max: config.DB_POOL_MAX,
   connectionTimeoutMs: config.DB_CONNECT_TIMEOUT_MS,
@@ -239,6 +251,8 @@ const allowlists = {
     : {}),
 };
 const commands = new DiscordCommandService(agent, allowlists, {
+  // Moved commands point to the web only when the portal can actually serve them.
+  ...(webEnabled(config) ? { webBaseUrl: config.RAPI_PUBLIC_BASE_URL } : {}),
   guildAllowlist: () => guildGate.allowed(),
   privacy: async (identity, options, level) =>
     executePrivacyCommand(
@@ -353,7 +367,11 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
   );
 }
 
-const web = createWebPortal(config, allowlists, new WebStore(store), store);
+const web = createWebPortal(config, allowlists, new WebStore(store), store, {
+  commands,
+  guilds: () => guildGate.allowed(),
+  homeGuildId,
+});
 
 const server = createDiscordInteractionServer(
   commands,
@@ -474,6 +492,7 @@ const server = createDiscordInteractionServer(
           name: "server_config",
           options: {
             action: "적용",
+            viaButton: true,
             planId: customId.slice("server_config_apply:".length),
           },
         });

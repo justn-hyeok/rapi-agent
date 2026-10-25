@@ -447,7 +447,7 @@ export function createDiscordInteractionServer(
       if (
         integrations?.web &&
         (request.method === "GET" || request.method === "POST") &&
-        /^\/(?:auth\/|me(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
+        /^\/(?:auth\/|me(?:[/?]|$)|admin(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
           request.url ?? "",
         )
       ) {
@@ -963,7 +963,9 @@ export function createDiscordInteractionServer(
               },
             ]
           : undefined;
-      const isPublic = ["search", "brief", "usage"].includes(commandName);
+      const isPublic =
+        ["search", "brief", "usage"].includes(commandName) &&
+        !result.data?.webNotice;
       json(response, 200, {
         type: 4,
         data: {

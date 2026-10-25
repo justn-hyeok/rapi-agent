@@ -25,6 +25,11 @@ import {
 } from "@rapi/core";
 import type { PostgresStore, WebArchiveIssue, WebStore } from "@rapi/db";
 import {
+  WEB_ADMIN_NAV,
+  webAdminRoutes,
+  type WebAdminOptions,
+} from "./web-admin.js";
+import {
   messagePage,
   redirect,
   webPage,
@@ -122,7 +127,7 @@ export interface WebRoute {
 }
 
 export const WEB_PATH_PATTERN =
-  /^\/(?:auth\/|me(?:\/|$)|archive(?:\/|$)|u\/|logout$)/;
+  /^\/(?:auth\/|me(?:\/|$)|admin(?:\/|$)|archive(?:\/|$)|u\/|logout$)/;
 
 export class WebPortal {
   private readonly sessionKey: Buffer;
@@ -144,6 +149,11 @@ export class WebPortal {
     this.now = options.now ?? (() => new Date());
     this.http = options.fetch ?? fetch;
     this.routes = [...this.builtinRoutes(), ...(options.routes ?? [])];
+  }
+
+  /** CSRF check for admin pages that read their own session. */
+  verifyCsrf(account: WebAccount, request: WebRequest): boolean {
+    return this.csrfOk(account, request);
   }
 
   /** Link an owner can put in a DM: unsubscribes without a login. */
@@ -635,6 +645,7 @@ export function createWebPortal(
   allowlists: DiscordAllowlists,
   store: WebStore,
   learner: LearnerWriter,
+  admin?: WebAdminOptions,
 ): WebPortal | undefined {
   if (
     !config.WEB_ENABLED ||
@@ -659,6 +670,7 @@ export function createWebPortal(
       allowlists,
       learnerEnabled: config.LEARNER_EXPERIMENT_ENABLED,
       emailEnabled: config.EMAIL_ENABLED,
+      ...(admin ? { routes: webAdminRoutes(admin), nav: WEB_ADMIN_NAV } : {}),
     },
   );
 }

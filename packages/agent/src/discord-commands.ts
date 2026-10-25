@@ -31,6 +31,24 @@ export const slashCommands = [
   "schedule",
 ] as const;
 
+/**
+ * Slash commands that moved to the web (docs/product-direction.md, "slash 명령
+ * 정리"). With the web on they answer with a link to the page instead.
+ */
+export const DISCORD_WEB_PAGES: Partial<
+  Record<(typeof slashCommands)[number], string>
+> = {
+  subscribe: "/admin/subscribe",
+  unsubscribe: "/admin/unsubscribe",
+  sources: "/admin/sources",
+  deliveries: "/admin/deliveries",
+  status: "/admin/status",
+  usage: "/admin/usage",
+  usage_policy: "/admin/usage-policy",
+  server_config: "/admin/server-config",
+  webhook: "/admin/webhooks",
+};
+
 export interface DiscordCommand {
   name: (typeof slashCommands)[number];
   options: Record<string, unknown>;
@@ -144,6 +162,8 @@ export class DiscordCommandService {
         ): Promise<string>;
         export(guildId: string, format: "yaml" | "json"): Promise<string>;
       };
+      /** Public web origin when WEB_ENABLED; moved commands then point to it. */
+      webBaseUrl?: string;
       /** Guilds the bot answers in; undefined means no restriction. */
       guildAllowlist?: () => Promise<readonly string[] | undefined>;
       publicBrief?: (
@@ -205,7 +225,17 @@ export class DiscordCommandService {
     if (guildAdmin && required === "superadmin") required = "admin";
     assertDiscordLevel(level, required);
     const ownerId = identity.userId;
+    const webPage = DISCORD_WEB_PAGES[command.name];
+    // A button from a preview made before the web was on may still apply it.
+    if (this.operations?.webBaseUrl && webPage && !command.options.viaButton)
+      return {
+        messages: [
+          `이 기능은 웹으로 옮겼어요. ${this.operations.webBaseUrl.replace(/\/+$/, "")}${webPage} 에서 이어서 해 주세요. (Discord 계정으로 로그인)`,
+        ],
+        data: { webNotice: true },
+      };
     switch (command.name) {
+      // Frozen: /일정 gets no new behavior (docs/product-direction.md).
       case "schedule": {
         if (command.options.action === "목록") {
           const events = await this.agent.upcomingEvents(ownerId, 30);
@@ -341,10 +371,15 @@ export class DiscordCommandService {
         const rows = await this.agent.store.searchPublic(
           requiredString(command.options, "query"),
         );
+        const text =
+          rows.map((row) => `${row.title}\n${row.url}`).join("\n\n") ||
+          "검색 결과가 없습니다.";
+        const webBase = this.operations?.webBaseUrl?.replace(/\/+$/, "");
         return {
           messages: splitDiscordMessage(
-            rows.map((row) => `${row.title}\n${row.url}`).join("\n\n") ||
-              "검색 결과가 없습니다.",
+            webBase
+              ? `${text}\n\n웹에서 지난 소식 보기: ${webBase}/archive`
+              : text,
           ),
         };
       }

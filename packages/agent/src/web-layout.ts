@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { escapeHtml as h } from "@rapi/core";
+import { escapeHtml as h, webRoleAtLeast, type WebRole } from "@rapi/core";
 
 export interface WebResponse {
   status: number;
@@ -18,6 +18,8 @@ export interface WebNavAccount {
 export interface WebNavLink {
   href: string;
   label: string;
+  /** Shown only to accounts with at least this role; omitted means everyone. */
+  role?: WebRole;
 }
 
 export interface WebPageInput {
@@ -62,6 +64,9 @@ ul.plain li{border-bottom:1px solid var(--line)}
 ul.plain a{display:block;padding:12px 0;color:var(--fg);text-decoration:none}
 .item h3{font-size:1rem;margin:0 0 4px}
 .item a{color:var(--accent)}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:.85rem}
+input[type=text],input[type=number],select{width:100%;min-height:44px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit}
+label.field{display:block;margin:8px 0}
 .tag{font-size:.8rem;color:var(--muted)}
 `;
 
@@ -71,7 +76,12 @@ export function webPage(input: WebPageInput): WebResponse {
   const nav: WebNavLink[] = [
     { href: "/me", label: "내 구독" },
     { href: "/archive", label: "아카이브" },
-    ...(input.nav ?? []),
+    ...(input.nav ?? []).filter(
+      (link) =>
+        !link.role ||
+        (input.account !== undefined &&
+          webRoleAtLeast(input.account.role as WebRole, link.role)),
+    ),
   ];
   const account = input.account;
   const auth = account
