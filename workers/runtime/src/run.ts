@@ -8,6 +8,7 @@ import {
 import {
   DiscordDeliveryAdapter,
   FeedSourceAdapter,
+  HtmlSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
   ApiSummarizer,
@@ -27,10 +28,8 @@ import {
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
   RapiAgent,
-  CrawlerCollector,
   WebhookDeliveryWorker,
 } from "@rapi/agent";
-import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
 import {
   BlogPostsStore,
@@ -105,16 +104,6 @@ const agent = new RapiAgent(
       }
     : undefined,
 );
-const crawler =
-  process.env.CRAWLER_ENDPOINT && process.env.CRAWLER_CALLER_TOKEN
-    ? new CrawlerCollector(
-        agent,
-        new CrawlerClient(
-          process.env.CRAWLER_ENDPOINT,
-          process.env.CRAWLER_CALLER_TOKEN,
-        ),
-      )
-    : undefined;
 // The owner's curation channels: projects, setup and stars, AI blogs, free tokens.
 const communityFeeds = config.COMMUNITY_GUILD_ID
   ? await createCommunityFeeds({
@@ -130,6 +119,7 @@ const communityFeeds = config.COMMUNITY_GUILD_ID
     })
   : undefined;
 const feed = new FeedSourceAdapter();
+const htmlList = new HtmlSourceAdapter();
 const github = new GitHubSourceAdapter(config.GITHUB_READ_TOKEN);
 const stars = new GitHubStarRecommender(config.GITHUB_READ_TOKEN);
 const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
@@ -235,18 +225,6 @@ async function runLoop(
 }
 
 async function collect(): Promise<void> {
-  if (
-    !crawler &&
-    (
-      await store.pool.query(
-        "SELECT 1 FROM sources WHERE state='active' AND collection_policy->'crawler'->>'enabled'='true' LIMIT 1",
-      )
-    ).rowCount
-  )
-    throw new Error(
-      "Delegated sources require CRAWLER_ENDPOINT and CRAWLER_CALLER_TOKEN",
-    );
-  await crawler?.runOnce();
   const collected = await agent.collectEvents();
   if (collected.failures.length)
     process.stderr.write(
@@ -279,6 +257,7 @@ async function collect(): Promise<void> {
       });
     },
     stars,
+    htmlList,
   );
 }
 
@@ -369,10 +348,6 @@ const healthServer = createLocalHealthServer(
         kind: String(source.kind),
         active: source.state === "active",
         failureCount: Number(source.failure_count ?? 0),
-        crawler:
-          !!crawler &&
-          (source.collection_policy as { crawler?: { enabled?: boolean } })
-            .crawler?.enabled === true,
         lastSuccessAt: source.last_success_at as Date | null,
       })),
     );

@@ -435,7 +435,7 @@ Discord에서 모든 것을 하지 않는다.
 | 기억, 일정 | 동결 |
 | 3단계 권한(USER/ADMIN/SUPERADMIN) | 유지. Discord OAuth 계정과 연결한다. |
 | web-proxy, `clients/macos` | 라피와 무관. 같은 VM에서 도는 `rapi-web-proxy.service`의 거취를 먼저 정한다. |
-| 크롤러 연동(`crawler-collector`, `@rapi/crawler-client`) | **보류.** 크롤러 운영 방식을 따로 정한 뒤 다룬다. 참고: D-011, `docs/crawler-collection.md` |
+| 크롤러 연동 | **제거(2026-10-26, D-012).** 별도 Go 서비스와 연동 코드를 지웠다. 피드가 없는 사이트는 `html` 수집원(링크 목록 페이지)으로 받는다. `aside` 종류는 비공개 이력 데이터로만 남는다. |
 
 ## 실행 순서
 

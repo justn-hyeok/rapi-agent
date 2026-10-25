@@ -1,11 +1,10 @@
-const COLLECTABLE_KINDS = new Set(["github", "rss", "github_stars"]);
+const COLLECTABLE_KINDS = new Set(["github", "rss", "html", "github_stars"]);
 const SOURCE_FAILURE_THRESHOLD = 3;
 
 export interface SourceHealthInput {
   kind: string;
   active: boolean;
   failureCount: number;
-  crawler?: boolean;
   lastSuccessAt?: string | Date | null;
 }
 
@@ -21,18 +20,11 @@ export function assessSourceHealth(
   sources: readonly SourceHealthInput[],
 ): SourceHealthAssessment {
   const active = sources.filter((source) => source.active);
-  const supported = active.filter(
-    (source) =>
-      COLLECTABLE_KINDS.has(source.kind) ||
-      (source.kind === "aside" && source.crawler === true),
+  const supported = active.filter((source) =>
+    COLLECTABLE_KINDS.has(source.kind),
   );
   const failing = supported.filter(
-    (source) =>
-      source.failureCount >= SOURCE_FAILURE_THRESHOLD ||
-      (source.crawler === true &&
-        (!source.lastSuccessAt ||
-          !Number.isFinite(new Date(source.lastSuccessAt).getTime()) ||
-          Date.now() - new Date(source.lastSuccessAt).getTime() > 30 * 60_000)),
+    (source) => source.failureCount >= SOURCE_FAILURE_THRESHOLD,
   ).length;
   const unsupported = active.length - supported.length;
   if (failing > 0)

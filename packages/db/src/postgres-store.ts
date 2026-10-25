@@ -11,9 +11,11 @@ import type {
 import {
   capItemsPerSource,
   learnPreferences,
+  parseHtmlSourcePolicy,
   rankByPreference,
   repositoryKey,
   usageWindow,
+  validateHtmlSourceLocator,
   type FeedbackSignal,
 } from "@rapi/core";
 
@@ -155,14 +157,19 @@ export class PostgresStore {
     kind: string,
     locator: string,
     visibility: Visibility,
+    policy: Record<string, unknown> = {},
   ): Promise<string> {
+    if (kind === "html") {
+      validateHtmlSourceLocator(locator);
+      parseHtmlSourcePolicy(policy);
+    }
     const id = randomUUID();
     const result = await this.pool.query<{ id: string }>(
       `INSERT INTO sources (id, kind, locator, collection_policy)
-       VALUES ($1, $2, $3, jsonb_build_object('visibility', $4::text))
+       VALUES ($1, $2, $3, $5::jsonb || jsonb_build_object('visibility', $4::text))
        ON CONFLICT (kind, locator) DO UPDATE SET updated_at = now()
        RETURNING id`,
-      [id, kind, locator, visibility],
+      [id, kind, locator, visibility, JSON.stringify(policy)],
     );
     return result.rows[0]!.id;
   }
@@ -1718,6 +1725,7 @@ export class PostgresStore {
       id: string;
       kind: string;
       locator: string;
+      collection_policy: unknown;
       etag: string | null;
       last_success_at: Date | null;
     }>
@@ -1726,12 +1734,13 @@ export class PostgresStore {
       id: string;
       kind: string;
       locator: string;
+      collection_policy: unknown;
       etag: string | null;
       last_success_at: Date | null;
     }>(
-      `SELECT s.id,s.kind,s.locator,c.etag,c.last_success_at FROM sources s
+      `SELECT s.id,s.kind,s.locator,s.collection_policy,c.etag,c.last_success_at FROM sources s
        LEFT JOIN source_cursors c ON c.source_id=s.id
-       WHERE s.state='active' AND s.kind IN ('github','rss','github_stars') AND s.collection_policy->'crawler'->>'enabled' IS DISTINCT FROM 'true' ORDER BY s.created_at`,
+       WHERE s.state='active' AND s.kind IN ('github','rss','html','github_stars') ORDER BY s.created_at`,
     );
     return result.rows;
   }

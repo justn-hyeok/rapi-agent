@@ -275,7 +275,7 @@ npm run backup          # backups/ 아래 권한 0600 SQL dump 생성
 npm run restore:smoke   # 격리된 임시 DB로 실제 복구 검증
 npm run restart:smoke   # PostgreSQL 재시작 전후 핵심 count 검증
 npm run start:bot       # Discord interaction/webhook 서버
-npm run start:worker    # GitHub/RSS 수집과 배치 발송 worker
+npm run start:worker    # GitHub/RSS/HTML 목록 수집과 배치 발송 worker
 npm run start:monitor   # 독립 health 감시와 장애·복구 알림
 npm run db:migrate      # 로컬 또는 Supabase 지정 DB migration
 npm run backup          # 원자적 custom-format dump와 최근 7개 보존
@@ -651,3 +651,11 @@ GITHUB_REPORT_TARGET=dm
 마이그레이션 `0027_owner_reminders.sql`(`npm run db:migrate`, 자동 배포는 스스로 적용)을 봇·워커보다 먼저 적용한다. 블로그 상태 전이도 새 컬럼을 쓰므로 필수다. 학습자 미리보기를 3시간 동안
 결정하지 않으면, 블로그 글이 PR이 열린 채 24시간 `approved`에 머물면 SUPERADMIN에게 DM을 한 번 보낸다(반복 없음).
 새 환경 변수는 없다.
+
+## 크롤러 제거 후 정리 (0029)
+
+`0029_remove_crawler.sql`은 `aside` 수집원을 모두 `disabled`로 바꾸고 `crawler_collection_*` 테이블 세 개를 지우며, 응답 전체 스냅샷으로 쌓인 `raw_events` 중복(수집원별 최신 1건 제외, `source_items`가 참조하지 않는 것만)을 삭제한다. 피드가 없는 Anthropic 뉴스는 `kind='html'` 수집원으로 시드한다. 롤백은 테이블을 빈 채로 되살리고 `html` 수집원을 비활성화한다.
+
+배포 뒤 VM에서: `rapi-crawler-controller`, `rapi-crawler-browser`, `rapi-crawler-auto-deploy.timer`를 stop·disable하고, `.env`에서 `CRAWLER_*`를 지우고, `rapi-crawler` 저장소를 보관(archive)한다.
+
+`html` 수집원은 `collection_policy.html`에 `linkPattern`(경로 정규식, 200자 미만), `maxItems`(기본 20), `exclude`(경로 정규식 목록)를 둔다. 추가는 `createSource("html", url, "public", { html: {...} })`로 하며, 현재 관리자 화면(`/수집원`, `/admin/sources`)에는 수집원 추가 기능이 없다(상태 조회만).

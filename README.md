@@ -96,7 +96,7 @@ Tunnel을 통과한다. allowlist gateway는 세 POST 경로만 전달하며 hea
 loopback에 남긴다.
 
 `start:bot`은 Discord interaction, 서명된 generic webhook, 구독·검색·브리핑
-명령을 제공한다. `start:worker`는 GitHub/RSS 수집과 일간·주간 배치를 실행한다.
+명령을 제공한다. `start:worker`는 GitHub/RSS/HTML 목록 수집과 일간·주간 배치를 실행한다.
 Discord와 이메일은 하나의 동결된 batch를 사용한다.
 
 Discord 명령은 모두 한글이다. 개발 작업은 슬래시 명령 대신 `라피야! 로그인 오류 고쳐줘`처럼
