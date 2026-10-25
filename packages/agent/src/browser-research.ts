@@ -40,21 +40,23 @@ export function researchWindow(
   site: ResearchSite,
   snapshot: string,
   remaining: number,
+  seen: ReadonlySet<string> = new Set(),
 ): {
   text: string;
   urls: Set<string>;
 } {
   const urls = new Set<string>();
+  const unseen = new Set<string>();
   const lines: string[] = [];
   for (const line of snapshot.slice(0, 24_000).split("\n")) {
     const found = [...line.matchAll(/https:\/\/[^\s<>"')\]]+/g)]
       .map((m) => researchPostUrl(site, m[0]))
       .filter((u): u is string => u !== null);
-    if (
-      found.some((u) => !urls.has(u)) &&
-      urls.size + new Set(found.filter((u) => !urls.has(u))).size > remaining
-    )
-      break;
+    const additional = new Set(
+      found.filter((u) => !seen.has(u) && !unseen.has(u)),
+    );
+    if (unseen.size + additional.size > remaining) break;
+    additional.forEach((u) => unseen.add(u));
     found.forEach((u) => urls.add(u));
     lines.push(line);
   }
@@ -142,6 +144,7 @@ export class BrowserResearchService {
           input.site,
           await browser.snapshot(),
           policy.maxPosts - viewed.size,
+          viewed,
         );
         window.urls.forEach((u) => viewed.add(u));
         await this.options.store.record(run, {
