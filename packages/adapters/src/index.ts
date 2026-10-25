@@ -14,3 +14,4 @@ export * from "./github-app.js";
 export * from "./email.js";
 export * from "./public-qa-meter.js";
 export * from "./toss-payments.js";
+export * from "./browser-research.js";

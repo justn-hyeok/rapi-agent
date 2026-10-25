@@ -25,6 +25,10 @@ import {
   type HarnessId,
 } from "./harness.js";
 import type { DiscordTyping } from "./typing.js";
+import {
+  parseResearchDirective,
+  type BrowserResearchService,
+} from "@rapi/agent";
 
 const CANCEL_POLL_MS = 2000;
 
@@ -176,6 +180,7 @@ export class ChatOrchestrator {
         requestId: string,
       ): Promise<string>;
     },
+    readonly browserResearch?: Pick<BrowserResearchService, "request">,
   ) {}
   private withTyping<T>(channel: string, work: () => Promise<T>): Promise<T> {
     // Typing is a Discord feature; GitHub threads have no such channel.
@@ -215,6 +220,46 @@ export class ChatOrchestrator {
       return;
     }
     const redacted = redactChat(request).slice(0, 20000);
+    const researchSite = parseResearchDirective(redacted);
+    if (researchSite) {
+      const privateChannel = Boolean(
+        accessLevel === "superadmin" &&
+          chatOpsExecutionAllowed(scope.guild, this.homeGuildId) &&
+          this.community &&
+          (await this.community.isAdminChannel(scope)) &&
+          !scope.channel.startsWith("github:"),
+      );
+      if (!privateChannel) {
+        await this.reply(
+          scope.channel,
+          "브라우저 조사는 소유자의 비공개 ChatOps에서만 시작할 수 있습니다.",
+        );
+        return;
+      }
+      try {
+        await this.reply(
+          scope.channel,
+          this.browserResearch
+            ? await this.withTyping(scope.channel, () =>
+                this.browserResearch!.request({
+                  origin: "discord",
+                  userId: scope.owner,
+                  guildId: scope.guild,
+                  privateChannel,
+                  site: researchSite,
+                  requestId: message.id,
+                }),
+              )
+            : "로그인 필요로 보류",
+        );
+      } catch {
+        await this.reply(
+          scope.channel,
+          "브라우저 조사를 중단했습니다. 비공개 운영 기록을 확인하세요.",
+        );
+      }
+      return;
+    }
     const blogTopic =
       accessLevel === "superadmin" && this.blog
         ? parseBlogDraftDirective(redacted)
