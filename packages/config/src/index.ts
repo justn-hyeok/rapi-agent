@@ -130,6 +130,10 @@ export const environmentSchema = z
     DELIVERY_INTERVAL_SECONDS: z.coerce.number().int().min(60).default(3600),
     DELIVERY_ENABLED: booleanString.default("true"),
     LEARNER_EXPERIMENT_ENABLED: booleanString,
+    WEB_ENABLED: booleanString,
+    EMAIL_ENABLED: booleanString,
+    DISCORD_OAUTH_CLIENT_ID: z.string().regex(/^\d+$/).optional(),
+    DISCORD_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
     HARNESS_UPDATES_ENABLED: booleanString,
     HARNESS_UPDATES_REPO: z
       .string()
@@ -164,6 +168,20 @@ export const environmentSchema = z
         path: ["LEARNER_EXPERIMENT_ENABLED"],
         message:
           "LEARNER_EXPERIMENT_ENABLED requires WEBHOOK_ENCRYPTION_KEY, RAPI_PUBLIC_BASE_URL and DISCORD_SUPERADMIN_USER_IDS",
+      });
+    }
+    if (
+      value.WEB_ENABLED &&
+      (!value.DISCORD_OAUTH_CLIENT_ID ||
+        !value.DISCORD_OAUTH_CLIENT_SECRET ||
+        !value.RAPI_PUBLIC_BASE_URL ||
+        !value.WEBHOOK_ENCRYPTION_KEY)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["WEB_ENABLED"],
+        message:
+          "WEB_ENABLED requires DISCORD_OAUTH_CLIENT_ID, DISCORD_OAUTH_CLIENT_SECRET, RAPI_PUBLIC_BASE_URL and WEBHOOK_ENCRYPTION_KEY",
       });
     }
     if (

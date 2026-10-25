@@ -17,3 +17,4 @@ export * from "./ports/health-server.js";
 export * from "./ports/runtime-revision.js";
 export * from "./domain/learner.js";
 export * from "./domain/model-budget.js";
+export * from "./domain/web.js";

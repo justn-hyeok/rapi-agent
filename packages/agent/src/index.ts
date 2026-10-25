@@ -10,3 +10,4 @@ export * from "./community-feeds.js";
 export * from "./learner-experiment.js";
 export * from "./harness-updates.js";
 export * from "./harness-updates-io.js";
+export * from "./web-portal.js";

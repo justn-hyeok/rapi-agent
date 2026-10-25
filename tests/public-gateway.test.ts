@@ -6,7 +6,13 @@ import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import { createDiscordInteractionServer } from "../apps/bot/src/discord-http.js";
 import { DiscordCommandService, type RapiAgent } from "@rapi/agent";
-import { learnerLinkKey, signLearnerLink, verifyLearnerLink } from "@rapi/core";
+import {
+  learnerLinkKey,
+  signLearnerLink,
+  signWebUnsubscribe,
+  verifyLearnerLink,
+  webUnsubscribeKey,
+} from "@rapi/core";
 
 async function freePort(): Promise<number> {
   const server = createServer();
@@ -161,6 +167,116 @@ test("public gateway forwards only well-formed learner click links", async () =>
     assert.deepEqual(seen, [token]);
     const forged = `${token.slice(0, -3)}AAA`;
     assert.equal((await fetch(`${base}/r/${forged}`)).status, 404);
+  } finally {
+    if (child) {
+      const closed = once(child, "close");
+      child.kill("SIGTERM");
+      await closed;
+    }
+    bot.closeAllConnections();
+    await new Promise<void>((resolve) => bot.close(() => resolve()));
+  }
+});
+
+test("public gateway forwards only the well-formed web paths and methods", async () => {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const publicHex = publicKey
+    .export({ format: "der", type: "spki" })
+    .subarray(-32)
+    .toString("hex");
+  const token = signWebUnsubscribe(
+    webUnsubscribeKey("w".repeat(32)),
+    "123456789012345678",
+  );
+  const seen: string[] = [];
+  const bot = createDiscordInteractionServer(
+    new DiscordCommandService({} as RapiAgent, { userIds: [] }),
+    publicHex,
+    {
+      web: {
+        async handle(request) {
+          seen.push(`${request.method} ${request.path}`);
+          return {
+            status: 200,
+            headers: { "content-type": "text/plain", "set-cookie": "a=b" },
+            body: "web",
+          };
+        },
+      },
+    },
+  );
+  bot.listen(0, "127.0.0.1");
+  await once(bot, "listening");
+  const address = bot.address();
+  assert.ok(address && typeof address === "object");
+  const port = await freePort();
+  const health = await freePort();
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(process.execPath, ["ops/gateway/run.mjs"], {
+      env: {
+        ...process.env,
+        PORT: String(address.port),
+        RAPI_GATEWAY_PORT: String(port),
+        RAPI_GATEWAY_HEALTH_PORT: String(health),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await once(child.stdout!, "data");
+    const base = `http://127.0.0.1:${port}`;
+    const allowed: Array<[string, string]> = [
+      ["GET", "/auth/discord/login"],
+      ["GET", "/auth/discord/callback?code=a&state=b"],
+      ["POST", "/logout"],
+      ["GET", "/me"],
+      ["POST", "/me/subscription"],
+      ["GET", "/archive"],
+      ["GET", "/archive/weekly-2026-10-19"],
+      ["GET", "/archive/daily-2026-10-19"],
+      ["GET", `/u/${token}`],
+      ["POST", `/u/${token}`],
+    ];
+    for (const [method, path] of allowed) {
+      const reply = await fetch(base + path, {
+        method,
+        ...(method === "POST" ? { body: "csrf=x" } : {}),
+      });
+      assert.equal(reply.status, 200, `${method} ${path}`);
+      assert.equal(reply.headers.get("set-cookie"), "a=b");
+    }
+    assert.equal(seen.length, allowed.length);
+    const denied: Array<[string, string]> = [
+      ["POST", "/auth/discord/login"],
+      ["POST", "/auth/discord/callback"],
+      ["GET", "/auth/discord/other"],
+      ["GET", "/logout"],
+      ["GET", "/me/subscription"],
+      ["POST", "/me"],
+      ["GET", "/me/"],
+      ["GET", "/me/admin"],
+      ["POST", "/archive"],
+      ["GET", "/archive/"],
+      ["GET", "/archive/weekly-2026-10-1"],
+      ["GET", "/archive/monthly-2026-10-19"],
+      ["GET", "/archive/weekly-2026-10-19/x"],
+      ["GET", "/archive/..%2Finteractions"],
+      ["GET", `/u/${token}/x`],
+      ["GET", `/u/${token}x`],
+      ["GET", "/u/abc"],
+      ["PUT", `/u/${token}`],
+      ["DELETE", "/me"],
+    ];
+    for (const [method, path] of denied)
+      assert.equal(
+        (await fetch(base + path, { method })).status,
+        404,
+        `${method} ${path}`,
+      );
+    assert.equal(
+      seen.length,
+      allowed.length,
+      "denied requests never reach the bot",
+    );
   } finally {
     if (child) {
       const closed = once(child, "close");

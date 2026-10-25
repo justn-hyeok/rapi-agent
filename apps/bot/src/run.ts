@@ -16,6 +16,7 @@ import {
   createCommunityFeeds,
   createHarnessUpdates,
   createLearnerExperiment,
+  createWebPortal,
   HarnessUpdateService,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
@@ -38,6 +39,7 @@ import {
   expectedMigrationNames,
   HarnessUpdatesStore,
   ModelUsageStore,
+  WebStore,
   PostgresStore,
 } from "@rapi/db";
 import {
@@ -333,6 +335,8 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
   );
 }
 
+const web = createWebPortal(config, allowlists, new WebStore(store), store);
+
 const server = createDiscordInteractionServer(
   commands,
   config.DISCORD_PUBLIC_KEY,
@@ -352,6 +356,7 @@ const server = createDiscordInteractionServer(
       curation: (batchId, token, input) =>
         agent.briefingCuration(batchId, token, input),
     },
+    ...(web ? { web: { handle: (request) => web.handle(request) } } : {}),
     ...(learner
       ? {
           learner: {

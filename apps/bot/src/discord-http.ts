@@ -371,6 +371,22 @@ export function createDiscordInteractionServer(
         input: { action?: unknown; key?: unknown },
       ): Promise<{ status: number; body: unknown }>;
     };
+    web?: {
+      handle(request: {
+        method: string;
+        path: string;
+        query: URLSearchParams;
+        cookie?: string | undefined;
+        form: URLSearchParams;
+      }): Promise<
+        | {
+            status: number;
+            headers: Record<string, string | string[]>;
+            body: string;
+          }
+        | undefined
+      >;
+    };
     learner?: {
       handle(
         identity: { userId: string; guildId?: string },
@@ -408,6 +424,33 @@ export function createDiscordInteractionServer(
           ...(ready && typeof ready === "object" ? ready : {}),
           revision: runtimeRevision,
         });
+      }
+      if (
+        integrations?.web &&
+        (request.method === "GET" || request.method === "POST") &&
+        /^\/(?:auth\/|me(?:[/?]|$)|archive(?:[/?]|$)|u\/|logout(?:\?|$))/.test(
+          request.url ?? "",
+        )
+      ) {
+        const url = new URL(request.url!, "http://local");
+        let form = new URLSearchParams();
+        if (request.method === "POST") {
+          const raw = await readBody(request);
+          if (raw.length > 4096)
+            return json(response, 413, { error: "too large" });
+          form = new URLSearchParams(raw.toString("utf8"));
+        }
+        const page = await integrations.web.handle({
+          method: request.method,
+          path: url.pathname,
+          query: url.searchParams,
+          cookie: request.headers.cookie,
+          form,
+        });
+        if (page) {
+          response.writeHead(page.status, page.headers);
+          return response.end(page.body);
+        }
       }
       const learnerLink = /^\/r\/([\w.-]{1,200})(?:\?|$)/.exec(
         request.url ?? "",

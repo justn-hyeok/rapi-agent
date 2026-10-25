@@ -15,6 +15,19 @@ const allowed = [
   /^\/webhooks\/[^/?#]+$/,
 ];
 
+// Web pages (Discord login, /me, archive, tokenless unsubscribe). The bot answers 404 for
+// all of them unless WEB_ENABLED is true; the strict shapes here keep everything else out.
+const webRoutes = [
+  ["GET", /^\/auth\/discord\/(?:login|callback)$/],
+  ["POST", /^\/logout$/],
+  ["GET", /^\/me$/],
+  ["POST", /^\/me\/subscription$/],
+  ["GET", /^\/archive$/],
+  ["GET", /^\/archive\/(?:daily|weekly)-\d{4}-\d{2}-\d{2}$/],
+  ["GET", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
+  ["POST", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
+];
+
 function respond(response, status, body) {
   response.writeHead(status, {
     "content-type": "application/json",
@@ -95,7 +108,11 @@ const server = createServer(async (incoming, outgoing) => {
   const briefingFeedback =
     incoming.method === "POST" &&
     /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail|curation)$/.test(path);
+  const webPage = webRoutes.some(
+    ([method, rule]) => incoming.method === method && rule.test(path),
+  );
   if (
+    !webPage &&
     !briefingPage &&
     !learnerLink &&
     !briefingFeedback &&
