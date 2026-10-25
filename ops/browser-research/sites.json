@@ -1,0 +1,43 @@
+{
+  "threads": {
+    "feed": "https://www.threads.com/",
+    "domains": [
+      "threads.com",
+      "www.threads.com",
+      "static.cdninstagram.com",
+      "scontent.cdninstagram.com"
+    ],
+    "maxPosts": 20,
+    "dailyPosts": 100,
+    "maxSeconds": 120
+  },
+  "x": {
+    "feed": "https://x.com/home",
+    "domains": [
+      "x.com",
+      "www.x.com",
+      "api.x.com",
+      "abs.twimg.com",
+      "pbs.twimg.com",
+      "video.twimg.com"
+    ],
+    "maxPosts": 20,
+    "dailyPosts": 180,
+    "maxSeconds": 120
+  },
+  "reddit": {
+    "feed": "https://www.reddit.com/",
+    "domains": [
+      "reddit.com",
+      "www.reddit.com",
+      "oauth.reddit.com",
+      "www.redditstatic.com",
+      "styles.redditmedia.com",
+      "preview.redd.it",
+      "i.redd.it"
+    ],
+    "maxPosts": 20,
+    "dailyPosts": 100,
+    "maxSeconds": 120
+  }
+}

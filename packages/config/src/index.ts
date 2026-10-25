@@ -178,6 +178,15 @@ export const environmentSchema = z
     GITHUB_REPORT_TARGET: z.enum(["dm", "issue"]).default("dm"),
     BLOG_PUBLISH_ENABLED: booleanString,
     BLOG_DRAFTS_ENABLED: booleanString,
+    BROWSER_RESEARCH_ENABLED: booleanString,
+    BROWSER_RESEARCH_BIN: z
+      .string()
+      .min(1)
+      .default("/home/justn/browser-agent/node_modules/.bin/agent-browser"),
+    BROWSER_RESEARCH_AUTH_DIR: z
+      .string()
+      .min(1)
+      .default("/home/justn/secrets/browser-research"),
     BLOG_REPO: z
       .string()
       .regex(/^[\w.-]+\/[\w.-]+$/)

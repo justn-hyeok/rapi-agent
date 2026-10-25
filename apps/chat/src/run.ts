@@ -7,12 +7,16 @@ import {
   createModelClient,
   createPublicQaMeter,
   superadminDmNotifier,
+  AgentResearchBrowser,
+  loadResearchPolicy,
 } from "@rapi/adapters";
 import {
   ChatbotService,
   PublicCommunityService,
   createBlogService,
   createGithubRepoReader,
+  BrowserResearchService,
+  RapiAgent,
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
@@ -37,6 +41,7 @@ import {
   ChatOpsStore,
   GitHubStore,
   ModelUsageStore,
+  BrowserResearchStore,
 } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
@@ -223,6 +228,23 @@ const chat = new ChatOrchestrator(
     discord,
     modelClient ?? undefined,
   ),
+  new BrowserResearchService({
+    enabled: config.BROWSER_RESEARCH_ENABLED,
+    owners: config.DISCORD_SUPERADMIN_USER_IDS ?? [],
+    homeGuildId,
+    model: modelClient,
+    store: new BrowserResearchStore(store),
+    ingest: new RapiAgent(store, discord),
+    policy: loadResearchPolicy,
+    browser: (site, policy, signal) =>
+      new AgentResearchBrowser({
+        site,
+        policy,
+        signal,
+        binary: config.BROWSER_RESEARCH_BIN,
+        authDirectory: config.BROWSER_RESEARCH_AUTH_DIR,
+      }),
+  }),
 );
 const intake =
   githubApp && githubStore && githubPolicy

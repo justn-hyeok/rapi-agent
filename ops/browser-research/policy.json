@@ -1,0 +1,23 @@
+{
+  "default": "deny",
+  "allow": ["launch", "navigate", "snapshot", "scroll", "close"],
+  "deny": [
+    "click",
+    "dblclick",
+    "fill",
+    "type",
+    "press",
+    "select",
+    "check",
+    "uncheck",
+    "evaluate",
+    "download",
+    "upload",
+    "state_load",
+    "state_save",
+    "cookies_get",
+    "cookies_set",
+    "storage_set",
+    "webmcp_invoke"
+  ]
+}
