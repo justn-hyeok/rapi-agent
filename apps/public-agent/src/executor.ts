@@ -67,7 +67,7 @@ export interface PublicCodexResult {
   started: boolean;
   ok: boolean;
   output: string;
-  reason: "exit" | "timeout" | "cancel" | "spawn_error";
+  reason: "exit" | "timeout" | "cancel" | "spawn_error" | "budget";
 }
 
 export async function runPublicCodex(

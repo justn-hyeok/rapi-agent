@@ -11,8 +11,33 @@ const healthPort = Number(process.env.RAPI_GATEWAY_HEALTH_PORT ?? "3601");
 const targetPort = Number(process.env.PORT ?? "3000");
 const allowed = [
   /^\/interactions$/,
+  /^\/github\/webhook$/,
   /^\/webhooks\/v1\/[^/?#]+$/,
   /^\/webhooks\/[^/?#]+$/,
+];
+
+// Web pages (Discord login, /me, /admin pages, archive, tokenless unsubscribe). The bot answers 404 for
+// all of them unless WEB_ENABLED is true; the strict shapes here keep everything else out.
+const webRoutes = [
+  ["GET", /^\/auth\/discord\/(?:login|callback)$/],
+  ["POST", /^\/logout$/],
+  ["GET", /^\/me$/],
+  ["POST", /^\/me\/subscription$/],
+  ["POST", /^\/me\/email$/],
+  ["GET", /^\/admin$/],
+  [
+    "GET",
+    /^\/admin\/(?:subscribe|unsubscribe|sources|deliveries|status|usage|usage-policy|server-config|webhooks)$/,
+  ],
+  [
+    "POST",
+    /^\/admin\/(?:subscribe|unsubscribe|usage-policy|server-config|webhooks)$/,
+  ],
+  ["GET", /^\/archive$/],
+  ["GET", /^\/archive\/(?:daily|weekly)-\d{4}-\d{2}-\d{2}$/],
+  ["GET", /^\/archive\/blog\/(?=.{1,100}$)[a-z0-9]+(?:-[a-z0-9]+)*$/],
+  ["GET", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
+  ["POST", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
 ];
 
 function respond(response, status, body) {
@@ -86,11 +111,33 @@ const server = createServer(async (incoming, outgoing) => {
   const briefingPage =
     ["GET", "HEAD"].includes(incoming.method) &&
     /^\/b\/[0-9a-f-]{36}$/.test(path);
+  // Tracked learner links: one signed token per item and recipient.
+  const learnerLink =
+    incoming.method === "GET" &&
+    /^\/r\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{15,20}\.\d{10}\.[\w-]{43}$/.test(
+      path,
+    );
+  // Email links: a confirm page (GET) and its action (POST), plus provider webhooks.
+  const emailLink =
+    ["GET", "POST"].includes(incoming.method) &&
+    /^\/e\/(?:verify|unsub)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{10}\.[\w-]{43}$/.test(
+      path,
+    );
+  const emailWebhook =
+    incoming.method === "POST" &&
+    /^\/e\/webhook\/(?:resend|postmark)$/.test(path);
   const briefingFeedback =
     incoming.method === "POST" &&
     /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail|curation)$/.test(path);
+  const webPage = webRoutes.some(
+    ([method, rule]) => incoming.method === method && rule.test(path),
+  );
   if (
+    !webPage &&
     !briefingPage &&
+    !learnerLink &&
+    !emailLink &&
+    !emailWebhook &&
     !briefingFeedback &&
     (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path)))
   ) {

@@ -107,5 +107,16 @@ export function routeIntent(input: string): ChatRoute {
     )
   )
     return "execute";
+  // English change requests: an imperative verb first ("fix the login test").
+  // Negations and meta-talk ("don't fix", "how to add") stay questions.
+  if (
+    /^(?:(?:please|pls|can\s+you|could\s+you)\s+)?(?:fix|add|implement|update|refactor|remove|rename|bump|write\s+(?:unit\s+|more\s+)?tests?)\b/i.test(
+      plain,
+    ) &&
+    !/\b(?:don'?t|do\s+not|never|without|instead\s+of|if|whether|should|would|explain|how)\b/i.test(
+      plain,
+    )
+  )
+    return "execute";
   return "answer";
 }

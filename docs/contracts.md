@@ -8,11 +8,10 @@ JSON schema와 DB migration은 Phase 0에서 이 계약을 바탕으로 만든�
 | 용어 | 이 프로젝트에서의 의미 | 신뢰·배포 경계 |
 | --- | --- | --- |
 | `rapi-core` | 정규화, 중복 제거, 구독, 발송, 승인, 작업 상태를 소유하는 TypeScript 도메인 계층 | VM의 신뢰된 애플리케이션 경계 |
-| OMP | 승인된 개발 작업 명세를 받아 코드 수정·검증을 수행하는 외부 실행 harness | 별도 작업공간과 실행 receipt를 가진 비신뢰 callback 발신자 |
 | OpenClaw | Discord, webhook, cron, Gateway를 연결하는 초기 실행 계층 후보 | `rapi-core` runtime port 밖의 교체 가능 어댑터 |
 | ZeroClaw | 저자원 장기 실행과 승인 gate 관점에서 평가할 대안 runtime | OpenClaw와 같은 port 계약을 구현하는 별도 후보 |
 | `DeliveryBatch` | 특정 기간과 구독에 포함할 항목을 동결한 발송 snapshot | 생성 후 항목 집합 불변 |
-| 작업 명세 | 목표, 범위, 완료 조건, 권한을 version으로 고정한 OMP 입력 | 승인과 실행은 정확한 revision에 귀속 |
+| 작업 명세 | 목표, 범위, 완료 조건, 권한을 version으로 고정한 입력(과거 OMP 작업 기록) | 승인과 실행은 정확한 revision에 귀속 |
 
 ## 2. 식별자와 멱등성
 
@@ -54,49 +53,11 @@ canonical URL과 내용 fingerprint가 같은 항목은 자동 삭제하지 않�
   접수와 실제 중단 결과를 각각 기록하며 중단을 성공으로 추정하지 않는다.
 - `failed` 재시도는 같은 revision의 새 execution attempt로 만들고 횟수를 제한한다.
 
-## 4. OMP 어댑터 계약
+## 4. OMP 어댑터 계약 (제거됨)
 
-### dispatch 입력
-
-- `task_id`, `task_revision`, `execution_attempt_id`
-- 대상 저장소, 기준 revision, 전용 작업공간 참조
-- 목표, 비목표, 요구사항, 완료 조건
-- 허용 행위와 금지 행위
-- 승인 ID, 승인 범위, 만료 시각
-- timeout, 결과 보고서 위치, 필요한 검증
-
-### dispatch 응답
-
-- 외부 `receipt_id`
-- 접수 시각과 실행기 identity/version
-- accepted 또는 rejected 상태와 거절 이유
-
-### callback
-
-- `callback_event_id`, `receipt_id`, `execution_attempt_id`
-- 단조 증가하는 `state_version`
-- 상태(`running`, `blocked`, `completed`, `failed`, `cancelled`)
-- 발생 시각, 원인, 결과 보고서와 증거 참조
-- callback signature와 key ID
-
-`rapi-core`는 callback signature, receipt와 attempt 연결, 허용 상태 전이,
-`state_version`을 검증한 뒤 적용한다. callback은 적어도 한 번 전달될 수 있다고
-가정한다. 순서가 뒤바뀐 오래된 callback은 감사 로그에 남기되 현재 상태를
-되돌리지 않는다.
-
-### timeout과 취소
-
-- dispatch timeout은 접수 실패와 실행 실패를 구분한다. receipt 확인 전에는 같은
-  idempotency key로 상태를 조회한 뒤에만 재전송한다.
-- 실행 timeout은 cancel 요청을 보내고 `cancel_requested_at`을 기록한다.
-- cancel 응답이 없으면 `blocked` 또는 `failed`로 운영자에게 알리며 프로세스가
-  중단됐다고 간주하지 않는다.
-
-### 결과 증거
-
-완료 callback 자체는 성공 증거가 아니다. 작업 명세가 요구한 테스트 결과,
-revision/commit, diff 또는 PR, 결과 보고서가 서로 같은 execution attempt를
-가리켜야 `completed`를 최종 확정한다. 필요한 증거가 빠지면 `blocked`다.
+OMP dispatch/callback 계약은 2026-10-24에 제거됐다
+([product-direction](product-direction.md)). 코드 실행은 ChatOps만 사용한다.
+`TaskRequest`·`ExecutionAttempt` 테이블은 기존 행의 보존·삭제 정책을 위해 남는다.
 
 ## 5. 공개 범위 승격
 
@@ -124,26 +85,8 @@ Phase의 manifest가 구체화한다. manifest가 없으면 그 Phase의 완료�
 사용한다. 실행 보고와 확인된 검사, 메모리 내용과 권한을 구분한다. 상세 상태 전이와
 revision/evidence binding은 [ChatOps 계약](chatops-capabilities.md)에 정의한다.
 
-### OMP provider selection
+### Provider selection
 
-`provider` is `codex | cursor | commandcode`, default `codex`. `model` is optional:
-omission resolves to `gpt-5.3-codex-spark` for Codex and remains omitted for Cursor
-and Command Code. Model IDs are 1–128 characters, start with an ASCII letter or
-number, and contain only letters, numbers, `.`, `_`, `:`, `/`, `-`. Codex retains
-its Korean/English model aliases at the service boundary. Invalid IDs/providers
-are rejected; there is no automatic provider fallback.
-
-The service stores provider/model in the task revision before approval. Existing
-specs and resumable receipts without a provider retain Codex/Spark defaults.
-English/Korean aliases are `codex`/`코덱스`, `cursor`/`커서`, and
-`commandcode`/`command code`/`goat`/`고트`/`커맨드코드`. Only an unquoted leading
-`커서로 …`, `고트로 …`, or `cursor: …` directive in the current `/작업` content
-selects a provider. The explicit `공급자` option wins; history and memory never
-participate. The separate natural-language ChatOps executor remains Codex.
-
-CLI invocation uses argument arrays. `repo:write` maps to Codex
-`--approve-for-me`, Cursor `--force`, or Command Code `--yolo`. Result, evidence,
-callback signatures, state versions, and idempotency keys retain their contracts.
-Provider startup/authentication errors fail the receipt with actionable guidance.
-Secrets are filtered from child environments and redacted from execution logs,
-reports and failure messages; only Command Code receives `COMMAND_CODE_API_KEY`.
+`@rapi/contracts`의 `provider`(`codex | cursor | commandcode`)와 `model` 검증 규칙은
+유지한다. 모델 ID는 1–128자이며 ASCII 영문·숫자로 시작하고 영문, 숫자, `.`, `_`, `:`,
+`/`, `-`만 쓴다. 현재 ChatOps 실행기는 Codex만 사용한다.

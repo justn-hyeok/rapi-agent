@@ -1,10 +1,50 @@
 import { request } from "node:http";
 
+/** Reported by the `api` backend only; the codex backend sends none. */
+export interface PublicAgentUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** 0 with `costSource: "unknown"` means the caller prices the tokens itself. */
+  costMicroUsd: number;
+  costSource: "gateway" | "unknown";
+}
+
 export interface PublicAgentResult {
   started: boolean;
   ok: boolean;
   output: string;
-  reason: "exit" | "timeout" | "cancel" | "spawn_error";
+  reason: "exit" | "timeout" | "cancel" | "spawn_error" | "budget";
+  usage?: PublicAgentUsage;
+}
+
+/** The socket is trusted but not assumed well-formed: anything off becomes "no usage". */
+export function parsePublicAgentUsage(
+  value: unknown,
+): PublicAgentUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const count = (entry: unknown): number | undefined =>
+    typeof entry === "number" && Number.isFinite(entry) && entry >= 0
+      ? Math.round(entry)
+      : undefined;
+  const inputTokens = count(raw.inputTokens);
+  const outputTokens = count(raw.outputTokens);
+  const costMicroUsd = count(raw.costMicroUsd);
+  if (
+    typeof raw.model !== "string" ||
+    inputTokens === undefined ||
+    outputTokens === undefined ||
+    costMicroUsd === undefined
+  )
+    return undefined;
+  return {
+    model: raw.model.slice(0, 100),
+    inputTokens,
+    outputTokens,
+    costMicroUsd,
+    costSource: raw.costSource === "gateway" ? "gateway" : "unknown",
+  };
 }
 
 export class PublicAgentClient {
@@ -16,10 +56,14 @@ export class PublicAgentClient {
   answer(
     prompt: string,
     onStarted: () => Promise<void> | void,
+    options?: { feature?: "archive_qa" | "public_qa" },
     signal?: AbortSignal,
   ): Promise<PublicAgentResult> {
     return new Promise((resolve, reject) => {
-      const payload = JSON.stringify({ prompt });
+      const payload = JSON.stringify({
+        prompt,
+        ...(options?.feature ? { feature: options.feature } : {}),
+      });
       let settled = false;
       const complete = (work: () => void): void => {
         if (settled) return;
@@ -85,7 +129,12 @@ export class PublicAgentClient {
               } else if (event.type === "result") {
                 resultReceived = true;
                 void startWork.then(
-                  () => complete(() => resolve(event as PublicAgentResult)),
+                  () =>
+                    complete(() => {
+                      const { usage, ...result } = event as PublicAgentResult;
+                      const parsed = parsePublicAgentUsage(usage);
+                      resolve(parsed ? { ...result, usage: parsed } : result);
+                    }),
                   (error: unknown) =>
                     complete(() =>
                       reject(

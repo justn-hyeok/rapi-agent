@@ -7,7 +7,6 @@ import {
   CommunityFeeds,
   RapiAgent,
   RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
 } from "@rapi/agent";
 import { PostgresStore } from "@rapi/db";
 
@@ -18,11 +17,7 @@ if (!databaseUrl || new URL(databaseUrl).pathname !== "/rapi_test")
 describe("curation feeds", () => {
   it("posts each feed once to its managed channel and skips missing channels", async () => {
     const store = new PostgresStore(databaseUrl);
-    const agent = new RapiAgent(
-      store,
-      new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
-    );
+    const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
     try {
       await store.resetForTests();
       await store.pool.query("DELETE FROM community_posts");

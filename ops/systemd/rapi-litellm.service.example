@@ -1,0 +1,24 @@
+# Example only; not installed by any script. See docs/operations.md "LiteLLM 켜기".
+[Unit]
+Description=LiteLLM gateway for Rapi model calls
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=10min
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=justn
+# Holds LITELLM_MASTER_KEY and the provider keys (OPENAI_API_KEY, ...); chmod 600.
+EnvironmentFile=/etc/rapi/litellm.env
+# Loopback only: nothing outside this machine can reach the gateway.
+ExecStart=/opt/rapi-litellm/bin/litellm --config /etc/rapi/litellm.yaml --host 127.0.0.1 --port 4000
+Restart=on-failure
+RestartSec=30
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

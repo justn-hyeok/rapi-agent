@@ -792,6 +792,80 @@ export class PostgresStore {
     );
   }
 
+  async discordGuildStatus(
+    guildId: string,
+  ): Promise<"pending" | "allowed" | "rejected" | "left" | undefined> {
+    const result = await this.pool.query<{
+      status: "pending" | "allowed" | "rejected" | "left";
+    }>("SELECT status FROM discord_guilds WHERE guild_id=$1", [guildId]);
+    return result.rows[0]?.status;
+  }
+
+  async allowedDiscordGuilds(): Promise<
+    Array<{ guildId: string; allowedAt: Date | null }>
+  > {
+    const result = await this.pool.query<{
+      guild_id: string;
+      decided_at: Date | null;
+    }>("SELECT guild_id,decided_at FROM discord_guilds WHERE status='allowed'");
+    return result.rows.map((row) => ({
+      guildId: row.guild_id,
+      allowedAt: row.decided_at,
+    }));
+  }
+
+  /** Records a join request; true only when the row became pending now. */
+  async requestDiscordGuild(guildId: string, name: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO discord_guilds(guild_id,name,status) VALUES($1,$2,'pending')
+       ON CONFLICT (guild_id) DO UPDATE SET status='pending',name=EXCLUDED.name,requested_at=now(),decided_at=NULL,decided_by=NULL,left_at=NULL
+       WHERE discord_guilds.status='left'
+       RETURNING guild_id`,
+      [guildId, name],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Settles a pending guild once; false when it was already decided. */
+  async decideDiscordGuild(
+    guildId: string,
+    status: "allowed" | "rejected",
+    decidedBy: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE discord_guilds SET status=$2,decided_at=now(),decided_by=$3 WHERE guild_id=$1 AND status='pending'`,
+      [guildId, status, decidedBy],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async markDiscordGuildLeft(guildId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE discord_guilds SET status='left',left_at=now() WHERE guild_id=$1 AND status IN ('allowed','pending')`,
+      [guildId],
+    );
+  }
+
+  async communityGuildPostSent(guildId: string, key: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM community_guild_posts WHERE guild_id=$1 AND key=$2",
+      [guildId, key],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async recordCommunityGuildPost(input: {
+    guildId: string;
+    key: string;
+    channelId: string;
+    messageId: string | null;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO community_guild_posts(guild_id,key,channel_id,message_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [input.guildId, input.key, input.channelId, input.messageId],
+    );
+  }
+
   async communityPostExists(key: string): Promise<boolean> {
     const result = await this.pool.query(
       "SELECT 1 FROM community_posts WHERE key=$1",
@@ -848,15 +922,19 @@ export class PostgresStore {
     return result.rows as never;
   }
 
-  async communityDraft(
-    key: string,
-  ): Promise<{ key: string; feed: string; embeds: unknown[] } | null> {
+  async communityDraft(key: string): Promise<{
+    key: string;
+    feed: string;
+    embeds: unknown[];
+    created: Date;
+  } | null> {
     const result = await this.pool.query<{
       key: string;
       feed: string;
       embeds: unknown[];
+      created: Date;
     }>(
-      "SELECT key,feed,embeds FROM community_posts WHERE key=$1 AND state='draft'",
+      "SELECT key,feed,embeds,posted_at AS created FROM community_posts WHERE key=$1 AND state='draft'",
       [key],
     );
     return result.rows[0] ?? null;
@@ -893,6 +971,396 @@ export class PostgresStore {
       [prefix],
     );
     return result.rows.map((row) => row.key);
+  }
+
+  // --- Phase-0 learner DM experiment (docs/product-direction.md) ---
+
+  async learnerSubscribe(input: {
+    userId: string;
+    guildId: string | null;
+    cadence: "daily" | "weekly";
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO learner_subscriptions(user_id,guild_id,cadence) VALUES($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET cadence=$3,
+        guild_id=COALESCE($2,learner_subscriptions.guild_id),
+        opted_in_at=CASE WHEN learner_subscriptions.opted_out_at IS NULL THEN learner_subscriptions.opted_in_at ELSE now() END,
+        opted_out_at=NULL`,
+      [input.userId, input.guildId, input.cadence],
+    );
+  }
+
+  async learnerSetCadence(
+    userId: string,
+    cadence: "daily" | "weekly",
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET cadence=$2 WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId, cadence],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerOptOut(userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET opted_out_at=now() WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerSetEmailInterest(
+    userId: string,
+    interested: boolean,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_subscriptions SET email_interest=$2 WHERE user_id=$1 AND opted_out_at IS NULL",
+      [userId, interested],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerActiveSubscribers(
+    cadence: "daily" | "weekly",
+  ): Promise<Array<{ userId: string; emailAsked: boolean }>> {
+    const result = await this.pool.query<{
+      user_id: string;
+      asked: boolean;
+    }>(
+      `SELECT user_id, email_asked_at IS NOT NULL OR email_interest IS NOT NULL AS asked
+       FROM learner_subscriptions WHERE cadence=$1 AND opted_out_at IS NULL ORDER BY opted_in_at`,
+      [cadence],
+    );
+    return result.rows.map((row) => ({
+      userId: row.user_id,
+      emailAsked: row.asked,
+    }));
+  }
+
+  async learnerMarkEmailAsked(userId: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_subscriptions SET email_asked_at=now() WHERE user_id=$1 AND email_asked_at IS NULL",
+      [userId],
+    );
+  }
+
+  /** Posts of the learner feeds after `since`. New free models are recorded as markers, so those count; drafts and check markers do not. */
+  async learnerCandidatePosts(
+    since: Date,
+    feeds: string[],
+  ): Promise<
+    Array<{
+      key: string;
+      feed: string;
+      title: string | null;
+      embeds: unknown;
+      data: unknown;
+    }>
+  > {
+    const result = await this.pool.query<{
+      key: string;
+      feed: string;
+      title: string | null;
+      embeds: unknown;
+      data: unknown;
+    }>(
+      `SELECT key,feed,title,embeds,data FROM community_posts
+       WHERE (state='posted' OR (state='marker' AND starts_with(key,'free-model:')))
+         AND feed=ANY($2) AND posted_at>$1 ORDER BY posted_at DESC LIMIT 200`,
+      [since, feeds],
+    );
+    return result.rows;
+  }
+
+  async learnerLastWindowEnd(
+    cadence: "daily" | "weekly",
+  ): Promise<Date | null> {
+    const result = await this.pool.query<{ at: Date | null }>(
+      "SELECT max(window_end) AS at FROM learner_issues WHERE cadence=$1 AND state<>'empty'",
+      [cadence],
+    );
+    return result.rows[0]?.at ?? null;
+  }
+
+  /** Creates the period's issue once; null when the period already has one. */
+  async learnerCreateIssue(input: {
+    cadence: "daily" | "weekly";
+    periodKey: string;
+    windowStart: Date;
+    windowEnd: Date;
+    items: Array<{
+      postKey: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>;
+  }): Promise<string | null> {
+    return this.transaction(async (client) => {
+      const id = randomUUID();
+      const inserted = await client.query(
+        `INSERT INTO learner_issues(id,cadence,period_key,state,window_start,window_end)
+         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (cadence,period_key) DO NOTHING`,
+        [
+          id,
+          input.cadence,
+          input.periodKey,
+          input.items.length ? "pending" : "empty",
+          input.windowStart,
+          input.windowEnd,
+        ],
+      );
+      if (!inserted.rowCount) return null;
+      for (const [position, item] of input.items.entries())
+        await client.query(
+          `INSERT INTO learner_issue_items(id,issue_id,position,section,post_key,title,summary,url)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            randomUUID(),
+            id,
+            position,
+            item.section,
+            item.postKey,
+            item.title,
+            item.summary,
+            item.url,
+          ],
+        );
+      return input.items.length ? id : null;
+    });
+  }
+
+  async learnerIssueExists(
+    cadence: "daily" | "weekly",
+    periodKey: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "SELECT 1 FROM learner_issues WHERE cadence=$1 AND period_key=$2",
+      [cadence, periodKey],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerIssue(id: string): Promise<{
+    id: string;
+    cadence: "daily" | "weekly";
+    periodKey: string;
+    state: string;
+    items: Array<{
+      id: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>;
+  } | null> {
+    const issue = await this.pool.query<{
+      id: string;
+      cadence: "daily" | "weekly";
+      period_key: string;
+      state: string;
+    }>("SELECT id,cadence,period_key,state FROM learner_issues WHERE id=$1", [
+      id,
+    ]);
+    const row = issue.rows[0];
+    if (!row) return null;
+    const items = await this.pool.query<{
+      id: string;
+      section: "core" | "tools";
+      title: string;
+      summary: string;
+      url: string;
+    }>(
+      "SELECT id,section,title,summary,url FROM learner_issue_items WHERE issue_id=$1 ORDER BY position",
+      [id],
+    );
+    return {
+      id: row.id,
+      cadence: row.cadence,
+      periodKey: row.period_key,
+      state: row.state,
+      items: items.rows,
+    };
+  }
+
+  /** Issues whose owner preview still has to go out (recent ones only). */
+  async learnerIssuesAwaitingPreview(): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM learner_issues WHERE state='pending' AND preview_sent_at IS NULL
+       AND created_at>now()-interval '24 hours' ORDER BY created_at`,
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async learnerMarkPreviewSent(id: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_issues SET preview_sent_at=now() WHERE id=$1",
+      [id],
+    );
+  }
+
+  /** Previews sent between `from` and `to` that nobody decided and nobody was reminded about. */
+  async learnerIssuesNeedingReminder(from: Date, to: Date): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM learner_issues WHERE state='pending' AND preview_reminded_at IS NULL
+       AND preview_sent_at>=$1 AND preview_sent_at<=$2 ORDER BY preview_sent_at`,
+      [from, to],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  /** True for the one caller that may send the reminder. */
+  async learnerClaimPreviewReminder(id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_issues SET preview_reminded_at=now() WHERE id=$1 AND state='pending' AND preview_reminded_at IS NULL",
+      [id],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  /** Moves a pending issue to 'sending' or 'skipped'; only one caller can win. */
+  async learnerDecideIssue(
+    id: string,
+    to: "sending" | "skipped",
+    actorId: string,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_issues SET state=$2,decided_by=$3,decided_at=now() WHERE id=$1 AND state='pending'",
+      [id, to, actorId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerFinishIssue(id: string): Promise<void> {
+    await this.pool.query(
+      "UPDATE learner_issues SET state='sent',sent_at=now() WHERE id=$1 AND state='sending'",
+      [id],
+    );
+  }
+
+  async learnerIssueState(id: string): Promise<string | null> {
+    const result = await this.pool.query<{ state: string }>(
+      "SELECT state FROM learner_issues WHERE id=$1",
+      [id],
+    );
+    return result.rows[0]?.state ?? null;
+  }
+
+  async learnerRecordDelivery(input: {
+    issueId: string;
+    userId: string;
+    state: "sent" | "failed";
+    error?: string;
+    providerId?: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO learner_deliveries(issue_id,user_id,state,error,provider_id) VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT (issue_id,user_id) DO NOTHING`,
+      [
+        input.issueId,
+        input.userId,
+        input.state,
+        input.error ?? null,
+        input.providerId ?? null,
+      ],
+    );
+  }
+
+  async learnerDeliveryCounts(
+    issueId: string,
+  ): Promise<{ sent: number; failed: number }> {
+    const result = await this.pool.query<{ state: string; n: string }>(
+      "SELECT state,count(*) AS n FROM learner_deliveries WHERE issue_id=$1 GROUP BY state",
+      [issueId],
+    );
+    const count = (state: string) =>
+      Number(result.rows.find((row) => row.state === state)?.n ?? 0);
+    return { sent: count("sent"), failed: count("failed") };
+  }
+
+  /** The stored URL of an item in a sent issue; the only redirect target. */
+  async learnerItemUrl(itemId: string): Promise<string | null> {
+    const result = await this.pool.query<{ url: string }>(
+      `SELECT i.url FROM learner_issue_items i JOIN learner_issues s ON s.id=i.issue_id
+       WHERE i.id=$1 AND s.state IN ('sending','sent')`,
+      [itemId],
+    );
+    return result.rows[0]?.url ?? null;
+  }
+
+  async learnerRecordClick(itemId: string, userId: string): Promise<void> {
+    await this.pool.query(
+      "INSERT INTO learner_clicks(item_id,user_id) VALUES($1,$2)",
+      [itemId, userId],
+    );
+  }
+
+  /** Counts a reply only from an active subscriber; stores no message content. */
+  async learnerRecordReply(userId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO learner_replies(user_id)
+       SELECT $1::text WHERE EXISTS (SELECT 1 FROM learner_subscriptions WHERE user_id=$1 AND opted_out_at IS NULL)`,
+      [userId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerReportClaim(periodKey: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "INSERT INTO learner_reports(period_key) VALUES($1) ON CONFLICT DO NOTHING",
+      [periodKey],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async learnerReportData(
+    from: Date,
+    to: Date,
+  ): Promise<{
+    active: number;
+    daily: number;
+    weekly: number;
+    optOutsWeek: number;
+    optOutsTotal: number;
+    clickers: number;
+    repliesWeek: number;
+    repliesTotal: number;
+    emailYes: number;
+    emailNo: number;
+    emailUnknown: number;
+  }> {
+    const result = await this.pool.query<Record<string, string>>(
+      `SELECT
+        count(*) FILTER (WHERE opted_out_at IS NULL) AS active,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND cadence='daily') AS daily,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND cadence='weekly') AS weekly,
+        count(*) FILTER (WHERE opted_out_at>=$1 AND opted_out_at<$2) AS opt_week,
+        count(*) FILTER (WHERE opted_out_at IS NOT NULL) AS opt_total,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND EXISTS (
+          SELECT 1 FROM learner_clicks c WHERE c.user_id=learner_subscriptions.user_id AND c.at>=$1 AND c.at<$2)) AS clickers,
+        (SELECT count(*) FROM learner_replies WHERE at>=$1 AND at<$2) AS replies_week,
+        (SELECT count(*) FROM learner_replies) AS replies_total,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS TRUE) AS email_yes,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS FALSE) AS email_no,
+        count(*) FILTER (WHERE opted_out_at IS NULL AND email_interest IS NULL) AS email_unknown
+       FROM learner_subscriptions`,
+      [from, to],
+    );
+    const row = result.rows[0]!;
+    const n = (key: string) => Number(row[key] ?? 0);
+    return {
+      active: n("active"),
+      daily: n("daily"),
+      weekly: n("weekly"),
+      optOutsWeek: n("opt_week"),
+      optOutsTotal: n("opt_total"),
+      clickers: n("clickers"),
+      repliesWeek: n("replies_week"),
+      repliesTotal: n("replies_total"),
+      emailYes: n("email_yes"),
+      emailNo: n("email_no"),
+      emailUnknown: n("email_unknown"),
+    };
   }
 
   /** Recent public posts from sources marked official (AI tool blogs). */
@@ -2263,265 +2731,6 @@ export class PostgresStore {
     };
   }
 
-  async createTask(
-    requesterId: string,
-    specification: Record<string, unknown>,
-    riskLevel: string,
-  ): Promise<{ taskId: string; revision: number }> {
-    return this.transaction(async (client) => {
-      const taskId = randomUUID();
-      await client.query(
-        "INSERT INTO task_requests (id,requester_id,state,risk_level) VALUES ($1,$2,'awaiting_approval',$3)",
-        [taskId, requesterId, riskLevel],
-      );
-      await client.query(
-        "INSERT INTO task_revisions (task_id,revision,specification,change_reason) VALUES ($1,1,$2::jsonb,'initial request')",
-        [taskId, JSON.stringify(specification)],
-      );
-      return { taskId, revision: 1 };
-    });
-  }
-
-  async reviseTask(
-    taskId: string,
-    specification: Record<string, unknown>,
-  ): Promise<number> {
-    return this.transaction(async (client) => {
-      const current = await client.query<{ current_revision: number }>(
-        "SELECT current_revision FROM task_requests WHERE id=$1 FOR UPDATE",
-        [taskId],
-      );
-      if (!current.rows[0]) throw new Error("Task not found");
-      const revision = current.rows[0].current_revision + 1;
-      await client.query(
-        "INSERT INTO task_revisions (task_id,revision,specification,change_reason) VALUES ($1,$2,$3::jsonb,'request revised')",
-        [taskId, revision, JSON.stringify(specification)],
-      );
-      await client.query(
-        "UPDATE task_requests SET current_revision=$2,state='awaiting_approval',updated_at=now() WHERE id=$1",
-        [taskId, revision],
-      );
-      await client.query(
-        "UPDATE approvals SET decision='expired',updated_at=now() WHERE task_id=$1 AND decision='approved'",
-        [taskId],
-      );
-      return revision;
-    });
-  }
-
-  async approveTask(
-    taskId: string,
-    revision: number,
-    approverId: string,
-    permissions: string[],
-    expiresAt: Date,
-    messageRef: string,
-  ): Promise<string> {
-    return this.transaction(async (client) => {
-      const task = await client.query<{
-        current_revision: number;
-        state: string;
-      }>(
-        "SELECT current_revision,state FROM task_requests WHERE id=$1 FOR UPDATE",
-        [taskId],
-      );
-      if (
-        !task.rows[0] ||
-        task.rows[0].current_revision !== revision ||
-        task.rows[0].state !== "awaiting_approval"
-      )
-        throw new Error("Task revision is not awaiting approval");
-      const taskRevision = await client.query<{
-        specification: Record<string, unknown>;
-      }>(
-        "SELECT specification FROM task_revisions WHERE task_id=$1 AND revision=$2",
-        [taskId, revision],
-      );
-      const requested = Array.isArray(
-        taskRevision.rows[0]?.specification.permissions,
-      )
-        ? taskRevision.rows[0].specification.permissions.map(String)
-        : [];
-      const knownPermissions = new Set([
-        "repo:read",
-        "repo:write",
-        "commit:create",
-        "push",
-        "pull_request:create",
-        "deploy",
-      ]);
-      if (
-        permissions.some(
-          (permission) =>
-            !knownPermissions.has(permission) ||
-            !requested.includes(permission),
-        )
-      )
-        throw new Error("Approval permissions exceed the requested task scope");
-      const approvalId = randomUUID();
-      await client.query(
-        "INSERT INTO approvals (id,task_id,task_revision,approver_id,permission_scope,decision,expires_at,discord_message_ref) VALUES ($1,$2,$3,$4,$5::jsonb,'approved',$6,$7)",
-        [
-          approvalId,
-          taskId,
-          revision,
-          approverId,
-          JSON.stringify(permissions),
-          expiresAt,
-          messageRef,
-        ],
-      );
-      await client.query(
-        "UPDATE task_requests SET state='approved',updated_at=now() WHERE id=$1",
-        [taskId],
-      );
-      return approvalId;
-    });
-  }
-
-  async prepareDispatch(
-    taskId: string,
-    executor: string,
-  ): Promise<{
-    attemptId: string;
-    specification: Record<string, unknown>;
-    idempotencyKey: string;
-    existingReceipt: string | null;
-  }> {
-    return this.transaction(async (client) => {
-      const task = await client.query<{
-        current_revision: number;
-        state: string;
-      }>(
-        "SELECT current_revision,state FROM task_requests WHERE id=$1 FOR UPDATE",
-        [taskId],
-      );
-      const row = task.rows[0];
-      if (!row) throw new Error("Task not found");
-      const approval = await client.query<{
-        id: string;
-        permission_scope: string[];
-        expires_at: Date;
-      }>(
-        "SELECT id,permission_scope,expires_at FROM approvals WHERE task_id=$1 AND task_revision=$2 AND decision='approved' AND expires_at>now() ORDER BY created_at DESC LIMIT 1",
-        [taskId, row.current_revision],
-      );
-      if (!approval.rows[0])
-        throw new Error(
-          "A valid approval for the current revision is required",
-        );
-      const revision = await client.query<{
-        specification: Record<string, unknown>;
-      }>(
-        "SELECT specification FROM task_revisions WHERE task_id=$1 AND revision=$2",
-        [taskId, row.current_revision],
-      );
-      const key = `${taskId}:${row.current_revision}:${executor}`;
-      const attemptId = randomUUID();
-      await client.query(
-        `INSERT INTO execution_attempts (id,task_id,task_revision,executor,idempotency_key,state)
-         VALUES ($1,$2,$3,$4,$5,'dispatched') ON CONFLICT (idempotency_key) DO NOTHING`,
-        [attemptId, taskId, row.current_revision, executor, key],
-      );
-      const attempt = await client.query<{
-        id: string;
-        receipt_id: string | null;
-      }>(
-        "SELECT id,receipt_id FROM execution_attempts WHERE idempotency_key=$1",
-        [key],
-      );
-      await client.query(
-        "UPDATE task_requests SET state='dispatched',updated_at=now() WHERE id=$1 AND state='approved'",
-        [taskId],
-      );
-      return {
-        attemptId: attempt.rows[0]!.id,
-        specification: {
-          ...revision.rows[0]!.specification,
-          task_id: taskId,
-          task_revision: row.current_revision,
-          execution_attempt_id: attempt.rows[0]!.id,
-          workspace_ref: `omp:${attempt.rows[0]!.id}`,
-          approval_id: approval.rows[0]!.id,
-          approval_expires_at: approval.rows[0]!.expires_at.toISOString(),
-          permissions: approval.rows[0]!.permission_scope,
-        },
-        idempotencyKey: key,
-        existingReceipt: attempt.rows[0]!.receipt_id,
-      };
-    });
-  }
-
-  async recordDispatch(
-    attemptId: string,
-    receiptId: string,
-    accepted: boolean,
-    reason?: string,
-  ): Promise<void> {
-    await this.pool.query(
-      "UPDATE execution_attempts SET receipt_id=$2,state=$3,result=$4::jsonb,updated_at=now() WHERE id=$1",
-      [
-        attemptId,
-        receiptId,
-        accepted ? "running" : "failed",
-        JSON.stringify(reason ? { reason } : {}),
-      ],
-    );
-    await this.pool.query(
-      `UPDATE task_requests t SET state=$2,updated_at=now() FROM execution_attempts e
-       WHERE e.id=$1 AND t.id=e.task_id`,
-      [attemptId, accepted ? "running" : "failed"],
-    );
-  }
-
-  async applyCallback(
-    callbackId: string,
-    attemptId: string,
-    receiptId: string,
-    stateVersion: number,
-    state: string,
-    payload: Record<string, unknown>,
-  ): Promise<boolean> {
-    return this.transaction(async (client) => {
-      const attempt = await client.query<{
-        state_version: number;
-        task_id: string;
-        receipt_id: string | null;
-      }>(
-        "SELECT state_version,task_id,receipt_id FROM execution_attempts WHERE id=$1 FOR UPDATE",
-        [attemptId],
-      );
-      const row = attempt.rows[0];
-      if (!row) throw new Error("Execution attempt not found");
-      if (!row.receipt_id || row.receipt_id !== receiptId)
-        throw new Error("OMP receipt does not match the execution attempt");
-      const applied = stateVersion > row.state_version;
-      await client.query(
-        "INSERT INTO callback_events (callback_event_id,execution_attempt_id,state_version,payload,applied) VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (callback_event_id) DO NOTHING",
-        [callbackId, attemptId, stateVersion, JSON.stringify(payload), applied],
-      );
-      if (!applied) return false;
-      await client.query(
-        "UPDATE execution_attempts SET state=$2,state_version=$3,result=$4::jsonb,updated_at=now() WHERE id=$1",
-        [attemptId, state, stateVersion, JSON.stringify(payload)],
-      );
-      await client.query(
-        "UPDATE task_requests SET state=$2,updated_at=now() WHERE id=$1",
-        [row.task_id, state],
-      );
-      return true;
-    });
-  }
-
-  async executionOwner(attemptId: string): Promise<string> {
-    const result = await this.pool.query<{ requester_id: string }>(
-      `SELECT t.requester_id FROM execution_attempts e JOIN task_requests t ON t.id=e.task_id WHERE e.id=$1`,
-      [attemptId],
-    );
-    if (!result.rows[0]) throw new Error("Execution attempt not found");
-    return result.rows[0].requester_id;
-  }
-
   async taskState(taskId: string): Promise<string> {
     const result = await this.pool.query<{ state: string }>(
       "SELECT state FROM task_requests WHERE id=$1",
@@ -2531,40 +2740,26 @@ export class PostgresStore {
     return result.rows[0].state;
   }
 
-  async latestAwaitingTask(ownerId: string): Promise<{
-    id: string;
-    revision: number;
-    permissions: string[];
-  } | null> {
-    const result = await this.pool.query<{
-      id: string;
-      current_revision: number;
-      permissions: string[] | null;
-    }>(
-      `SELECT t.id,t.current_revision,r.specification->'permissions' AS permissions
-       FROM task_requests t JOIN task_revisions r
-       ON r.task_id=t.id AND r.revision=t.current_revision
-       WHERE t.requester_id=$1 AND t.state='awaiting_approval'
-       ORDER BY t.updated_at DESC LIMIT 1`,
-      [ownerId],
-    );
-    const row = result.rows[0];
-    return row
-      ? {
-          id: row.id,
-          revision: row.current_revision,
-          permissions: Array.isArray(row.permissions)
-            ? row.permissions.map(String)
-            : [],
-        }
-      : null;
-  }
-
   async latestCancellableTask(ownerId: string): Promise<string | null> {
     const result = await this.pool.query<{ id: string }>(
       `SELECT id FROM task_requests WHERE requester_id=$1
        AND state NOT IN ('completed','failed','rejected','expired','cancelled')
        ORDER BY updated_at DESC LIMIT 1`,
+      [ownerId],
+    );
+    return result.rows[0]?.id ?? null;
+  }
+
+  /**
+   * `/취소` for ChatOps: marks the owner's newest running run `cancel_requested`.
+   * The chat process polls this phase and stops the process; null when nothing runs.
+   */
+  async requestChatOpsCancel(ownerId: string): Promise<string | null> {
+    const result = await this.pool.query<{ id: string }>(
+      `UPDATE chatops_runs SET phase='cancel_requested'
+       WHERE id=(SELECT id FROM chatops_runs WHERE owner_id=$1 AND phase='running'
+                 ORDER BY created_at DESC LIMIT 1) AND phase='running'
+       RETURNING id`,
       [ownerId],
     );
     return result.rows[0]?.id ?? null;
@@ -2645,27 +2840,6 @@ export class PostgresStore {
       [channelId, limit],
     );
     return result.rows;
-  }
-
-  async latestTaskExecution(
-    taskId: string,
-  ): Promise<
-    { id: string; receiptId: string | null; state: string } | undefined
-  > {
-    const result = await this.pool.query<{
-      id: string;
-      receipt_id: string | null;
-      state: string;
-    }>(
-      `SELECT e.id,e.receipt_id,e.state FROM execution_attempts e
-       JOIN task_requests t ON t.id=e.task_id AND t.current_revision=e.task_revision
-       WHERE e.task_id=$1 ORDER BY e.created_at DESC LIMIT 1`,
-      [taskId],
-    );
-    const row = result.rows[0];
-    return row
-      ? { id: row.id, receiptId: row.receipt_id, state: row.state }
-      : undefined;
   }
 
   async cancelTask(taskId: string): Promise<void> {

@@ -10,7 +10,6 @@ import {
   CrawlerCollector,
   RapiAgent,
   RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
 } from "@rapi/agent";
 
 test(
@@ -34,11 +33,7 @@ test(
       process.env.CRAWLER_PUBLIC_TEST_ENDPOINT!,
       process.env.CRAWLER_CALLER_TOKEN!,
     );
-    const agent = new RapiAgent(
-      store,
-      new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
-    );
+    const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
     const collector = new CrawlerCollector(agent, client);
     try {
       for (const name of [

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -8,7 +8,6 @@ import {
   DiscordCommandService,
   RapiAgent,
   RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
 } from "@rapi/agent";
 import { PostgresStore } from "@rapi/db";
 
@@ -38,11 +37,7 @@ const githubFixture = {
 describe("rapi-agent MVP", () => {
   it("retains original malformed source payloads before normalization fails", async () => {
     const store = new PostgresStore(databaseUrl);
-    const agent = new RapiAgent(
-      store,
-      new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
-    );
+    const agent = new RapiAgent(store, new RecordingDeliveryAdapter());
     try {
       await store.resetForTests();
       const source = await agent.createSource(
@@ -70,8 +65,7 @@ describe("rapi-agent MVP", () => {
   it("passes all eight product completion scenarios", async () => {
     const store = new PostgresStore(databaseUrl);
     const delivery = new RecordingDeliveryAdapter();
-    const omp = new RecordingOmpAdapter();
-    const agent = new RapiAgent(store, delivery, omp);
+    const agent = new RapiAgent(store, delivery);
     const outputRoot = `/tmp/rapi-e2e-${randomUUID()}`;
     await rm(outputRoot, { recursive: true, force: true });
     await mkdir(outputRoot, { recursive: true });
@@ -410,147 +404,6 @@ describe("rapi-agent MVP", () => {
         batchesBeforeRetry.rows[0]!.count,
       );
 
-      const taskResult = await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        {
-          name: "task",
-          options: {
-            specification: {
-              goal: "Implement fixture",
-              repository: "example/rapi",
-              base_revision: "abc123",
-              permissions: ["repo:write"],
-              acceptance_criteria: ["tests pass"],
-            },
-          },
-        },
-      );
-      const taskId = String(taskResult.data?.taskId);
-      const approval = await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        {
-          name: "approve",
-          options: {
-            taskId,
-            revision: 1,
-            permissions: ["repo:write"],
-            messageRef: "discord-message-1",
-          },
-        },
-      );
-      const attemptId = String(approval.data?.attemptId);
-      const secondDispatch = await agent.dispatchTask(taskId);
-      assert.equal(secondDispatch.attemptId, attemptId);
-      assert.equal(omp.dispatches.length, 1);
-
-      const revisionTask = await agent.createTask("owner-1", {
-        goal: "Revision invalidation",
-        permissions: ["repo:write"],
-      });
-      await agent.approveTask(
-        revisionTask.taskId,
-        1,
-        "owner-1",
-        ["repo:write"],
-        "discord-message-2",
-      );
-      assert.equal(
-        await store.reviseTask(revisionTask.taskId, {
-          goal: "Changed revision",
-          permissions: ["repo:write"],
-        }),
-        2,
-      );
-      await assert.rejects(
-        agent.dispatchTask(revisionTask.taskId),
-        /valid approval for the current revision is required/,
-      );
-
-      const callback = Buffer.from(
-        JSON.stringify({
-          callback_event_id: "callback-1",
-          receipt_id: String(approval.data?.receiptId),
-          execution_attempt_id: attemptId,
-          state_version: 2,
-          state: "completed",
-          result_report_ref: "reports/result.md",
-          evidence_refs: [
-            "commit:deadbeef",
-            "test:passed",
-            "pr:https://github.com/example/rapi/pull/2",
-          ],
-        }),
-      );
-      const secret = "callback-test-secret";
-      const signature = createHmac("sha256", secret)
-        .update(callback)
-        .digest("hex");
-      assert.equal(
-        await agent.receiveOmpCallback(callback, signature, secret),
-        true,
-      );
-      assert.equal(await store.taskState(taskId), "completed");
-      assert.match(delivery.messages.at(-1)!.payload.text, /completed/);
-      assert.equal(
-        await agent.receiveOmpCallback(callback, signature, secret),
-        false,
-      );
-
-      const simpleTask = await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        {
-          name: "task",
-          options: { content: "한글로 간단한 작업을 수행한다" },
-        },
-      );
-      assert.match(simpleTask.messages[0]!, /\/승인/);
-      const simpleApproval = await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        { name: "approve", options: {} },
-      );
-      assert.match(simpleApproval.messages[0]!, /OMP에 전달/);
-      assert.equal(
-        omp.dispatches.at(-1)?.specification.goal,
-        "한글로 간단한 작업을 수행한다",
-      );
-      assert.equal(omp.dispatches.at(-1)?.specification.model, "gpt-5.6-sol");
-
-      assert.equal(omp.dispatches.at(-1)?.specification.provider, "codex");
-      for (const options of [
-        { content: "커서로 오류 고쳐줘" },
-        { content: "고트로 오류 고쳐줘", model: "vendor/Model:1" },
-        { content: "오류 고쳐줘", provider: "command code" },
-      ]) {
-        const selectedTask = await commands.execute(
-          { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-          { name: "task", options },
-        );
-        await commands.execute(
-          { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-          { name: "approve", options: { taskId: selectedTask.data?.taskId } },
-        );
-        const spec = omp.dispatches.at(-1)!.specification;
-        assert.equal(
-          spec.provider,
-          options.content.startsWith("커서") ? "cursor" : "commandcode",
-        );
-        assert.equal(spec.model, options.model);
-        assert.equal(spec.goal, "오류 고쳐줘");
-      }
-
-      const astraTask = await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        {
-          name: "task",
-          options: { content: "오류를 고친다", model: "아스트라" },
-        },
-      );
-      await commands.execute(
-        { userId: "owner-1", guildId: "guild-1", channelId: "channel-1" },
-        { name: "approve", options: { taskId: astraTask.data?.taskId } },
-      );
-      assert.equal(omp.dispatches.at(-1)?.specification.model, "gpt-6-astra");
-
       await assert.rejects(
         commands.execute(
           { userId: "intruder", guildId: "guild-1", channelId: "channel-1" },
@@ -562,8 +415,8 @@ describe("rapi-agent MVP", () => {
         commands.execute(
           { userId: "owner-1", guildId: "wrong", channelId: "channel-1" },
           {
-            name: "approve",
-            options: { taskId, revision: 1, permissions: [], messageRef: "x" },
+            name: "cancel",
+            options: {},
           },
         ),
         /guild is not allowed/,
@@ -579,7 +432,7 @@ describe("rapi-agent MVP", () => {
       const cursorBeforeRestart = await store.getCursor(rssSource);
       await store.close();
       const restartedStore = new PostgresStore(databaseUrl);
-      const restartedAgent = new RapiAgent(restartedStore, delivery, omp);
+      const restartedAgent = new RapiAgent(restartedStore, delivery);
       assert.deepEqual(
         await restartedStore.getCursor(rssSource),
         cursorBeforeRestart,
@@ -604,7 +457,6 @@ describe("rapi-agent MVP", () => {
             ingestionFixtureSourceItems: 2,
             totalSourceItems: 3,
             batchId,
-            taskId,
             databaseRestartSafe: true,
           },
           null,
@@ -655,7 +507,7 @@ describe("rapi-agent MVP", () => {
   it("marks an empty subscription batch delivered without attempts", async () => {
     const store = new PostgresStore(databaseUrl);
     const delivery = new RecordingDeliveryAdapter();
-    const agent = new RapiAgent(store, delivery, new RecordingOmpAdapter());
+    const agent = new RapiAgent(store, delivery);
 
     try {
       await store.resetForTests();

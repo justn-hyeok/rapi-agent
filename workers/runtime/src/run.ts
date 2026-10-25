@@ -10,13 +10,20 @@ import {
   FeedSourceAdapter,
   GitHubSourceAdapter,
   GitHubStarRecommender,
+  ApiSummarizer,
   CodexSummarizer,
+  GitHubAppClient,
   GitHubRepositoryInfo,
-  OmpHttpAdapter,
   SmtpDeliveryAdapter,
+  createModelClient,
+  superadminDmNotifier,
 } from "@rapi/adapters";
 import {
+  createBlogService,
   createCommunityFeeds,
+  createGitHubReport,
+  createHarnessUpdates,
+  createLearnerExperiment,
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
   RapiAgent,
@@ -25,7 +32,14 @@ import {
 } from "@rapi/agent";
 import { CrawlerClient } from "@rapi/crawler-client";
 import { loadEnvironment } from "@rapi/config";
-import { PostgresStore } from "@rapi/db";
+import {
+  BlogPostsStore,
+  GitHubStore,
+  HarnessUpdatesStore,
+  ModelUsageStore,
+  PostgresStore,
+} from "@rapi/db";
+import { readFile } from "node:fs/promises";
 import { requireHealthyDeliveryResults } from "./delivery-loop.js";
 import { deliveryReadiness } from "./delivery-readiness.js";
 import { shouldRunDelivery } from "./delivery-schedule.js";
@@ -64,17 +78,24 @@ const delivery = new CompositeDeliveryAdapter({
   discord_channel: discord,
   email,
 });
-const omp = config.OMP_ENDPOINT
-  ? new OmpHttpAdapter(config.OMP_ENDPOINT)
-  : { dispatch: () => Promise.reject(new Error("OMP is not configured")) };
+// Null unless MODEL_API_BASE_URL and MODEL_API_KEY are set; callers fall back to the CLI.
+const modelClient = createModelClient(
+  config,
+  new ModelUsageStore(store),
+  superadminDmNotifier(discord, config.DISCORD_SUPERADMIN_USER_IDS ?? []),
+);
 const summarizer =
   process.env.SUMMARY_MODEL === "off"
     ? undefined
-    : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
+    : config.SUMMARIZER_BACKEND === "api" && modelClient
+      ? new ApiSummarizer(
+          modelClient,
+          `api:${config.MODEL_FOR_SUMMARY ?? config.MODEL_DEFAULT}`,
+        )
+      : new CodexSummarizer(process.env.SUMMARY_MODEL || DEFAULT_SUMMARY_MODEL);
 const agent = new RapiAgent(
   store,
   delivery,
-  omp,
   summarizer,
   new GitHubRepositoryInfo(config.GITHUB_READ_TOKEN),
   config.WEBHOOK_ENCRYPTION_KEY && config.RAPI_PUBLIC_BASE_URL
@@ -100,6 +121,7 @@ const communityFeeds = config.COMMUNITY_GUILD_ID
       store,
       summarizer,
       guildId: config.COMMUNITY_GUILD_ID,
+      extraGuildIds: config.DISCORD_ALLOWED_GUILD_IDS ?? [],
       botToken: config.DISCORD_BOT_TOKEN,
       root: process.cwd(),
       ...(config.GITHUB_READ_TOKEN
@@ -123,6 +145,44 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
     )
   : undefined;
 
+// The shared metered client (above) also feeds blog drafts and the weekly repo
+// report; both degrade when it is null.
+const githubReport =
+  config.GITHUB_APP_ENABLED &&
+  config.GITHUB_APP_ID &&
+  config.GITHUB_APP_PRIVATE_KEY_PATH
+    ? createGitHubReport(config, {
+        store: new GitHubStore(store),
+        app: new GitHubAppClient({
+          appId: config.GITHUB_APP_ID,
+          privateKey: await readFile(
+            config.GITHUB_APP_PRIVATE_KEY_PATH,
+            "utf8",
+          ),
+        }),
+        delivery,
+        model: modelClient ?? undefined,
+      })
+    : undefined;
+const blog = createBlogService(
+  config,
+  new BlogPostsStore(store),
+  store,
+  discord,
+  modelClient ?? undefined,
+);
+const learner = createLearnerExperiment(
+  config,
+  store,
+  discord,
+  blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {},
+);
+const harnessUpdates = createHarnessUpdates(
+  config,
+  new HarnessUpdatesStore(store),
+  discord,
+);
+
 type LoopState = {
   running?: boolean;
   lastStartedAt?: string;
@@ -131,13 +191,24 @@ type LoopState = {
   deliveryOutcome?: "delivered" | "idle";
 };
 const loops: Record<
-  "collection" | "delivery" | "webhook" | "curation",
+  | "collection"
+  | "delivery"
+  | "webhook"
+  | "curation"
+  | "learner"
+  | "harness"
+  | "github"
+  | "blog",
   LoopState
 > = {
   collection: {},
   delivery: {},
   webhook: {},
   curation: {},
+  learner: {},
+  harness: {},
+  github: {},
+  blog: {},
 };
 
 async function runLoop(
@@ -235,6 +306,38 @@ const curationTimer = communityFeeds
   ? setInterval(() => void runLoop("curation", curate), 5 * 60_000)
   : undefined;
 
+const learnerTimer = learner
+  ? setInterval(
+      () => void runLoop("learner", () => learner.runDue(new Date())),
+      60_000,
+    )
+  : undefined;
+
+const blogTimer = blog
+  ? setInterval(
+      () => void runLoop("blog", () => blog.runDue(new Date())),
+      5 * 60_000,
+    )
+  : undefined;
+
+// Detection is rate limited inside the service to every 6 hours.
+const harnessTimer = harnessUpdates
+  ? setInterval(
+      () => void runLoop("harness", () => harnessUpdates.runDue(new Date())),
+      10 * 60_000,
+    )
+  : undefined;
+// The report is claimed per week, so a frequent check is cheap and restart-safe.
+const githubTimer = githubReport
+  ? setInterval(
+      () => void runLoop("github", () => githubReport.runDue(new Date())),
+      10 * 60_000,
+    )
+  : undefined;
+if (githubReport) void runLoop("github", () => githubReport.runDue(new Date()));
+if (harnessUpdates)
+  void runLoop("harness", () => harnessUpdates.runDue(new Date()));
+
 await runLoop("collection", collect);
 if (shouldRunDelivery(config.DELIVERY_ENABLED))
   await runLoop("delivery", deliver);
@@ -327,6 +430,10 @@ const healthServer = createLocalHealthServer(
             required:
               !disabled &&
               name !== "curation" &&
+              name !== "learner" &&
+              name !== "harness" &&
+              name !== "github" &&
+              name !== "blog" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -350,6 +457,10 @@ const healthServer = createLocalHealthServer(
 const shutdown = (): void => {
   clearInterval(collectionTimer);
   if (curationTimer) clearInterval(curationTimer);
+  if (learnerTimer) clearInterval(learnerTimer);
+  if (harnessTimer) clearInterval(harnessTimer);
+  if (githubTimer) clearInterval(githubTimer);
+  if (blogTimer) clearInterval(blogTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);
   clearInterval(webhookTimer);
   healthServer.close();

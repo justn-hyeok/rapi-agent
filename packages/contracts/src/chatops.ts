@@ -27,8 +27,8 @@ export const runPhaseSchema = z.enum([
 export type RunPhase = z.infer<typeof runPhaseSchema>;
 export const scopeSchema = z
   .object({
-    guild: z.string().min(1).max(100),
-    channel: z.string().min(1).max(100),
+    guild: z.string().min(1).max(200),
+    channel: z.string().min(1).max(200),
     owner: z.string().min(1).max(100),
   })
   .strict();
@@ -102,7 +102,7 @@ export const runEvidenceSchema = z
   .strict();
 export type RunEvidence = z.infer<typeof runEvidenceSchema>;
 export const chatRunSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   guild_id: z.string(),
   channel_id: z.string(),
   owner_id: z.string(),
@@ -117,7 +117,7 @@ export const chatRunSchema = z.object({
 });
 export type ChatRun = z.infer<typeof chatRunSchema>;
 export const memorySchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   content: z.string().max(2000),
   digest: digestSchema,
   revision: z.number().int().positive(),

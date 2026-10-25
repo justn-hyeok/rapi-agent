@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PostgresStore } from "@rapi/db";
-import {
-  RapiAgent,
-  RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
-} from "@rapi/agent";
+import { RapiAgent, RecordingDeliveryAdapter } from "@rapi/agent";
 
 const url = process.env.DATABASE_URL;
 if (!url || new URL(url).pathname !== "/rapi_test")
@@ -15,7 +11,7 @@ for (const cadence of ["daily", "immediate"] as const) {
   test(`${cadence} delivery retains later arrivals, retries after restart gaps, and never resends success`, async () => {
     const store = new PostgresStore(url);
     const delivery = new RecordingDeliveryAdapter();
-    const agent = new RapiAgent(store, delivery, new RecordingOmpAdapter());
+    const agent = new RapiAgent(store, delivery);
     try {
       await store.resetForTests();
       const source = await agent.createSource(

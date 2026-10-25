@@ -4,13 +4,14 @@ revision: working-tree-2026-09-08
 fixtures:
   github: tests/e2e/mvp.test.ts#githubFixture
   rss: tests/e2e/mvp.test.ts#rssFixture
+  chatops: tests/e2e/chatops.test.ts
 scenarios:
   - github_and_rss_ingestion
   - duplicate_delivery_prevention
   - discord_subscription_and_dm
   - matching_test_email
   - public_mdx_build
-  - approved_omp_execution_and_callback
+  - chatops_run_recorded_and_cancellable
   - process_and_database_restart_recovery
   - discord_user_guild_channel_denial
 commands:
@@ -24,5 +25,5 @@ pass_rules:
   - repeated events create exactly 2 raw events and 2 normalized items
   - successful delivery targets are never sent twice
   - public build contains no private MDX
-  - OMP dispatch is unique per task revision and executor
+  - a ChatOps run records attempts and evidence and can be cancelled
   - PostgreSQL restart preserves raw events and delivery attempts

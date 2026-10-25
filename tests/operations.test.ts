@@ -64,13 +64,11 @@ describe("operational health", () => {
   it("supports longer per-component failure thresholds", () => {
     const tracker = new HealthTransitionTracker(3, 2, {
       chat: { failureThreshold: 4 },
-      omp: { failureThreshold: 1 },
     });
     assert.equal(tracker.observe("chat", false), undefined);
     assert.equal(tracker.observe("chat", false), undefined);
     assert.equal(tracker.observe("chat", false), undefined);
     assert.equal(tracker.observe("chat", false), "down");
-    assert.equal(tracker.observe("omp", false), "down");
   });
 
   it("only reports recovery for a notified incident and cools down repeats", () => {

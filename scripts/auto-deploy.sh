@@ -78,7 +78,7 @@ receipt="$ROOT/switch-$SHORT-$(date -u +%Y%m%d%H%M).json"
 sudo -n env RAPI_SWITCH_APPROVED=true RAPI_SWITCH_APPLY_MIGRATIONS=true RAPI_CURRENT_RELEASE="$ROOT/current" \
   RAPI_CANDIDATE_RELEASE="$candidate" RAPI_RELEASE_SHA="$SHA" \
   RAPI_SWITCH_RECEIPT="$receipt" RAPI_SERVICE_ENV_FILE="$ENV_FILE" \
-  RAPI_SWITCH_SERVICES=bot,chat,omp,monitor,worker \
+  RAPI_SWITCH_SERVICES=bot,chat,monitor,worker \
   "$(command -v node)" scripts/switch-release.mjs </dev/null >>"$ROOT/.auto-deploy-$SHORT.log" 2>&1 || true
 status=$(jq -r '.status // "missing"' "$receipt" 2>/dev/null || echo missing)
 [[ "$status" == "switched" ]] || fail "서비스 전환 실패 ($status)"

@@ -67,9 +67,9 @@ npm run supabase:configure
 `anon`·`authenticated`의 public schema 접근은 차단한다. 관리자 URL은 저장하지 않는다.
 
 사전 검사가 끝나면 현재 작업을 drain하고 기존 DB를 custom dump로 백업한다. 기존
-서비스를 정지한 뒤 `.env`의 runtime URL과 새 OMP workspace/receipt 경로를 원자적으로
+서비스를 정지한 뒤 `.env`의 runtime URL을 원자적으로
 바꾸고 서비스를 시작한다. bot, ChatOps, worker readiness 중 하나라도 실패하면 이전
-`.env`로 되돌리고 기존 서비스를 다시 시작한다. 기존 PostgreSQL, dump와 OMP receipt는
+`.env`로 되돌리고 기존 서비스를 다시 시작한다. 기존 PostgreSQL, dump와 기존 실행 기록은
 보존하며 새 DB로 이전하지 않는다.
 
 ## Cloudflare Named Tunnel
@@ -86,7 +86,7 @@ Cloudflare 로그인이 없으면 CLI가 브라우저 승인 URL을 연다. 명�
 - `/webhooks/v1/:connectionId`
 - 기존 `/webhooks/:sourceId`
 
-공개 `/health`, `/ready`, monitor, OMP callback은 404다. 스크립트가 실제 공개 차단과
+공개 `/health`, `/ready`, monitor는 404다. 스크립트가 실제 공개 차단과
 interaction 전달을 확인한 뒤 `/var/lib/rapi/tunnel-verified.json`을 만든다. 이 marker와
 현재 origin이 일치하기 전에는 신규 수신 웹훅 등록을 거부한다.
 
@@ -115,7 +115,7 @@ GitHub는 `ping`, `push`, `issues`, `pull_request`, `release`를 검증하고 `g
 ## 상태, 용량과 백업
 
 `/health`와 `/ready`는 loopback에만 있다. monitor는 30초마다 DB, bot, Gateway ChatOps,
-worker, OMP, 공개 executor, allowlist gateway, Cloudflare tunnel과 백업을 검사한다. 3회
+worker, 공개 executor, allowlist gateway, Cloudflare tunnel과 백업을 검사한다. 3회
 연속 실패를 장애, 이후 2회 연속 성공을 복구로 알린다. 같은 서버 전체가 꺼지거나
 인터넷이 단절되면 즉시 알릴 수 없다.
 

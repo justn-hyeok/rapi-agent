@@ -8,6 +8,14 @@ export interface DiscordIdentity {
 
 export type DiscordAccessLevel = "user" | "admin" | "superadmin";
 
+/** "guild": the grant only covers the guild the request came from. */
+export type DiscordAccessScope = "global" | "guild";
+
+export interface DiscordAccess {
+  level: DiscordAccessLevel;
+  scope: DiscordAccessScope;
+}
+
 export interface DiscordAllowlists {
   /** Legacy owner allowlist. Every listed user is a superadmin. */
   userIds: readonly string[];
@@ -18,6 +26,8 @@ export interface DiscordAllowlists {
   userRoleIds?: readonly string[];
   guildMembersAreUsers?: boolean;
   guildIds?: readonly string[];
+  /** Operator guild. Unset means every allowed guild counts as home. */
+  homeGuildId?: string;
   channelIds?: readonly string[];
 }
 
@@ -40,6 +50,19 @@ export function assertDiscordAccess(
   allowlists: DiscordAllowlists,
   required: DiscordAccessLevel = "user",
 ): DiscordAccessLevel {
+  return resolveDiscordAccess(identity, allowlists, required).level;
+}
+
+/**
+ * Resolves the level and how far it reaches. Outside the home guild, ADMIN
+ * from the Discord Administrator permission or a role only reaches that
+ * guild; SUPERADMIN and explicit admin user IDs stay global.
+ */
+export function resolveDiscordAccess(
+  identity: DiscordIdentity,
+  allowlists: DiscordAllowlists,
+  required: DiscordAccessLevel = "user",
+): DiscordAccess {
   if (identity.guildId !== undefined) {
     if (allowlists.guildIds && !allowlists.guildIds.includes(identity.guildId))
       throw new Error("Discord guild is not allowed");
@@ -78,5 +101,32 @@ export function assertDiscordAccess(
             : undefined;
   if (!level) throw new Error("Discord user is not allowed");
   assertDiscordLevel(level, required);
-  return level;
+  const outsideHome =
+    identity.guildId !== undefined &&
+    allowlists.homeGuildId !== undefined &&
+    identity.guildId !== allowlists.homeGuildId;
+  const explicitAdmin =
+    level === "superadmin" ||
+    allowlists.adminUserIds?.includes(identity.userId) === true;
+  return {
+    level,
+    scope: outsideHome && !explicitAdmin ? "guild" : "global",
+  };
+}
+
+/** Throws unless the access reaches beyond a single guild. */
+export function assertDiscordScope(
+  access: DiscordAccess,
+  effect: DiscordAccessScope,
+  /** Commands the caller can use in this guild, shown in the refusal. */
+  usable: readonly string[] = [],
+): void {
+  if (effect === "global" && access.scope === "guild")
+    throw new Error(
+      `이 명령은 운영자 서버나 DM에서만 사용할 수 있습니다.${
+        usable.length
+          ? ` 이 서버에서는 ${usable.join(", ")}을(를) 쓸 수 있어요.`
+          : ""
+      }`,
+    );
 }

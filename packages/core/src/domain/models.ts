@@ -75,8 +75,15 @@ export interface DeliveryPayload {
   text: string;
   html: string;
   itemIds: string[];
+  /** Extra email headers such as List-Unsubscribe; other adapters ignore them. */
+  emailHeaders?: Record<string, string>;
   /** A Discord message (embeds and link buttons) replacing the text split. */
-  discord?: { embeds: unknown[]; components?: unknown[] };
+  discord?: {
+    embeds: unknown[];
+    components?: unknown[];
+    content?: string;
+    flags?: number;
+  };
 }
 
 export interface DeliveryResult {
@@ -89,18 +96,4 @@ export interface DeliveryAdapter {
     payload: DeliveryPayload,
     idempotencyKey: string,
   ): Promise<DeliveryResult>;
-}
-
-export interface OmpDispatchResult {
-  receiptId: string;
-  accepted: boolean;
-  reason?: string;
-}
-
-export interface OmpAdapter {
-  cancel?(receiptId: string, attemptId: string): Promise<boolean>;
-  dispatch(
-    specification: Record<string, unknown>,
-    idempotencyKey: string,
-  ): Promise<OmpDispatchResult>;
 }

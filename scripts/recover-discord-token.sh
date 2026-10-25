@@ -18,7 +18,6 @@ trap cleanup ERR
 "${root[@]}" systemctl enable --now \
   rapi-bot.service \
   rapi-chat.service \
-  rapi-omp.service
 
 if node --env-file=.env -e 'process.exit(process.env.RAPI_PUBLIC_BASE_URL ? 0 : 1)'; then
   "${root[@]}" systemctl enable --now rapi-public-gateway.service

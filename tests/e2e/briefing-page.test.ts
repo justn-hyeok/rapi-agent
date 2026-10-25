@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  RapiAgent,
-  RecordingDeliveryAdapter,
-  RecordingOmpAdapter,
-} from "@rapi/agent";
+import { RapiAgent, RecordingDeliveryAdapter } from "@rapi/agent";
 import { briefingLinkKey } from "@rapi/core";
 import { PostgresStore } from "@rapi/db";
 
@@ -18,7 +14,6 @@ describe("briefing page", () => {
     const agent = new RapiAgent(
       store,
       new RecordingDeliveryAdapter(),
-      new RecordingOmpAdapter(),
       undefined,
       undefined,
       { key: briefingLinkKey("k".repeat(32)), baseUrl: "https://rapi.example" },
@@ -251,7 +246,6 @@ describe("briefing page", () => {
       const detailAgent = new RapiAgent(
         store,
         new RecordingDeliveryAdapter(),
-        new RecordingOmpAdapter(),
         {
           policy: "test:model",
           summarize: async () => new Map(),
