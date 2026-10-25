@@ -456,6 +456,9 @@ export async function processDeletion(client, id, config) {
       await client.query("DELETE FROM events WHERE owner_id=$1", [
         row.target_id,
       ]);
+      await client.query("DELETE FROM chatbot_turns WHERE user_id=$1", [
+        row.target_id,
+      ]);
       for (const table of [
         "learner_clicks",
         "learner_replies",
@@ -778,6 +781,9 @@ export async function sweepMetadata(
         "DELETE FROM chat_messages WHERE created_at<$1::timestamptz-interval '30 days'",
         [now],
       );
+      await client.query("DELETE FROM chatbot_turns WHERE expires_at<=$1", [
+        now,
+      ]);
       await client.query(
         "DELETE FROM queue_jobs WHERE state IN('done','dead_letter') AND created_at<$1::timestamptz-interval '1 year'",
         [now],

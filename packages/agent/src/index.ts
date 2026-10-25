@@ -15,3 +15,4 @@ export * from "./github-app.js";
 export * from "./blog-posts.js";
 export * from "./blog-posts-io.js";
 export * from "./web-admin.js";
+export * from "./chatbot.js";

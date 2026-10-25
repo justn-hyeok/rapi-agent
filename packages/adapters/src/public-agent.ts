@@ -4,7 +4,7 @@ export interface PublicAgentResult {
   started: boolean;
   ok: boolean;
   output: string;
-  reason: "exit" | "timeout" | "cancel" | "spawn_error";
+  reason: "exit" | "timeout" | "cancel" | "spawn_error" | "budget";
 }
 
 export class PublicAgentClient {
@@ -16,10 +16,14 @@ export class PublicAgentClient {
   answer(
     prompt: string,
     onStarted: () => Promise<void> | void,
+    options?: { feature?: "archive_qa" | "public_qa" },
     signal?: AbortSignal,
   ): Promise<PublicAgentResult> {
     return new Promise((resolve, reject) => {
-      const payload = JSON.stringify({ prompt });
+      const payload = JSON.stringify({
+        prompt,
+        ...(options?.feature ? { feature: options.feature } : {}),
+      });
       let settled = false;
       const complete = (work: () => void): void => {
         if (settled) return;

@@ -29,7 +29,7 @@ fi
 "${root[@]}" install -o root -g root -m 0755 "$codex_source" /opt/rapi-public-agent/codex
 "${root[@]}" install -o root -g root -m 0755 "$code_mode_host" /opt/rapi-public-agent/codex-code-mode-host
 /opt/rapi-public-agent/codex --version
-"${root[@]}" install -o root -g root -m 0644 apps/public-agent/dist/run.js apps/public-agent/dist/executor.js /opt/rapi-public-agent/
+"${root[@]}" install -o root -g root -m 0644 apps/public-agent/dist/run.js apps/public-agent/dist/executor.js apps/public-agent/dist/api-executor.js apps/public-agent/dist/gateway-client.js /opt/rapi-public-agent/
 "${root[@]}" install -o root -g root -m 0644 ops/systemd/rapi-public-agent.service /etc/systemd/system/rapi-public-agent.service
 "${root[@]}" systemctl daemon-reload
 

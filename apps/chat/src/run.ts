@@ -5,7 +5,13 @@ import {
   GitHubAppClient,
   PublicAgentClient,
 } from "@rapi/adapters";
-import { createBlogService, PublicCommunityService } from "@rapi/agent";
+import {
+  ChatbotService,
+  PublicCommunityService,
+  createBlogService,
+  createGithubRepoReader,
+  loadBlogArchive,
+} from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
   assertDiscordAccess,
@@ -24,6 +30,7 @@ import {
 } from "@rapi/contracts";
 import {
   BlogPostsStore,
+  ChatbotStore,
   PostgresStore,
   ChatOpsStore,
   GitHubStore,
@@ -82,10 +89,26 @@ const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
+const chatbotStore = new ChatbotStore(store);
+const chatbot = config.CHATBOT_ENABLED
+  ? new ChatbotService(chatbotStore, store, {
+      l2Enabled: config.CHATBOT_L2_ENABLED,
+      readRepo: createGithubRepoReader(),
+    })
+  : undefined;
+if (chatbot && config.RAPI_PUBLIC_BASE_URL)
+  // Blog posts are optional archive sources; the checkout may not have them.
+  await loadBlogArchive(
+    new URL("../../blog/content/", import.meta.url).pathname,
+    config.RAPI_PUBLIC_BASE_URL,
+  )
+    .then((documents) => chatbotStore.upsertArchiveDocuments(documents))
+    .catch(() => undefined);
 const publicCommunity = new PublicCommunityService(
   store,
   publicAgent,
   config.PUBLIC_AGENT_ENABLED,
+  chatbot,
 );
 // DIRECT_MESSAGES is requested only for the learner experiment, which counts replies.
 const intents =
@@ -136,13 +159,19 @@ if (githubApp) {
 const chat = new ChatOrchestrator(
   runs,
   executor,
-  async (channel, content) => {
+  async (channel, content, components) => {
     if (sendGithub && channel.startsWith("github:")) {
       await sendGithub(channel, content);
       return;
     }
-    for (const chunk of splitDiscordMessage(redactChat(content)))
-      await sendMessage(channel, chunk);
+    const chunks = splitDiscordMessage(redactChat(content));
+    for (const [index, chunk] of chunks.entries())
+      await sendMessage(
+        channel,
+        chunk,
+        // Buttons belong under the last part of a long reply.
+        index === chunks.length - 1 ? components : undefined,
+      );
   },
   {
     isAdminChannel: async (scope) => {
@@ -155,8 +184,9 @@ const chat = new ChatOrchestrator(
       return scope.channel === (configured ?? managed);
     },
     answer: async (input) => {
-      return publicCommunity.answer({
+      return publicCommunity.converse({
         guildId: input.guildId,
+        channelId: input.channelId,
         userId: input.userId,
         requestId: input.requestId,
         tier: input.tier,
@@ -235,12 +265,14 @@ async function discordRequest(
 async function sendMessage(
   channelId: string,
   content: string,
+  components?: unknown[],
 ): Promise<string> {
   const response = await discordRequest(`/channels/${channelId}/messages`, {
     method: "POST",
     body: JSON.stringify({
       content,
       allowed_mentions: { parse: [] },
+      ...(components?.length ? { components } : {}),
     }),
   });
   const message = (await response.json()) as { id: string };

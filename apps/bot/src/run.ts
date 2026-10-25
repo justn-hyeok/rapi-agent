@@ -21,6 +21,8 @@ import {
   createLearnerExperiment,
   createWebPortal,
   HarnessUpdateService,
+  CHATBOT_SUBSCRIPTION_PREFIX,
+  handleChatbotSubscriptionComponent,
   DEFAULT_SUMMARY_MODEL,
   WebhookManager,
 } from "@rapi/agent";
@@ -474,6 +476,12 @@ const server = createDiscordInteractionServer(
         assertDiscordAccess(identity, allowlists, "superadmin");
         if (!blog) return "지금은 쓸 수 없는 버튼입니다.";
         return blog.handleComponent(identity, customId);
+      }
+      if (customId.startsWith(CHATBOT_SUBSCRIPTION_PREFIX)) {
+        // Any member may press their own confirm button; the id and the
+        // presser must match, and only that person's subscription changes.
+        if (!config.CHATBOT_ENABLED) return "지금은 쓸 수 없는 버튼입니다.";
+        return handleChatbotSubscriptionComponent(store, identity, customId);
       }
       if (HarnessUpdateService.handles(customId)) {
         // Pressed in the owner's DM; only a SUPERADMIN may decide.

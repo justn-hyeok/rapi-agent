@@ -90,6 +90,10 @@ export const environmentSchema = z
       .string()
       .default("/run/rapi-public-agent/agent.sock"),
     PUBLIC_AGENT_ENABLED: booleanString,
+    // The executor reads PUBLIC_AGENT_BACKEND itself; it is listed here so a typo fails loudly.
+    PUBLIC_AGENT_BACKEND: z.enum(["codex", "api"]).default("codex"),
+    CHATBOT_ENABLED: booleanString,
+    CHATBOT_L2_ENABLED: booleanString,
     PUBLIC_AGENT_READY_URL: z
       .string()
       .url()
@@ -194,6 +198,27 @@ export const environmentSchema = z
         path: ["LEARNER_EXPERIMENT_ENABLED"],
         message:
           "LEARNER_EXPERIMENT_ENABLED requires WEBHOOK_ENCRYPTION_KEY, RAPI_PUBLIC_BASE_URL and DISCORD_SUPERADMIN_USER_IDS",
+      });
+    }
+    if (value.CHATBOT_ENABLED && !value.PUBLIC_AGENT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["CHATBOT_ENABLED"],
+        message: "CHATBOT_ENABLED requires PUBLIC_AGENT_ENABLED",
+      });
+    }
+    if (value.CHATBOT_ENABLED && value.PUBLIC_AGENT_BACKEND !== "api") {
+      context.addIssue({
+        code: "custom",
+        path: ["CHATBOT_ENABLED"],
+        message: "CHATBOT_ENABLED requires PUBLIC_AGENT_BACKEND=api",
+      });
+    }
+    if (value.CHATBOT_L2_ENABLED && !value.CHATBOT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["CHATBOT_L2_ENABLED"],
+        message: "CHATBOT_L2_ENABLED requires CHATBOT_ENABLED",
       });
     }
     if (

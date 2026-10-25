@@ -107,7 +107,7 @@ export interface PublicCommunityResponder {
     requestId: string;
     text: string;
     tier: "user" | "staff";
-  }): Promise<string | undefined>;
+  }): Promise<string | { content: string; components?: unknown[] } | undefined>;
 }
 
 // The live checkout only follows main; the VM deploys merged main by itself
@@ -153,7 +153,11 @@ export class ChatOrchestrator {
   constructor(
     readonly store: ChatOpsStore,
     readonly executor: Executor,
-    readonly send: (channel: string, text: string) => Promise<unknown>,
+    readonly send: (
+      channel: string,
+      text: string,
+      components?: unknown[],
+    ) => Promise<unknown>,
     readonly community?: PublicCommunityResponder,
     readonly typing?: DiscordTyping,
     readonly homeGuildId?: string,
@@ -176,8 +180,14 @@ export class ChatOrchestrator {
   private key(scope: ChatScope): string {
     return JSON.stringify([scope.guild, scope.channel, scope.owner]);
   }
-  private async reply(channel: string, text: string): Promise<void> {
-    await this.send(channel, redactChat(text).slice(0, 16000));
+  private async reply(
+    channel: string,
+    text: string,
+    components?: unknown[],
+  ): Promise<void> {
+    if (components?.length)
+      await this.send(channel, redactChat(text).slice(0, 16000), components);
+    else await this.send(channel, redactChat(text).slice(0, 16000));
   }
   async receive(
     message: DiscordChatMessage,
@@ -266,7 +276,14 @@ export class ChatOrchestrator {
             tier: accessLevel === "user" ? "user" : "staff",
           }),
         );
-        if (response) await this.reply(scope.channel, response);
+        if (typeof response === "string")
+          await this.reply(scope.channel, response);
+        else if (response)
+          await this.reply(
+            scope.channel,
+            response.content,
+            response.components,
+          );
         return;
       }
     }

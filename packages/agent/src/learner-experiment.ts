@@ -73,7 +73,7 @@ export interface LearnerReply {
   components?: unknown[];
 }
 
-const FEEDS = ["free-tokens", "setup", "stars"];
+export const LEARNER_FEEDS = ["free-tokens", "setup", "stars"];
 const FREE_MODELS_URL = "https://openrouter.ai/models?max_price=0";
 const CADENCE_LABEL: Record<LearnerCadence, string> = {
   daily: "매일",
@@ -220,7 +220,7 @@ export class LearnerExperiment {
   }
 
   async buildItems(since: Date): Promise<LearnerItemDraft[]> {
-    const posts = await this.store.learnerCandidatePosts(since, FEEDS);
+    const posts = await this.store.learnerCandidatePosts(since, LEARNER_FEEDS);
     const items: LearnerItemDraft[] = [];
     let freeModels = 0;
     let freeModelsKey = "";
