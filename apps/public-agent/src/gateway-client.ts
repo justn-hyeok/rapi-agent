@@ -16,8 +16,9 @@ interface ChatCompletion {
 
 /**
  * Minimal OpenAI-compatible client (API key or a LiteLLM gateway) for the
- * isolated public executor. Metering and the monthly cap belong to the gateway;
- * a budget rejection from it (HTTP 402, or 400/429 naming the budget) becomes
+ * isolated public executor. It has no database: the caller (bot/chat) checks the
+ * monthly cap before forwarding and records the usage this process reports back.
+ * A budget rejection from a gateway (HTTP 402, or 400/429 naming the budget) becomes
  * the budget error. Returns undefined until a key and a model are configured.
  */
 export function createGatewayModelClient(
@@ -58,13 +59,19 @@ export function createGatewayModelClient(
       if (!response.ok)
         throw new Error(`model gateway returned ${response.status}`);
       const parsed = JSON.parse(text) as ChatCompletion;
+      // LiteLLM reports the price of the call; without it the caller prices the
+      // tokens from its own table (this process has neither a ledger nor prices).
+      const header = response.headers.get("x-litellm-response-cost");
+      const gatewayUsd = header === null ? NaN : Number(header);
+      const hasGatewayCost = Number.isFinite(gatewayUsd) && gatewayUsd >= 0;
       return {
         text: parsed.choices?.[0]?.message?.content ?? "",
         model: parsed.model ?? model,
         usage: {
           inputTokens: parsed.usage?.prompt_tokens ?? 0,
           outputTokens: parsed.usage?.completion_tokens ?? 0,
-          costMicroUsd: 0,
+          costMicroUsd: hasGatewayCost ? Math.round(gatewayUsd * 1_000_000) : 0,
+          costSource: hasGatewayCost ? "gateway" : "unknown",
         },
       };
     },

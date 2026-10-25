@@ -7,6 +7,7 @@ import {
   CodexSummarizer,
   SmtpDeliveryAdapter,
   createModelClient,
+  createPublicQaMeter,
   superadminDmNotifier,
 } from "@rapi/adapters";
 import {
@@ -92,6 +93,10 @@ const publicCommunity = new PublicCommunityService(
   store,
   publicAgent,
   config.PUBLIC_AGENT_ENABLED,
+  undefined,
+  // PUBLIC_AGENT_BACKEND=api: the isolated executor has no database, so the
+  // cap is checked here and its reported usage lands in the same ledger.
+  createPublicQaMeter(config, new ModelUsageStore(store)),
 );
 const layout = new DiscordLayoutManager(store, {
   botToken: config.DISCORD_BOT_TOKEN,
@@ -159,13 +164,14 @@ const agent = new RapiAgent(
       }
     : undefined,
 );
-// Drafts need the shared model client (lane C6); until it is wired here only
-// the button flow for posts the worker created is available.
+// Without a model client (no MODEL_API_*) drafts answer "unavailable"; the
+// button flow for posts the worker created works either way.
 const blog = createBlogService(
   config,
   new BlogPostsStore(store),
   store,
   discord,
+  modelClient ?? undefined,
 );
 const emailService =
   config.EMAIL_PROVIDER && config.EMAIL_API_KEY && config.EMAIL_FROM
@@ -390,11 +396,31 @@ if (process.env.REGISTER_DISCORD_COMMANDS === "true") {
   );
 }
 
-const web = createWebPortal(config, allowlists, new WebStore(store), store, {
-  commands,
-  guilds: () => guildGate.allowed(),
-  homeGuildId,
-});
+const web = createWebPortal(
+  config,
+  allowlists,
+  new WebStore(store),
+  store,
+  {
+    commands,
+    guilds: () => guildGate.allowed(),
+    homeGuildId,
+  },
+  {
+    // Published guides show next to sent issues in /archive; withdrawn ones never do.
+    blogPosts: new BlogPostsStore(store),
+    ...(emailService
+      ? {
+          email: {
+            status: (userId) => emailService.statusFor(userId),
+            register: (userId, address) =>
+              emailService.register(userId, address),
+            remove: (userId) => emailService.removeAddress(userId),
+          },
+        }
+      : {}),
+  },
+);
 
 const server = createDiscordInteractionServer(
   commands,

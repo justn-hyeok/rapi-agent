@@ -37,7 +37,7 @@ const FEATURES: ModelFeature[] = [
   "repo_report",
 ];
 
-function loadPrices(
+export function loadPrices(
   file: string,
   warn: (message: string) => void,
 ): ModelPriceTable {

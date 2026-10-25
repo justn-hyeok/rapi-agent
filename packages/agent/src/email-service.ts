@@ -21,6 +21,8 @@ import type { EmailStore } from "@rapi/db";
 type EmailServiceStore = Pick<
   EmailStore,
   | "register"
+  | "byUser"
+  | "removeByUser"
   | "claimVerificationSend"
   | "byId"
   | "verify"
@@ -62,6 +64,18 @@ export interface EmailIssue {
     summary?: string;
     url: string;
   }>;
+}
+
+export interface EmailAddressStatus {
+  masked: string;
+  state: "pending" | "verified" | "unsubscribed" | "blocked";
+}
+
+/** `name@example.com` → `n***@example.com`; enough to recognize, not to harvest. */
+export function maskEmailAddress(address: string): string {
+  const at = address.lastIndexOf("@");
+  if (at < 1) return "***";
+  return `${address.slice(0, 1)}***${address.slice(at)}`;
 }
 
 const CADENCE_LABEL: Record<LearnerCadence, string> = {
@@ -149,6 +163,28 @@ export class EmailService {
       return "확인 메일을 보내지 못했어요. 주소를 확인하고 잠시 뒤에 다시 시도해 주세요.";
     }
     return "확인 메일을 보냈어요. 24시간 안에 메일의 링크를 열어 확인해 주세요. 확인하면 다음 호부터 메일로도 받아요.";
+  }
+
+  /** What `/me` shows about the learner's address; the address itself is masked. */
+  async statusFor(userId: string): Promise<EmailAddressStatus | null> {
+    const row = await this.store.byUser(userId);
+    if (!row) return null;
+    return {
+      masked: maskEmailAddress(row.email),
+      state:
+        row.bounceState === "hard" || row.bounceState === "complaint"
+          ? "blocked"
+          : row.unsubscribed
+            ? "unsubscribed"
+            : row.verified
+              ? "verified"
+              : "pending",
+    };
+  }
+
+  /** The web "remove my address"; true when there was something to remove. */
+  removeAddress(userId: string): Promise<boolean> {
+    return this.store.removeByUser(userId);
   }
 
   private invalidLink(): EmailPage {

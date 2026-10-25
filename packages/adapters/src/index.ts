@@ -12,3 +12,4 @@ export * from "./metered-model-client.js";
 export * from "./model-factory.js";
 export * from "./github-app.js";
 export * from "./email.js";
+export * from "./public-qa-meter.js";

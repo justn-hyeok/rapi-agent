@@ -23,7 +23,15 @@ import {
   type LearnerCadence,
   type WebRole,
 } from "@rapi/core";
-import type { PostgresStore, WebArchiveIssue, WebStore } from "@rapi/db";
+import type {
+  BlogPostsStore,
+  PostgresStore,
+  PublishedBlogPost,
+  WebArchiveIssue,
+  WebStore,
+} from "@rapi/db";
+import type { EmailAddressStatus } from "./email-service.js";
+import { renderBlogMdx } from "./web-blog.js";
 import {
   WEB_ADMIN_NAV,
   webAdminRoutes,
@@ -59,10 +67,44 @@ export interface WebRequest {
   form: URLSearchParams;
 }
 
-/** Past issues for `/archive`; lane M2's published posts can plug in here. */
+/**
+ * Past issues for `/archive`. The optional post methods add published blog
+ * guides next to them; a source without them lists issues only.
+ */
 export interface ArchiveSource {
   list(limit: number): Promise<WebArchiveIssue[]>;
   get(slug: string): Promise<WebArchiveIssue | null>;
+  listPosts?(limit: number): Promise<PublishedBlogPost[]>;
+  getPost?(slug: string): Promise<PublishedBlogPost | null>;
+}
+
+/** Sent issues plus published blog guides; withdrawn posts never reach it. */
+export function createArchiveSource(
+  issues: Pick<WebStore, "archiveIssues" | "archiveIssue">,
+  blog?: Pick<BlogPostsStore, "listPublishedBlogPosts" | "getBlogPost">,
+): ArchiveSource {
+  return {
+    list: (limit) => issues.archiveIssues(limit),
+    get: (slug) => issues.archiveIssue(slug),
+    ...(blog
+      ? {
+          // Issue posts are the same issues as above; only guides are new here.
+          listPosts: async (limit) =>
+            (await blog.listPublishedBlogPosts(limit)).filter(
+              (post) => post.kind !== "issue",
+            ),
+          getPost: (slug) => blog.getBlogPost(slug),
+        }
+      : {}),
+  };
+}
+
+/** The `/me` email card; backed by the email channel's service (`EMAIL_ENABLED`). */
+export interface WebEmailPort {
+  status(userId: string): Promise<EmailAddressStatus | null>;
+  /** Returns the same reply text the Discord modal shows. */
+  register(userId: string, address: string): Promise<string>;
+  remove(userId: string): Promise<boolean>;
 }
 
 export type WebPortalStore = Pick<
@@ -89,6 +131,8 @@ export interface WebPortalOptions {
   /** Whether the learner DM experiment sends anything; the form is disabled otherwise. */
   learnerEnabled: boolean;
   emailEnabled: boolean;
+  /** Present when the email channel is configured; enables the `/me` address card. */
+  email?: WebEmailPort;
   fetch?: typeof fetch;
   now?: () => Date;
   /** Routes added by later lanes (admin pages). */
@@ -294,6 +338,18 @@ export class WebPortal {
         handler: (c) => this.archiveList(c),
       },
       {
+        method: "POST",
+        pattern: /^\/me\/email$/,
+        access: "USER",
+        handler: (c) => this.emailAddress(c),
+      },
+      {
+        method: "GET",
+        pattern: /^\/archive\/blog\/([a-z0-9]+(?:-[a-z0-9]+)*)$/,
+        access: "public",
+        handler: (c) => this.archivePost(c),
+      },
+      {
         method: "GET",
         pattern: /^\/archive\/([a-z]+-[\d-]{10})$/,
         access: "public",
@@ -462,11 +518,13 @@ export class WebPortal {
     });
   }
 
-  private async me({
-    request,
-    account,
-  }: WebRouteContext): Promise<WebResponse> {
+  private async me(
+    { request, account }: WebRouteContext,
+    message?: string,
+  ): Promise<WebResponse> {
     const user = account!;
+    const email = this.options.email;
+    const address = email ? await email.status(user.userId) : null;
     const subscription = await this.store.learnerSubscription(user.userId);
     const active = subscription?.active === true;
     const cadence = subscription?.cadence ?? "weekly";
@@ -476,11 +534,12 @@ export class WebPortal {
       unsubscribed: "구독을 해지했어요.",
       email:
         "메일 구독은 아직 준비 중이에요. 지금은 Discord DM만 받을 수 있어요.",
+      emailcard: '메일 주소는 아래 "메일 주소" 카드에서 등록해 주세요.',
       off: "소식 발송이 아직 시작되지 않았어요. 시작되면 알려 드릴게요.",
       bad: "선택을 확인하지 못했어요. 다시 골라 주세요.",
       csrf: "요청을 확인하지 못했어요. 페이지를 새로 열고 다시 시도해 주세요.",
     };
-    const notice = notices[request.query.get("m") ?? ""];
+    const notice = message ?? notices[request.query.get("m") ?? ""];
     const disabled = this.options.learnerEnabled ? "" : " disabled";
     const body = `<h1>내 구독</h1>
 ${notice ? `<p class="note">${h(notice)}</p>` : ""}
@@ -494,12 +553,62 @@ ${this.options.learnerEnabled ? "" : '<p class="note">학습자 소식 발송이
 <label class="opt"><input type="radio" name="cadence" value="daily"${cadence === "daily" ? " checked" : ""}> 매일</label>
 <label class="opt"><input type="radio" name="cadence" value="weekly"${cadence === "weekly" ? " checked" : ""}> 매주</label></fieldset>
 <fieldset><legend>받을 곳</legend>
-<label class="opt"><input type="radio" name="channel" value="discord_dm" checked> Discord DM</label>
-<label class="opt off"><input type="radio" name="channel" value="email"${this.options.emailEnabled ? "" : " disabled"}> 이메일${this.options.emailEnabled ? "" : " (준비 중)"}</label></fieldset>
+<label class="opt"><input type="radio" name="channel" value="discord_dm" checked> Discord DM</label>${
+      email
+        ? ""
+        : `
+<label class="opt off"><input type="radio" name="channel" value="email"${this.options.emailEnabled ? "" : " disabled"}> 이메일${this.options.emailEnabled ? "" : " (준비 중)"}</label>`
+    }</fieldset>
 <p><button class="primary" type="submit" name="action" value="subscribe"${disabled}>${active ? "바꾸기" : "구독하기"}</button>${active ? ' <button type="submit" name="action" value="unsubscribe">구독 해지</button>' : ""}</p>
 <p class="muted">DM은 라피 봇과 같은 서버에 있고 서버 멤버의 DM을 허용해야 받을 수 있어요.</p>
-</form>`;
+</form>${email ? this.emailCard(user, address) : ""}`;
     return this.page(user, { title: "내 구독", body });
+  }
+
+  private emailCard(
+    user: WebAccount,
+    address: EmailAddressStatus | null,
+  ): string {
+    const states: Record<EmailAddressStatus["state"], string> = {
+      pending:
+        "확인 대기 중 — 메일함(스팸함 포함)의 확인 링크를 열고 [확인]을 눌러야 받아요.",
+      verified: "확인됨 — 다음 호부터 이 주소로도 보내요.",
+      unsubscribed:
+        "수신 거부됨 — 주소를 다시 등록하면 새로 확인 메일을 보내요.",
+      blocked: "이 주소로는 보낼 수 없어요 — 다른 주소로 등록해 주세요.",
+    };
+    return `
+<form method="post" action="/me/email" class="card">
+<input type="hidden" name="csrf" value="${h(user.csrf)}">
+<h2>메일 주소</h2>
+<p>${address ? `<strong>${h(address.masked)}</strong><br><span class="muted">${h(states[address.state])}</span>` : "등록한 주소가 없어요."}</p>
+<p><label>주소 <input type="email" name="address" maxlength="254" autocomplete="email" placeholder="name@example.com"></label>
+<button class="primary" type="submit" name="action" value="add">${address ? "주소 바꾸기" : "주소 등록"}</button>${address ? ' <button type="submit" name="action" value="remove">주소 삭제</button>' : ""}</p>
+<p class="muted">메일은 구독 중일 때 DM과 함께 와요. 구독을 해지하면 메일도 멈춰요. 같은 주소로 확인 메일은 10분에 한 번만 보내요.</p>
+</form>`;
+  }
+
+  private async emailAddress(context: WebRouteContext): Promise<WebResponse> {
+    const { request, account } = context;
+    const user = account!;
+    const email = this.options.email;
+    if (!email) return redirect("/me?m=email");
+    if (!this.csrfOk(user, request)) return redirect("/me?m=csrf");
+    const action = request.form.get("action");
+    if (action === "remove") {
+      const done = await email.remove(user.userId);
+      return this.me(
+        context,
+        done ? "메일 주소를 지웠어요." : "지울 메일 주소가 없어요.",
+      );
+    }
+    const address = request.form.get("address")?.trim() ?? "";
+    if (action !== "add" || !address || address.length > 254)
+      return this.me(
+        context,
+        "메일 주소를 확인하지 못했어요. 다시 입력해 주세요.",
+      );
+    return this.me(context, await email.register(user.userId, address));
   }
 
   private async subscribe({
@@ -523,7 +632,13 @@ ${this.options.learnerEnabled ? "" : '<p class="note">학습자 소식 발송이
       return back("bad");
     const channel = request.form.get("channel") ?? "discord_dm";
     if (channel !== "discord_dm")
-      return back(channel === "email" ? "email" : "bad");
+      return back(
+        channel === "email"
+          ? this.options.email
+            ? "emailcard"
+            : "email"
+          : "bad",
+      );
     if (!this.options.learnerEnabled) return back("off");
     const current = await this.store.learnerSubscription(user.userId);
     if (current?.active)
@@ -540,14 +655,49 @@ ${this.options.learnerEnabled ? "" : '<p class="note">학습자 소식 발송이
   private async archiveList({
     account,
   }: WebRouteContext): Promise<WebResponse> {
-    const issues = await this.archive.list(ARCHIVE_LIMIT);
-    const list = issues.length
-      ? `<ul class="plain">${issues.map((issue) => `<li><a href="/archive/${h(issue.slug)}">${h(issueTitle(issue))}<br><span class="muted">${h(formatDate(issue.sentAt))}</span></a></li>`).join("")}</ul>`
+    const [issues, posts] = await Promise.all([
+      this.archive.list(ARCHIVE_LIMIT),
+      this.archive.listPosts?.(ARCHIVE_LIMIT) ?? [],
+    ]);
+    const entries = [
+      ...issues.map((issue) => ({
+        href: `/archive/${issue.slug}`,
+        title: issueTitle(issue),
+        at: issue.sentAt,
+      })),
+      ...posts.map((post) => ({
+        href: `/archive/blog/${post.slug}`,
+        title: post.title,
+        at: post.publishedAt,
+      })),
+    ]
+      .sort((a, b) => b.at.getTime() - a.at.getTime())
+      .slice(0, ARCHIVE_LIMIT);
+    const list = entries.length
+      ? `<ul class="plain">${entries.map((entry) => `<li><a href="${h(entry.href)}">${h(entry.title)}<br><span class="muted">${h(formatDate(entry.at))}</span></a></li>`).join("")}</ul>`
       : '<p class="muted">아직 발송된 소식이 없어요.</p>';
     return this.page(account, {
       title: "아카이브",
       indexable: true,
-      body: `<h1>지난 소식</h1><p class="muted">DM으로 보낸 학습자 소식을 웹에서도 볼 수 있어요.</p>${list}`,
+      body: `<h1>지난 소식</h1><p class="muted">DM으로 보낸 학습자 소식과 라피가 쓴 가이드를 웹에서도 볼 수 있어요.</p>${list}`,
+    });
+  }
+
+  private async archivePost({
+    match,
+    account,
+  }: WebRouteContext): Promise<WebResponse> {
+    const post = await this.archive.getPost?.(match[1]!);
+    if (!post)
+      return this.page(account, {
+        title: "찾을 수 없어요",
+        status: 404,
+        body: '<h1>찾을 수 없어요</h1><p>없는 글이거나 내려간 글이에요. <a href="/archive">목록으로</a></p>',
+      });
+    return this.page(account, {
+      title: post.title,
+      indexable: true,
+      body: `<p><a href="/archive">← 아카이브</a></p><h1>${h(post.title)}</h1><p class="muted">${h(formatDate(post.publishedAt))}</p>${renderBlogMdx(post.mdx)}`,
     });
   }
 
@@ -646,6 +796,10 @@ export function createWebPortal(
   store: WebStore,
   learner: LearnerWriter,
   admin?: WebAdminOptions,
+  extras: {
+    blogPosts?: Pick<BlogPostsStore, "listPublishedBlogPosts" | "getBlogPost">;
+    email?: WebEmailPort;
+  } = {},
 ): WebPortal | undefined {
   if (
     !config.WEB_ENABLED ||
@@ -658,10 +812,7 @@ export function createWebPortal(
   return new WebPortal(
     store,
     learner,
-    {
-      list: (limit) => store.archiveIssues(limit),
-      get: (slug) => store.archiveIssue(slug),
-    },
+    createArchiveSource(store, extras.blogPosts),
     {
       baseUrl: config.RAPI_PUBLIC_BASE_URL,
       clientId: config.DISCORD_OAUTH_CLIENT_ID,
@@ -669,7 +820,8 @@ export function createWebPortal(
       secret: config.WEBHOOK_ENCRYPTION_KEY,
       allowlists,
       learnerEnabled: config.LEARNER_EXPERIMENT_ENABLED,
-      emailEnabled: config.EMAIL_ENABLED,
+      emailEnabled: config.EMAIL_ENABLED && extras.email !== undefined,
+      ...(config.EMAIL_ENABLED && extras.email ? { email: extras.email } : {}),
       ...(admin ? { routes: webAdminRoutes(admin), nav: WEB_ADMIN_NAV } : {}),
     },
   );

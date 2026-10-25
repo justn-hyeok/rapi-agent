@@ -4,13 +4,15 @@ import {
   DiscordDeliveryAdapter,
   GitHubAppClient,
   PublicAgentClient,
+  createModelClient,
+  createPublicQaMeter,
+  superadminDmNotifier,
 } from "@rapi/adapters";
 import {
   ChatbotService,
   PublicCommunityService,
   createBlogService,
   createGithubRepoReader,
-  loadBlogArchive,
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
@@ -34,6 +36,7 @@ import {
   PostgresStore,
   ChatOpsStore,
   GitHubStore,
+  ModelUsageStore,
 } from "@rapi/db";
 import { CodexExecutor, cleanupArtifacts } from "./executor.js";
 import { ChatOrchestrator } from "./orchestrator.js";
@@ -88,27 +91,28 @@ const guildGate = createGuildGate({
 const runs = new ChatOpsStore(store);
 const chatWorkspace = "/home/justn/rapi-chat";
 const repository = "/home/justn/rapi-agent";
+const discord = new DiscordDeliveryAdapter(config.DISCORD_BOT_TOKEN);
+const modelUsage = new ModelUsageStore(store);
+// Null unless MODEL_API_BASE_URL and MODEL_API_KEY are set.
+const modelClient = createModelClient(
+  config,
+  modelUsage,
+  superadminDmNotifier(discord, config.DISCORD_SUPERADMIN_USER_IDS ?? []),
+);
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
-const chatbotStore = new ChatbotStore(store);
+const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL);
 const chatbot = config.CHATBOT_ENABLED
   ? new ChatbotService(chatbotStore, store, {
       l2Enabled: config.CHATBOT_L2_ENABLED,
       readRepo: createGithubRepoReader(),
     })
   : undefined;
-if (chatbot && config.RAPI_PUBLIC_BASE_URL)
-  // Blog posts are optional archive sources; the checkout may not have them.
-  await loadBlogArchive(
-    new URL("../../blog/content/", import.meta.url).pathname,
-    config.RAPI_PUBLIC_BASE_URL,
-  )
-    .then((documents) => chatbotStore.upsertArchiveDocuments(documents))
-    .catch(() => undefined);
 const publicCommunity = new PublicCommunityService(
   store,
   publicAgent,
   config.PUBLIC_AGENT_ENABLED,
   chatbot,
+  createPublicQaMeter(config, modelUsage),
 );
 // DIRECT_MESSAGES is requested only for the learner experiment, which counts replies.
 const intents =
@@ -210,13 +214,14 @@ const chat = new ChatOrchestrator(
         executorOptions,
       })
     : undefined,
-  // Drafting needs the shared model client (lane C6); until it is wired the
-  // service answers that drafts are unavailable.
+  // Drafts use the same metered model client as the bot; without MODEL_API_*
+  // the service answers that drafts are unavailable.
   createBlogService(
     { ...config, BLOG_PUBLISH_ENABLED: false },
     new BlogPostsStore(store),
     store,
-    new DiscordDeliveryAdapter(config.DISCORD_BOT_TOKEN),
+    discord,
+    modelClient ?? undefined,
   ),
 );
 const intake =

@@ -384,11 +384,17 @@ DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 �
   WHERE at >= date_trunc('month', now() AT TIME ZONE 'Asia/Seoul') GROUP BY 1;`
 - 마이그레이션 `0026_model_usage.sql`을 먼저 적용한다(`npm run db:migrate`).
 
-아직 연결하지 않은 것: Codex CLI를 LiteLLM 뒤로 보내려면 Codex가 Responses API
-(`wire_api = "responses"`)를 쓰므로 LiteLLM의 `/v1/responses` 지원과 Codex 설정이
-필요하다. 현재 chat(ChatOps)과 public-agent는 계속 Codex 구독 로그인으로 실행되며 이
-클라이언트를 쓰지 않는다. public-agent는 DB·키 접근이 없는 격리 프로세스라 의도적으로
-연결하지 않았다.
+연결 범위: 봇·chat·워커가 각자 같은 방식으로 이 클라이언트를 만들어 블로그 초안(`blog_draft`)과
+주간 GitHub 리포트(`repo_report`)에 넘긴다. `MODEL_API_*`가 없으면 초안은 "꺼져 있어요"라고
+답하고 리포트는 모델 요약 없이 나간다.
+
+public-agent는 DB·키 접근이 없는 격리 프로세스라 이 클라이언트를 직접 쓰지 않는다.
+`PUBLIC_AGENT_BACKEND=api`일 때의 비용은 호출하는 쪽(봇·chat)이 이어 받는다: 질문을 넘기기 전에
+같은 `evaluateBudget`으로 이번 달 합계를 확인해 100%이면 "이번 달 한도에 도달했어요"로 답하고,
+실행기가 소켓 응답에 실어 보낸 사용량(토큰, 모델, LiteLLM이 준 비용)을 같은 `model_usage`에 기록한다.
+비용이 비어 오면 호출하는 쪽의 `ops/model-prices.json`으로 계산한다. `codex` 백엔드는 지금처럼
+계량하지 않는다. Codex CLI를 LiteLLM 뒤로 보내는 일(Responses API, `wire_api = "responses"`)은
+아직 하지 않았다. chat(ChatOps)은 계속 Codex 구독 로그인으로 실행된다.
 ## 메일 켜기 (선택)
 
 학습자 호를 메일로도 보내는 채널이다. 0단계 실험의 "메일 의향" 결과가 메일 발송을
@@ -432,9 +438,14 @@ DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 �
 - 모든 메일에 `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
   헤더와 본문 하단 수신 거부 링크(`/e/unsub/<토큰>`)가 있다.
 - 하드 바운스·스팸 신고는 해당 주소로의 발송을 멈춘다. 소프트 바운스는 5회 누적 시 멈춘다.
-- 웹 매직 링크 로그인: `verifyEmailToken()`(`@rapi/core`)이 토큰 검증을 제공한다. 웹 세션
-  계층(레인 W1)이 기반 코드에 없어 로그인 연결은 하지 않았다. 세션 계층이 생기면
-  `login` 목적(purpose)을 추가하고 `/e/login/<토큰>` 라우트와 게이트웨이 정규식을 더한다.
+- 웹 `/me`(`WEB_ENABLED`와 `EMAIL_ENABLED`가 둘 다 켜졌을 때): 로그인한 사용자가 메일 주소를
+  등록·변경·삭제하고 상태(확인 대기, 확인됨, 수신 거부, 발송 불가)를 본다. 주소는 가린 채
+  보여 주고, 등록은 디스코드 모달과 같은 서비스(확인 메일, 10분 간격 제한)를 거치며 CSRF 토큰이
+  필요하다. 하드 바운스·스팸 신고된 주소는 삭제해도 행이 남아 차단이 유지된다. 게이트웨이는
+  `POST /me/email`을 새로 연다.
+- 웹 매직 링크 로그인: `verifyEmailToken()`(`@rapi/core`)이 토큰 검증을 제공한다. 웹 로그인은
+  Discord OAuth만 쓰므로 메일 링크 로그인은 연결하지 않았다. 필요하면 `login` 목적(purpose)을 추가하고
+  `/e/login/<토큰>` 라우트와 게이트웨이 정규식을 더한다.
 - 끄려면 `EMAIL_ENABLED=false`로 되돌리고 봇을 재시작한다. 저장된 주소는 남는다
   (`/데이터삭제`와 보존기간 규칙으로 지워진다. `docs/data-lifecycle.md` 참고).
 
@@ -524,3 +535,33 @@ GITHUB_REPORT_TARGET=dm
 
 끄려면 `GITHUB_APP_ENABLED=false`로 되돌리고 서비스를 재시작한다. App 설치 자체를 지우면 GitHub 쪽에서도
 토큰이 즉시 무효화된다.
+
+## 기능 켜기 순서
+
+모든 기능은 꺼진 채로 배포되고, 배포만으로는 아무것도 바뀌지 않는다. 아래 순서는 앞 단계가
+뒤 단계의 전제인 경우를 따랐다. 단계마다 `.env`를 바꾸고 해당 서비스를 재시작한다. 마이그레이션은
+먼저 `npm run db:migrate`로 적용한다.
+
+| 순서 | 플래그 | 필요한 것 | 소유자 작업 | 자세히 |
+| --- | --- | --- | --- | --- |
+| 1 | `MODEL_API_BASE_URL` + `MODEL_API_KEY` (플래그 없음) | `MODEL_DEFAULT`, 선택 `MODEL_MONTHLY_BUDGET_USD`, 마이그레이션 `0026` | LiteLLM 설치와 공급자 키, 가격표 확인 | [LiteLLM 켜기](#litellm-켜기-선택) |
+| 2 | `LEARNER_EXPERIMENT_ENABLED` | `WEBHOOK_ENCRYPTION_KEY`, `RAPI_PUBLIC_BASE_URL`, `DISCORD_SUPERADMIN_USER_IDS`, `0019` | 없음(Discord 안에서 소유자 승인으로 발송) | `.env.example` |
+| 3 | `WEB_ENABLED` | `DISCORD_OAUTH_CLIENT_ID/SECRET`, `RAPI_PUBLIC_BASE_URL`, `WEBHOOK_ENCRYPTION_KEY`, `0021`(구독 폼은 2번이 켜져야 작동) | Discord 개발자 포털에 `${RAPI_PUBLIC_BASE_URL}/auth/discord/callback` redirect 등록, 게이트웨이 재시작 | README, `docs/ux-notes/w1-web.md` |
+| 4 | `BLOG_PUBLISH_ENABLED`, `BLOG_DRAFTS_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0022`, 초안은 1번 | VM의 `gh` 로그인, 블로그 PR 병합, `RAPI_BLOG_WITHDRAWALS_FILE` 쓰기 권한 | `docs/ux-notes/m2-blog.md` |
+| 5 | `EMAIL_ENABLED` | 2번, `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`, `EMAIL_WEBHOOK_SECRET`, `0023` | 발송 도메인 SPF/DKIM/DMARC, 업체 웹훅 등록, 게이트웨이 재시작 | [메일 켜기](#메일-켜기-선택) |
+| 6 | `PUBLIC_AGENT_ENABLED` + `PUBLIC_AGENT_BACKEND=api` | 실행기 쪽 `PUBLIC_AGENT_API_KEY/MODEL`(1번과 별개). 월 상한·가격표는 봇 `.env`의 `MODEL_MONTHLY_BUDGET_USD`와 `ops/model-prices.json` | `/etc/rapi-public-agent.env`에 같은 백엔드·키 설정, 배포 뒤 실행기 재시작(안 하면 사용량 기록이 오지 않는다) | 위 LiteLLM 절 |
+| 7 | `CHATBOT_ENABLED`, `CHATBOT_L2_ENABLED` | 6번, `0025`, 블로그 색인은 `RAPI_PUBLIC_BASE_URL`(https) | 봇 `.env`와 실행기 env 둘 다 `api`인지 확인 | `docs/ux-notes/q5-chatbot.md` |
+| 8 | `GITHUB_APP_ENABLED` | `GITHUB_APP_ID/PRIVATE_KEY_PATH/WEBHOOK_SECRET/ALLOWED_OWNERS/OWNER_LOGINS`, `0024` | GitHub App 등록·설치·웹훅 URL | [GitHub App 만들기](#github-app-만들기-선택) |
+| 9 | `HARNESS_UPDATES_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0020` | VM의 `gh` 로그인, 제안 PR 검토 | [하네스 버전 갱신](#하네스-버전-갱신-선택) |
+
+켜고 나서 한 번씩 확인할 것:
+
+- 1번: `/사용량`(운영진)에 기능별 비용 줄이 보이는지. 새 모델은 가격표에 먼저 넣는다.
+- 3번: 로그인 → `/me`, `/archive`. 4번 이후 `/archive`에는 발행된 가이드 글이 학습자 소식과 함께 보이고
+  내린 글은 보이지 않는다.
+- 5번: `/me`의 "메일 주소" 카드에서 등록 → 확인 메일 → `[확인]`.
+- 7번: 챗봇에게 블로그 글을 물어 출처 링크가 나오는지(색인은 5분 단위로 갱신되고, 내린 글은 다음 갱신에서 빠진다).
+- 6번은 1번 없이 켤 수 있다. 공개 질문 비용은 `model_usage`에 남지만 `MODEL_MONTHLY_BUDGET_USD`가 없으면
+  상한이 없다(기록만).
+
+끄는 순서는 반대다. 플래그를 `false`로 되돌리고 서비스를 재시작하면 된다.

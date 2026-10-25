@@ -5,6 +5,8 @@ import {
   WebPortal,
   createWebPortal,
   type ArchiveSource,
+  type WebEmailPort,
+  createArchiveSource,
   type WebPortalOptions,
   type WebPortalStore,
   type WebRequest,
@@ -32,7 +34,10 @@ const allowlists = {
   adminUserIds: [ADMIN],
 };
 
-function harness(overrides: Partial<WebPortalOptions> = {}) {
+function harness(
+  overrides: Partial<WebPortalOptions> = {},
+  archiveOverride?: ArchiveSource,
+) {
   let now = new Date("2026-10-26T00:00:00Z");
   const sessions = new Map<string, { userId: string; expiresAt: Date }>();
   const accounts = new Map<
@@ -146,7 +151,7 @@ function harness(overrides: Partial<WebPortalOptions> = {}) {
       global_name: "테스터",
     });
   };
-  const portal = new WebPortal(store, learner, archive, {
+  const portal = new WebPortal(store, learner, archiveOverride ?? archive, {
     baseUrl: "https://rapi.example.com/",
     clientId: "999",
     clientSecret: "client-secret",
@@ -679,4 +684,192 @@ test("web stays off unless WEB_ENABLED and every credential are set", async () =
     bot.closeAllConnections();
     await new Promise<void>((resolve) => bot.close(() => resolve()));
   }
+});
+
+function publishedPost(slug: string, kind: "guide" | "issue" = "guide") {
+  return {
+    slug,
+    kind,
+    title: `글 ${slug}`,
+    description: "설명",
+    mdx: [
+      "---",
+      'title: "x"',
+      "---",
+      "",
+      `# 글 ${slug}`,
+      "",
+      "## 소제목",
+      "",
+      "본문 &#60;script&#62;alert(1)&#60;/script&#62; 입니다.",
+      "",
+      "- [참고](https://example.com/a)",
+      "- [나쁨](javascript:alert(1))",
+      "",
+    ].join("\n"),
+    publishedAt: new Date("2026-10-20T00:00:00Z"),
+  };
+}
+
+test("the archive lists published guides next to issues and never a withdrawn one", async () => {
+  const published = [
+    publishedPost("guide-one"),
+    publishedPost("learner-x", "issue"),
+  ];
+  const blog = {
+    // The store only returns published posts; a withdrawn slug is simply absent.
+    async listPublishedBlogPosts() {
+      return published;
+    },
+    async getBlogPost(slug: string) {
+      return published.find((post) => post.slug === slug) ?? null;
+    },
+  };
+  const issues = {
+    async archiveIssues() {
+      return [
+        {
+          slug: "weekly-2026-10-19",
+          cadence: "weekly" as const,
+          periodKey: "2026-10-19",
+          sentAt: new Date("2026-10-19T01:00:00Z"),
+          items: [],
+        },
+      ];
+    },
+    async archiveIssue() {
+      return null;
+    },
+  };
+  const h = harness({}, createArchiveSource(issues, blog));
+  const list = await h.portal.handle(h.request("GET", "/archive"));
+  assert.match(list!.body, /href="\/archive\/blog\/guide-one"/);
+  assert.match(list!.body, /href="\/archive\/weekly-2026-10-19"/);
+  // Issue posts duplicate the learner issues, so they are not listed twice.
+  assert.doesNotMatch(list!.body, /learner-x/);
+  // Newest first: the guide (10-20) precedes the issue (10-19).
+  assert.ok(
+    list!.body.indexOf("guide-one") < list!.body.indexOf("weekly-2026-10-19"),
+  );
+  const post = await h.portal.handle(
+    h.request("GET", "/archive/blog/guide-one"),
+  );
+  assert.equal(post!.status, 200);
+  assert.match(post!.body, /<h2>소제목<\/h2>/);
+  assert.doesNotMatch(post!.body, /<script/);
+  assert.match(post!.body, /&lt;script&gt;/);
+  assert.match(
+    post!.body,
+    /<a href="https:\/\/example\.com\/a" target="_blank" rel="noopener noreferrer">참고<\/a>/,
+  );
+  assert.doesNotMatch(post!.body, /javascript:/);
+  // Withdrawn (absent from the store) and unknown slugs are the same 404.
+  published.splice(0, published.length);
+  const gone = await h.portal.handle(
+    h.request("GET", "/archive/blog/guide-one"),
+  );
+  assert.equal(gone!.status, 404);
+  assert.doesNotMatch(
+    (await h.portal.handle(h.request("GET", "/archive")))!.body,
+    /guide-one/,
+  );
+});
+
+test("an issue-only archive source keeps working without blog posts", async () => {
+  const h = harness();
+  assert.equal(
+    (await h.portal.handle(h.request("GET", "/archive/blog/anything")))!.status,
+    404,
+  );
+});
+
+test("/me adds, shows and removes an email address behind CSRF", async () => {
+  const sent: string[] = [];
+  let stored: { address: string; state: "pending" | "verified" } | null = null;
+  const email: WebEmailPort = {
+    async status() {
+      return stored
+        ? {
+            masked: stored.address.replace(/^(.).*(@.*)$/, "$1***$2"),
+            state: stored.state,
+          }
+        : null;
+    },
+    async register(userId, address) {
+      sent.push(`register:${userId}:${address}`);
+      stored = { address, state: "pending" };
+      return "확인 메일을 보냈어요.";
+    },
+    async remove(userId) {
+      sent.push(`remove:${userId}`);
+      const had = stored !== null;
+      stored = null;
+      return had;
+    },
+  };
+  const h = harness({ emailEnabled: true, email });
+  const { cookie, csrf } = await h.login();
+  const post = (form: Record<string, string>) =>
+    h.portal.handle(h.request("POST", "/me/email", { cookie, form }));
+
+  const initial = await h.portal.handle(h.request("GET", "/me", { cookie }));
+  assert.match(initial!.body, /등록한 주소가 없어요/);
+  assert.doesNotMatch(initial!.body, /준비 중/);
+
+  // No token, a wrong token, or no session never reaches the email service.
+  assert.equal(
+    (await post({ action: "add", address: "a@example.com" }))!.headers.location,
+    "/me?m=csrf",
+  );
+  assert.equal(
+    (await post({
+      action: "add",
+      address: "a@example.com",
+      csrf: "x".repeat(43),
+    }))!.headers.location,
+    "/me?m=csrf",
+  );
+  const anonymous = await h.portal.handle(
+    h.request("POST", "/me/email", {
+      form: { action: "add", address: "a@example.com", csrf },
+    }),
+  );
+  assert.equal(anonymous!.status, 401);
+  assert.deepEqual(sent, []);
+
+  const added = await post({
+    csrf,
+    action: "add",
+    address: "  secret@example.com ",
+  });
+  assert.equal(added!.status, 200);
+  assert.match(added!.body, /확인 메일을 보냈어요/);
+  assert.match(added!.body, /s\*\*\*@example\.com/);
+  assert.match(added!.body, /확인 대기 중/);
+  assert.doesNotMatch(added!.body, /secret@example\.com/);
+  assert.deepEqual(sent, ["register:" + USER + ":secret@example.com"]);
+
+  const bad = await post({ csrf, action: "add", address: "" });
+  assert.match(bad!.body, /메일 주소를 확인하지 못했어요/);
+  assert.equal(sent.length, 1);
+
+  const removed = await post({ csrf, action: "remove" });
+  assert.match(removed!.body, /메일 주소를 지웠어요/);
+  assert.deepEqual(sent.at(-1), "remove:" + USER);
+  assert.match(removed!.body, /등록한 주소가 없어요/);
+});
+
+test("/me keeps the old placeholder when no email service exists", async () => {
+  const h = harness({ emailEnabled: false });
+  const { cookie, csrf } = await h.login();
+  const page = await h.portal.handle(h.request("GET", "/me", { cookie }));
+  assert.match(page!.body, /이메일 \(준비 중\)/);
+  assert.doesNotMatch(page!.body, /\/me\/email/);
+  const reply = await h.portal.handle(
+    h.request("POST", "/me/email", {
+      cookie,
+      form: { csrf, action: "add", address: "a@example.com" },
+    }),
+  );
+  assert.equal(reply!.headers.location, "/me?m=email");
 });

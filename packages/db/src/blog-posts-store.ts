@@ -38,6 +38,7 @@ export interface NewBlogPost {
 /** What the web archive needs; no draft or withdrawn post is ever listed. */
 export interface PublishedBlogPost {
   slug: string;
+  kind: BlogPostKind;
   title: string;
   description: string;
   mdx: string;
@@ -197,12 +198,13 @@ export class BlogPostsStore {
   /** Published posts, newest first, for the web archive and the static build. */
   async listPublishedBlogPosts(limit = 200): Promise<PublishedBlogPost[]> {
     const result = await this.db.pool.query<Row>(
-      `SELECT slug,title,description,mdx,published_at FROM blog_posts
+      `SELECT slug,kind,title,description,mdx,published_at FROM blog_posts
        WHERE status='published' ORDER BY published_at DESC,slug LIMIT $1`,
       [Math.min(Math.max(limit, 1), 500)],
     );
     return result.rows.map((row) => ({
       slug: row.slug as string,
+      kind: row.kind as BlogPostKind,
       title: row.title as string,
       description: row.description as string,
       mdx: row.mdx as string,
@@ -213,7 +215,7 @@ export class BlogPostsStore {
   /** A withdrawn or unpublished slug yields null, exactly like an unknown one. */
   async getBlogPost(slug: string): Promise<PublishedBlogPost | null> {
     const result = await this.db.pool.query(
-      `SELECT slug,title,description,mdx,published_at FROM blog_posts
+      `SELECT slug,kind,title,description,mdx,published_at FROM blog_posts
        WHERE slug=$1 AND status='published'`,
       [slug],
     );
@@ -221,6 +223,7 @@ export class BlogPostsStore {
     return row
       ? {
           slug: row.slug as string,
+          kind: row.kind as BlogPostKind,
           title: row.title as string,
           description: row.description as string,
           mdx: row.mdx as string,

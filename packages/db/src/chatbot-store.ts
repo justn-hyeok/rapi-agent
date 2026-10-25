@@ -35,9 +35,16 @@ const SYNC_INTERVAL_MS = 5 * 60_000;
 /** Archive search and 24-hour thread context for the public chatbot. */
 export class ChatbotStore {
   private lastSync = 0;
-  constructor(readonly db: PostgresStore) {}
+  /** `blogBaseUrl` (RAPI_PUBLIC_BASE_URL) is required for blog posts to be indexed. */
+  constructor(
+    readonly db: PostgresStore,
+    private readonly blogBaseUrl?: string,
+  ) {}
 
-  /** Copies sent learner issues and posted curation items into the archive index. */
+  /**
+   * Copies sent learner issues, posted curation items and published blog posts
+   * into the archive index. A withdrawn post leaves the index on the next sync.
+   */
   async syncArchive(): Promise<void> {
     await this.db.pool.query(
       `INSERT INTO archive_documents(key,kind,title,summary,url,published_at)
@@ -58,6 +65,22 @@ export class ChatbotStore {
          AND COALESCE(p.embeds->0->>'url', substring(p.embeds->0->>'description' from 'https://[^[:space:])<>]+')) LIKE 'https://%'
        ON CONFLICT (key) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary, url=EXCLUDED.url`,
     );
+    const base = this.blogBaseUrl?.replace(/\/$/, "");
+    // archive_documents only accepts https URLs.
+    if (base?.startsWith("https://")) {
+      await this.db.pool.query(
+        `INSERT INTO archive_documents(key,kind,title,summary,url,published_at)
+         SELECT 'blog:'||slug, 'blog', title, left(description,400), $1||'/blog/'||slug||'.html', published_at
+         FROM blog_posts WHERE status='published' AND published_at IS NOT NULL
+         ON CONFLICT (key) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
+          url=EXCLUDED.url, published_at=EXCLUDED.published_at`,
+        [base],
+      );
+      await this.db.pool.query(
+        `DELETE FROM archive_documents WHERE kind='blog'
+         AND key NOT IN (SELECT 'blog:'||slug FROM blog_posts WHERE status='published')`,
+      );
+    }
     this.lastSync = Date.now();
   }
 

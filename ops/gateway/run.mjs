@@ -23,6 +23,7 @@ const webRoutes = [
   ["POST", /^\/logout$/],
   ["GET", /^\/me$/],
   ["POST", /^\/me\/subscription$/],
+  ["POST", /^\/me\/email$/],
   ["GET", /^\/admin$/],
   [
     "GET",
@@ -34,6 +35,7 @@ const webRoutes = [
   ],
   ["GET", /^\/archive$/],
   ["GET", /^\/archive\/(?:daily|weekly)-\d{4}-\d{2}-\d{2}$/],
+  ["GET", /^\/archive\/blog\/(?=.{1,100}$)[a-z0-9]+(?:-[a-z0-9]+)*$/],
   ["GET", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
   ["POST", /^\/u\/\d{15,20}\.\d{10}\.[\w-]{43}$/],
 ];

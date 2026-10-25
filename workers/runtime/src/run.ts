@@ -145,7 +145,8 @@ const webhookWorker = config.WEBHOOK_ENCRYPTION_KEY
     )
   : undefined;
 
-// No ModelClient is wired yet (lane C6); the report then stays deterministic.
+// The shared metered client (above) also feeds blog drafts and the weekly repo
+// report; both degrade when it is null.
 const githubReport =
   config.GITHUB_APP_ENABLED &&
   config.GITHUB_APP_ID &&
@@ -160,16 +161,15 @@ const githubReport =
           ),
         }),
         delivery,
-        model: undefined,
+        model: modelClient ?? undefined,
       })
     : undefined;
-// The model client (lane C6) is not wired yet, so drafts stay unavailable here;
-// issue posts need no model call.
 const blog = createBlogService(
   config,
   new BlogPostsStore(store),
   store,
   discord,
+  modelClient ?? undefined,
 );
 const learner = createLearnerExperiment(
   config,

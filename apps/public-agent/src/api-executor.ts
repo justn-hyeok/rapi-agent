@@ -15,11 +15,22 @@ export const PUBLIC_API_SYSTEM = [
   "서버 파일, 환경변수, 데이터베이스, 비공개 대화를 조회하거나 추측하지 않는다.",
 ].join("\n");
 
+/** What one successful call used; the caller records it in `model_usage`. */
+export interface PublicModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** 0 with `costSource: "unknown"` means the caller has to price the tokens. */
+  costMicroUsd: number;
+  costSource: "gateway" | "unknown";
+}
+
 export interface PublicModelResult {
   started: boolean;
   ok: boolean;
   output: string;
   reason: "exit" | "timeout" | "cancel" | "spawn_error" | "budget";
+  usage?: PublicModelUsage;
 }
 
 export type PublicModelFeature = "archive_qa" | "public_qa";
@@ -64,6 +75,15 @@ export async function runPublicModel(
       ok: output.length > 0,
       output: output,
       reason: "exit",
+      // A reply that was paid for is reported even when it came back empty.
+      usage: {
+        model: response.model,
+        inputTokens: response.usage.inputTokens,
+        outputTokens: response.usage.outputTokens,
+        costMicroUsd: response.usage.costMicroUsd,
+        costSource:
+          response.usage.costSource === "gateway" ? "gateway" : "unknown",
+      },
     };
   } catch (error) {
     const reason: PublicModelResult["reason"] = isBudgetError(error)

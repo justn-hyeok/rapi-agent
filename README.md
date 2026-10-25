@@ -114,7 +114,8 @@ slash 명령 정의는 16개다(`apps/bot/src/discord-http.ts`). `/브리핑`, `
 USER는 `/admin/usage`, ADMIN은 구독·수집원·발송내역·상태·사용정책, SUPERADMIN은 서버 구성·웹훅.
 웹에는 서버 맥락이 없어 서버 단위 설정은 서버를 직접 고르고, Discord 관리자 권한이나 역할은 웹에서 확인할 수
 없으므로 `DISCORD_*_USER_IDS`에 오른 계정만 쓸 수 있다. 웹은 Discord 로그인(`/auth/discord/login`),
-내 구독(`/me`), 지난 소식(`/archive`)도 제공한다.
+내 구독(`/me`, 메일 주소 등록 포함), 지난 소식과 발행된 가이드(`/archive`)도 제공한다.
+기능을 켜는 순서와 소유자 작업은 [운영 문서의 "기능 켜기 순서"](docs/operations.md#기능-켜기-순서)에 한 번만 정리했다.
 
 관리 구성은 `라피-질문`과 비공개 `라피-관리`에 ChatOps를 켠다. USER의 `라피야!`
 질문은 격리된 `gpt-5.6-luna`가 실시간 웹 검색으로 답하며 원문·세션을

@@ -1,5 +1,3 @@
-import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { redactChat } from "@rapi/contracts";
 import {
   ARCHIVE_TOP_K,
@@ -15,7 +13,6 @@ import {
   selectLearnerItems,
   splitEvidence,
   stripLinks,
-  type ArchiveDocument,
   type ArchiveHit,
   type ChatTurn,
   type LearnerCadence,
@@ -406,35 +403,4 @@ export function createGithubRepoReader(
       entries,
     };
   };
-}
-
-// --- Blog posts into the archive -------------------------------------------
-
-/** Public MDX posts of apps/blog/content as archive documents. */
-export async function loadBlogArchive(
-  directory: string,
-  baseUrl: string,
-): Promise<ArchiveDocument[]> {
-  const documents: ArchiveDocument[] = [];
-  for (const name of await readdir(directory)) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*\.mdx$/.test(name)) continue;
-    const source = await readFile(join(directory, name), "utf8");
-    const front = /^---\n([\s\S]*?)\n---/.exec(source)?.[1] ?? "";
-    const field = (key: string): string =>
-      new RegExp(`^${key}:\\s*(.+)$`, "m").exec(front)?.[1]?.trim() ?? "";
-    if (field("visibility") !== "public") continue;
-    const title = field("title");
-    const date = new Date(field("date"));
-    if (!title || Number.isNaN(date.getTime())) continue;
-    const slug = name.slice(0, -4);
-    documents.push({
-      key: `blog:${slug}`,
-      kind: "blog",
-      title,
-      summary: field("description").slice(0, 400),
-      url: `${baseUrl.replace(/\/$/, "")}/blog/${slug}.html`,
-      publishedAt: date,
-    });
-  }
-  return documents;
 }

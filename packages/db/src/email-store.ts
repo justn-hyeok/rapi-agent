@@ -72,6 +72,23 @@ export class EmailStore {
     return result.rows[0] ? record(result.rows[0]) : null;
   }
 
+  /**
+   * The learner's "remove my address". A suppressed address (hard bounce or
+   * complaint) stays as an unsubscribed row so removing and re-adding it cannot
+   * lift the suppression; everything else is deleted with its delivery rows.
+   */
+  async removeByUser(userId: string): Promise<boolean> {
+    const deleted = await this.db.pool.query(
+      "DELETE FROM learner_emails WHERE user_id=$1 AND bounce_state IN ('none','soft')",
+      [userId],
+    );
+    const kept = await this.db.pool.query(
+      "UPDATE learner_emails SET unsubscribed_at=COALESCE(unsubscribed_at,now()) WHERE user_id=$1",
+      [userId],
+    );
+    return (deleted.rowCount ?? 0) + (kept.rowCount ?? 0) > 0;
+  }
+
   async byId(id: string): Promise<EmailAddressRecord | null> {
     const result = await this.db.pool.query<Row>(
       `SELECT ${COLUMNS} FROM learner_emails WHERE id=$1`,

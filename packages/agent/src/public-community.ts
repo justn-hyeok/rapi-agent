@@ -1,6 +1,7 @@
 import { redactChat } from "@rapi/contracts";
 import { BUDGET_REPLY } from "@rapi/core";
 import type { PostgresStore } from "@rapi/db";
+import type { ModelFeature, PublicAgentUsage } from "@rapi/adapters";
 import { createHash } from "node:crypto";
 import type { ChatbotPlan, ChatbotReply, ChatbotService } from "./chatbot.js";
 
@@ -14,7 +15,22 @@ export interface PublicAnswerTransport {
     ok: boolean;
     output: string;
     reason: "exit" | "timeout" | "cancel" | "spawn_error" | "budget";
+    /** From the `api` backend only: what the call used, to be recorded by the caller. */
+    usage?: PublicAgentUsage;
   }>;
+}
+
+/**
+ * The monthly model cap for the isolated `api` executor, which cannot see the
+ * database: checked here before a question is forwarded, usage recorded after.
+ */
+export interface PublicModelMeter {
+  blocked(feature: ModelFeature): Promise<boolean>;
+  record(
+    feature: ModelFeature,
+    usage: PublicAgentUsage,
+    latencyMs: number,
+  ): Promise<void>;
 }
 
 export class PublicCommunityService {
@@ -24,6 +40,8 @@ export class PublicCommunityService {
     readonly enabled = true,
     /** Set when CHATBOT_ENABLED: archive Q&A replaces the free-form public answer. */
     readonly chatbot?: ChatbotService,
+    /** Set for PUBLIC_AGENT_BACKEND=api; the codex backend is not metered. */
+    readonly meter?: PublicModelMeter,
   ) {}
 
   async answer(input: {
@@ -69,6 +87,12 @@ export class PublicCommunityService {
         return plan.reply;
       }
     }
+    // The executor's own spend is not in the ledger until it is recorded below,
+    // so the cap is checked here, before a daily-limit slot is spent.
+    const feature: ModelFeature =
+      plan?.kind === "model" ? plan.feature : "public_qa";
+    if (this.meter && (await this.meter.blocked(feature)))
+      return say(BUDGET_REPLY);
     const reservation = await this.store.reserveAiUsage({
       guildId: input.guildId,
       userId: input.userId,
@@ -120,6 +144,7 @@ export class PublicCommunityService {
               "사용자 요청:",
               input.text.slice(0, 4_000),
             ].join("\n\n");
+      const startedAt = Date.now();
       const result = await this.transport.answer(
         prompt,
         async () => {
@@ -134,6 +159,10 @@ export class PublicCommunityService {
             "공개 질문 실행기를 사용할 수 없습니다. 잠시 후 다시 시도해주세요. 사용량은 차감되지 않았습니다.",
           );
       }
+      if (this.meter && result.usage)
+        await this.meter
+          .record(feature, result.usage, Date.now() - startedAt)
+          .catch(() => undefined);
       await this.store.finishAiUsage(
         input.requestId,
         result.ok ? "succeeded" : "failed",
