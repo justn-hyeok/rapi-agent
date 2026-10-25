@@ -115,6 +115,15 @@ const server = createServer(async (incoming, outgoing) => {
     /^\/r\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{15,20}\.\d{10}\.[\w-]{43}$/.test(
       path,
     );
+  // Email links: a confirm page (GET) and its action (POST), plus provider webhooks.
+  const emailLink =
+    ["GET", "POST"].includes(incoming.method) &&
+    /^\/e\/(?:verify|unsub)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d{10}\.[\w-]{43}$/.test(
+      path,
+    );
+  const emailWebhook =
+    incoming.method === "POST" &&
+    /^\/e\/webhook\/(?:resend|postmark)$/.test(path);
   const briefingFeedback =
     incoming.method === "POST" &&
     /^\/b\/[0-9a-f-]{36}\/(?:feedback|events|detail|curation)$/.test(path);
@@ -125,6 +134,8 @@ const server = createServer(async (incoming, outgoing) => {
     !webPage &&
     !briefingPage &&
     !learnerLink &&
+    !emailLink &&
+    !emailWebhook &&
     !briefingFeedback &&
     (incoming.method !== "POST" || !allowed.some((rule) => rule.test(path)))
   ) {

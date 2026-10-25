@@ -389,6 +389,54 @@ DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 �
 필요하다. 현재 chat(ChatOps)과 public-agent는 계속 Codex 구독 로그인으로 실행되며 이
 클라이언트를 쓰지 않는다. public-agent는 DB·키 접근이 없는 격리 프로세스라 의도적으로
 연결하지 않았다.
+## 메일 켜기 (선택)
+
+학습자 호를 메일로도 보내는 채널이다. 0단계 실험의 "메일 의향" 결과가 메일 발송을
+가리킬 때만 켠다. 기본은 꺼져 있고, 켜지 않으면 배포해도 아무것도 바뀌지 않는다.
+`LEARNER_EXPERIMENT_ENABLED=true`가 먼저 필요하다.
+
+### 소유자가 할 일
+
+1. 발송 업체를 고르고 계정을 만든다: `resend` 또는 `postmark`.
+2. 보내는 도메인을 업체에 등록하고 안내하는 DNS 레코드를 넣는다.
+   - **SPF**: 업체가 안내하는 `include:`를 도메인의 SPF TXT에 합친다(SPF TXT는 도메인당 하나).
+   - **DKIM**: 업체가 주는 CNAME/TXT 레코드를 그대로 추가한다.
+   - **DMARC**: `_dmarc.<도메인>` TXT. 처음에는 `v=DMARC1; p=none; rua=mailto:<받을 주소>`로
+     시작하고, 리포트에서 SPF/DKIM 정렬이 확인되면 `p=quarantine`으로 올린다.
+   - 업체 화면에서 도메인이 "Verified"가 된 것을 확인한 뒤 진행한다.
+3. 업체에서 발급한 서버 API 키를 `EMAIL_API_KEY`에 넣는다(채팅·Git에 남기지 않는다).
+4. 웹훅을 등록한다. URL은 `https://<RAPI_PUBLIC_BASE_URL의 도메인>/e/webhook/<resend|postmark>`.
+   - Resend: 이벤트 `email.bounced`, `email.complained`를 선택하고, 발급된 서명 비밀값
+     (`whsec_...`)을 `EMAIL_WEBHOOK_SECRET`에 넣는다. 서명(svix)과 5분 시각 허용 오차를 검증한다.
+   - Postmark: 서명을 제공하지 않으므로 웹훅 URL에 Basic 인증을 건다. 임의의 `user:password`를
+     만들어 업체 웹훅 설정과 `EMAIL_WEBHOOK_SECRET` 양쪽에 같은 값으로 넣는다. Bounce와
+     Spam complaint 웹훅을 켠다. 정기 소식은 Postmark 정책상 Broadcast 스트림이 맞을 수
+     있다(코드에서 확인하지 못했다). 그렇다면 스트림을 만들고 ID를 `EMAIL_POSTMARK_STREAM`에
+     넣는다(기본 `outbound`).
+5. `.env`에 설정한다: `EMAIL_ENABLED=true`, `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`
+   (인증한 도메인의 주소만, 표시 이름 없이), 선택 `EMAIL_REPLY_TO`, `EMAIL_WEBHOOK_SECRET`. 하나라도 빠지면
+   봇이 시작하지 않는다. 마이그레이션 `0023_email_delivery.sql`이 먼저 적용돼야 한다.
+6. 공개 게이트웨이(`ops/gateway/run.mjs`)가 새 코드로 재시작돼야 `/e/verify/…`,
+   `/e/unsub/…`, `/e/webhook/…`가 열린다. 봇을 재시작한다.
+7. 확인: 본인 계정으로 학습자 구독 → 구독 확인 메시지의 `[메일로도 받기]`로 주소 등록 →
+   확인 메일의 링크 → `[확인]` → 다음 호 발송 후 메일 수신, 맨 아래 `메일 그만 받기` 동작을 본다.
+
+### 동작 요약
+
+- 주소 등록은 디스코드 모달이다. 주소를 저장하고 확인 메일(24시간, 1회용 링크)을 보낸다.
+  링크를 열면 확인 버튼이 있는 페이지가 뜨고, 버튼을 눌러야 확인된다(메일 보안 스캐너가
+  링크를 미리 열어도 소모되지 않는다).
+- 호 발송은 기존 흐름 그대로 소유자가 `[발송]`을 눌렀을 때만 나간다. 그때 확인된 주소를
+  가진 구독자에게 메일이 추가로 나간다. 수신자별 결과는 `learner_email_deliveries`에
+  남고, 실패는 다시 시도하지 않는다.
+- 모든 메일에 `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+  헤더와 본문 하단 수신 거부 링크(`/e/unsub/<토큰>`)가 있다.
+- 하드 바운스·스팸 신고는 해당 주소로의 발송을 멈춘다. 소프트 바운스는 5회 누적 시 멈춘다.
+- 웹 매직 링크 로그인: `verifyEmailToken()`(`@rapi/core`)이 토큰 검증을 제공한다. 웹 세션
+  계층(레인 W1)이 기반 코드에 없어 로그인 연결은 하지 않았다. 세션 계층이 생기면
+  `login` 목적(purpose)을 추가하고 `/e/login/<토큰>` 라우트와 게이트웨이 정규식을 더한다.
+- 끄려면 `EMAIL_ENABLED=false`로 되돌리고 봇을 재시작한다. 저장된 주소는 남는다
+  (`/데이터삭제`와 보존기간 규칙으로 지워진다. `docs/data-lifecycle.md` 참고).
 
 ## OMP 제거
 

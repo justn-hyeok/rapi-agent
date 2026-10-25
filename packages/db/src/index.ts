@@ -31,3 +31,4 @@ export * from "./web-store.js";
 export * from "./github-store.js";
 export * from "./blog-posts-store.js";
 export * from "./chatbot-store.js";
+export * from "./email-store.js";

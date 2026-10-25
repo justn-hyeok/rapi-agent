@@ -2,6 +2,8 @@ import type { DeliveryAdapter, DeliveryResult } from "@rapi/core";
 import {
   DiscordDeliveryAdapter,
   ApiSummarizer,
+  EmailDeliveryAdapter,
+  createEmailTransport,
   CodexSummarizer,
   SmtpDeliveryAdapter,
   createModelClient,
@@ -18,6 +20,7 @@ import {
   BlogService,
   createBlogService,
   createHarnessUpdates,
+  createEmailService,
   createLearnerExperiment,
   createWebPortal,
   HarnessUpdateService,
@@ -41,6 +44,7 @@ import {
 import { loadEnvironment } from "@rapi/config";
 import {
   compareMigrationNames,
+  EmailStore,
   expectedMigrationNames,
   GitHubStore,
   BlogPostsStore,
@@ -163,11 +167,28 @@ const blog = createBlogService(
   store,
   discord,
 );
+const emailService =
+  config.EMAIL_PROVIDER && config.EMAIL_API_KEY && config.EMAIL_FROM
+    ? createEmailService(
+        config,
+        new EmailStore(store),
+        new EmailDeliveryAdapter(
+          createEmailTransport(config.EMAIL_PROVIDER, config.EMAIL_API_KEY, {
+            postmarkStream: config.EMAIL_POSTMARK_STREAM,
+          }),
+          { from: config.EMAIL_FROM, replyTo: config.EMAIL_REPLY_TO },
+        ),
+        async (userId) => {
+          await store.learnerSetEmailInterest(userId, true);
+        },
+      )
+    : undefined;
 const learner = createLearnerExperiment(
   config,
   store,
   discord,
   blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {},
+  emailService,
 );
 const harnessUpdates = createHarnessUpdates(
   config,
@@ -410,6 +431,20 @@ const server = createDiscordInteractionServer(
         agent.briefingCuration(batchId, token, input),
     },
     ...(web ? { web: { handle: (request) => web.handle(request) } } : {}),
+    ...(emailService && learner
+      ? {
+          email: {
+            page: (kind, token, method) =>
+              kind === "verify"
+                ? emailService.verifyLink(token, method)
+                : emailService.unsubscribeLink(token, method),
+            webhook: (provider, headers, rawBody) =>
+              emailService.webhook(provider, headers, rawBody),
+            register: (userId, address) =>
+              emailService.register(userId, address),
+          },
+        }
+      : {}),
     ...(learner
       ? {
           learner: {

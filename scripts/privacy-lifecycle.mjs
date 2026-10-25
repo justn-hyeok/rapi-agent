@@ -463,11 +463,14 @@ export async function processDeletion(client, id, config) {
         "learner_clicks",
         "learner_replies",
         "learner_deliveries",
-        "learner_subscriptions",
       ])
         await client.query(`DELETE FROM ${table} WHERE user_id=$1`, [
           row.target_id,
         ]);
+      await deleteUserEmails(client, row.target_id);
+      await client.query("DELETE FROM learner_subscriptions WHERE user_id=$1", [
+        row.target_id,
+      ]);
       await client.query(
         "UPDATE approvals SET approver_id=$2,discord_message_ref=NULL WHERE approver_id=$1",
         [row.target_id, privacyRef(key, "actor", row.target_id)],
@@ -796,6 +799,7 @@ export async function sweepMetadata(
         "DELETE FROM privacy_requests WHERE state='completed' AND processed_at<$1::timestamptz-interval '1 year'",
         [now],
       );
+      await expireEmails(client, now);
     }
     await client.query("COMMIT");
     return report;
@@ -803,4 +807,33 @@ export async function sweepMetadata(
     await client.query("ROLLBACK");
     throw error;
   }
+}
+
+/** The learner's email address and its delivery results (rows cascade from the address). */
+export async function deleteUserEmails(client, userId) {
+  await client.query(
+    "DELETE FROM learner_email_deliveries WHERE email_id IN (SELECT id FROM learner_emails WHERE user_id=$1)",
+    [userId],
+  );
+  await client.query("DELETE FROM learner_emails WHERE user_id=$1", [userId]);
+}
+
+/**
+ * Retention: addresses never confirmed are dropped after 7 days; addresses that
+ * were unsubscribed or stopped by a hard bounce or complaint after 1 year (the
+ * suppression only needs to outlive the mail it protects); delivery results
+ * after 90 days.
+ */
+export async function expireEmails(client, now) {
+  await client.query(
+    "DELETE FROM learner_email_deliveries WHERE at<$1::timestamptz-interval '90 days'",
+    [now],
+  );
+  await client.query(
+    `DELETE FROM learner_emails WHERE
+      (verified_at IS NULL AND created_at<$1::timestamptz-interval '7 days')
+      OR (unsubscribed_at<$1::timestamptz-interval '1 year')
+      OR (bounce_state IN('hard','complaint') AND bounced_at<$1::timestamptz-interval '1 year')`,
+    [now],
+  );
 }

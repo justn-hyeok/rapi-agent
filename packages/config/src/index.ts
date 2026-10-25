@@ -61,6 +61,15 @@ export const environmentSchema = z
     EMAIL_TRANSPORT: z.enum(["smtp", "api"]).optional(),
     EMAIL_FROM: z.string().email().optional(),
     EMAIL_TEST_RECIPIENTS: z.string().optional(),
+    EMAIL_ENABLED: booleanString,
+    EMAIL_PROVIDER: z.enum(["resend", "postmark"]).optional(),
+    EMAIL_API_KEY: z.string().min(1).optional(),
+    EMAIL_POSTMARK_STREAM: z
+      .string()
+      .regex(/^[\w-]{1,64}$/)
+      .optional(),
+    EMAIL_REPLY_TO: z.string().email().optional(),
+    EMAIL_WEBHOOK_SECRET: z.string().min(8).optional(),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
     SMTP_USERNAME: z.string().min(1).optional(),
@@ -143,7 +152,6 @@ export const environmentSchema = z
     DELIVERY_ENABLED: booleanString.default("true"),
     LEARNER_EXPERIMENT_ENABLED: booleanString,
     WEB_ENABLED: booleanString,
-    EMAIL_ENABLED: booleanString,
     DISCORD_OAUTH_CLIENT_ID: z.string().regex(/^\d+$/).optional(),
     DISCORD_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
     HARNESS_UPDATES_ENABLED: booleanString,
@@ -234,6 +242,35 @@ export const environmentSchema = z
         message:
           "WEB_ENABLED requires DISCORD_OAUTH_CLIENT_ID, DISCORD_OAUTH_CLIENT_SECRET, RAPI_PUBLIC_BASE_URL and WEBHOOK_ENCRYPTION_KEY",
       });
+    }
+    if (value.EMAIL_ENABLED) {
+      const missing = [
+        ["EMAIL_PROVIDER", value.EMAIL_PROVIDER],
+        ["EMAIL_API_KEY", value.EMAIL_API_KEY],
+        ["EMAIL_FROM", value.EMAIL_FROM],
+        ["EMAIL_WEBHOOK_SECRET", value.EMAIL_WEBHOOK_SECRET],
+        ["WEBHOOK_ENCRYPTION_KEY", value.WEBHOOK_ENCRYPTION_KEY],
+        ["RAPI_PUBLIC_BASE_URL", value.RAPI_PUBLIC_BASE_URL],
+      ]
+        .filter(([, setting]) => !setting)
+        .map(([name]) => name);
+      if (missing.length || !value.LEARNER_EXPERIMENT_ENABLED)
+        context.addIssue({
+          code: "custom",
+          path: ["EMAIL_ENABLED"],
+          message: `EMAIL_ENABLED requires LEARNER_EXPERIMENT_ENABLED and ${missing.join(", ") || "its provider settings"}`,
+        });
+      if (
+        value.EMAIL_PROVIDER === "postmark" &&
+        value.EMAIL_WEBHOOK_SECRET &&
+        !value.EMAIL_WEBHOOK_SECRET.includes(":")
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["EMAIL_WEBHOOK_SECRET"],
+          message:
+            "EMAIL_WEBHOOK_SECRET for postmark must be the webhook Basic auth credentials as user:password",
+        });
     }
     if (
       value.HARNESS_UPDATES_ENABLED &&

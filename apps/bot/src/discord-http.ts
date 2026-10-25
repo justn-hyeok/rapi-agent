@@ -413,6 +413,19 @@ export function createDiscordInteractionServer(
       ): Promise<{ content: string; components?: unknown[] }>;
       link(token: string, userAgent: string): Promise<string | null>;
     };
+    email?: {
+      page(
+        kind: "verify" | "unsub",
+        token: string,
+        method: "GET" | "POST",
+      ): Promise<{ status: number; html: string }>;
+      webhook(
+        provider: string,
+        headers: Record<string, string | string[] | undefined>,
+        rawBody: string,
+      ): Promise<{ status: number }>;
+      register(userId: string, address: string): Promise<string>;
+    };
     component?: (
       identity: {
         userId: string;
@@ -489,6 +502,43 @@ export function createDiscordInteractionServer(
           "referrer-policy": "no-referrer",
         });
         return response.end();
+      }
+      const emailPage = /^\/e\/(verify|unsub)\/([\w.-]{1,200})(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (emailPage && integrations?.email) {
+        if (request.method !== "GET" && request.method !== "POST")
+          return json(response, 404, { error: "not found" });
+        if (request.method === "POST") await readBody(request);
+        const result = await integrations.email.page(
+          emailPage[1] as "verify" | "unsub",
+          emailPage[2]!,
+          request.method,
+        );
+        response.writeHead(result.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "x-content-type-options": "nosniff",
+          "x-robots-tag": "noindex",
+          "content-security-policy":
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        });
+        return response.end(result.html);
+      }
+      const emailWebhook = /^\/e\/webhook\/(resend|postmark)(?:\?|$)/.exec(
+        request.url ?? "",
+      );
+      if (emailWebhook && integrations?.email) {
+        if (request.method !== "POST")
+          return json(response, 404, { error: "not found" });
+        const raw = await readBody(request);
+        const outcome = await integrations.email.webhook(
+          emailWebhook[1]!,
+          request.headers,
+          raw.toString("utf8"),
+        );
+        return json(response, outcome.status, {});
       }
       const briefing =
         /^\/b\/([0-9a-f-]{36})(\/feedback|\/events|\/detail|\/curation)?(?:\?|$)/.exec(
@@ -632,10 +682,10 @@ export function createDiscordInteractionServer(
         data?: {
           name?: string;
           custom_id?: string;
-          options?: Array<{ name: string; value: unknown }>;
           components?: Array<{
             components?: Array<{ custom_id?: string; value?: string }>;
           }>;
+          options?: Array<{ name: string; value: unknown }>;
         };
       };
       verifiedInteraction = true;
@@ -712,6 +762,74 @@ export function createDiscordInteractionServer(
             },
           });
         }
+      }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id === "email_add" &&
+        integrations?.email
+      )
+        return json(response, 200, {
+          type: 9,
+          data: {
+            custom_id: "email_add_modal",
+            title: "메일로도 받기",
+            components: [
+              {
+                type: 1,
+                components: [
+                  {
+                    type: 4,
+                    custom_id: "address",
+                    label: "받을 메일 주소",
+                    style: 1,
+                    min_length: 5,
+                    max_length: 254,
+                    required: true,
+                    placeholder: "name@example.com",
+                  },
+                ],
+              },
+            ],
+          },
+        });
+      if (
+        interaction.type === 5 &&
+        interaction.data?.custom_id === "email_add_modal" &&
+        integrations?.email
+      ) {
+        const address =
+          interaction.data.components
+            ?.flatMap((rowItem) => rowItem.components ?? [])
+            .find((field) => field.custom_id === "address")?.value ?? "";
+        // The provider call can outlast Discord's 3 second window.
+        if (interaction.application_id && interaction.token) {
+          const original = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`;
+          json(response, 200, { type: 5, data: { flags: 64 } });
+          void integrations.email
+            .register(userId, address)
+            .catch(
+              () =>
+                "메일 주소를 등록하지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
+            )
+            .then(async (content) => {
+              const update = await fetch(original, {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  content,
+                  allowed_mentions: { parse: [] },
+                }),
+              });
+              await update.arrayBuffer();
+            })
+            .catch(() => undefined);
+          return;
+        }
+        const content = await integrations.email.register(userId, address);
+        return json(response, 200, {
+          type: 4,
+          data: { content, flags: 64, allowed_mentions: { parse: [] } },
+        });
       }
       if (interaction.type === 3 && interaction.data?.custom_id) {
         const learnerId = interaction.data.custom_id;

@@ -12,6 +12,8 @@ describe("learner experiment store", () => {
     try {
       await store.resetForTests();
       for (const table of [
+        "learner_email_deliveries",
+        "learner_emails",
         "learner_reports",
         "learner_replies",
         "learner_clicks",

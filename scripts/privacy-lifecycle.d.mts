@@ -97,3 +97,5 @@ export function sweepMetadata(
   chatopsAudits: number;
   applied: boolean;
 }>;
+export function deleteUserEmails(client: Client, userId: string): Promise<void>;
+export function expireEmails(client: Client, now: Date): Promise<void>;

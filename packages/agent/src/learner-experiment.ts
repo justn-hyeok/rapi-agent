@@ -61,6 +61,21 @@ export interface LearnerExperimentOptions {
       url: string;
     }>;
   }) => Promise<void>;
+  /** The email channel; absent unless EMAIL_ENABLED and fully configured. */
+  email?: {
+    sendIssue(issue: {
+      id: string;
+      cadence: LearnerCadence;
+      periodKey: string;
+      items: Array<{
+        id: string;
+        section: "core" | "tools";
+        title: string;
+        summary?: string;
+        url: string;
+      }>;
+    }): Promise<{ sent: number; failed: number }>;
+  };
 }
 
 export interface LearnerIdentity {
@@ -155,6 +170,9 @@ export class LearnerExperiment {
           });
           return {
             content: `${CADENCE_LABEL[argument]} 받기로 했어요. 소식이 준비되면 DM으로 보낼게요. 서버 멤버가 보낸 DM을 막아 두셨다면 열어 주세요. 그만 받고 싶으면 받은 DM의 [그만 받기]를 누르면 돼요.`,
+            ...(this.options.email
+              ? { components: [row(button("메일로도 받기", "email_add", 1))] }
+              : {}),
           };
         }
         const changed = await this.store.learnerSetCadence(
@@ -367,7 +385,15 @@ export class LearnerExperiment {
     await this.store.learnerFinishIssue(issue.id);
     await this.options.onIssueSent?.(issue).catch(() => undefined);
     const counts = await this.store.learnerDeliveryCounts(issue.id);
-    return `발송했어요. 성공 ${counts.sent}명 · 실패 ${counts.failed}명`;
+    let emailNote = "";
+    if (this.options.email)
+      try {
+        const mail = await this.options.email.sendIssue(issue);
+        emailNote = ` · 메일 성공 ${mail.sent}명 · 실패 ${mail.failed}명`;
+      } catch {
+        emailNote = " · 메일 발송 중 오류가 났어요. 발송 내역을 확인해 주세요.";
+      }
+    return `발송했어요. DM 성공 ${counts.sent}명 · 실패 ${counts.failed}명${emailNote}`;
   }
 
   issueMessage(
@@ -407,7 +433,9 @@ export class LearnerExperiment {
       ...(subscriber.emailAsked
         ? []
         : [
-            button("메일로도 받고 싶어요", "learner_email:yes", 1),
+            this.options.email
+              ? button("메일로도 받기", "email_add", 1)
+              : button("메일로도 받고 싶어요", "learner_email:yes", 1),
             button("DM이면 충분해요", "learner_email:no"),
           ]),
     ];
@@ -494,6 +522,7 @@ export function createLearnerExperiment(
   store: LearnerStore,
   delivery: DeliveryAdapter,
   hooks: Pick<LearnerExperimentOptions, "onIssueSent"> = {},
+  email?: LearnerExperimentOptions["email"],
 ): LearnerExperiment | undefined {
   if (
     !config.LEARNER_EXPERIMENT_ENABLED ||
@@ -507,5 +536,6 @@ export function createLearnerExperiment(
     linkSecret: config.WEBHOOK_ENCRYPTION_KEY,
     baseUrl: config.RAPI_PUBLIC_BASE_URL,
     ...(hooks.onIssueSent ? { onIssueSent: hooks.onIssueSent } : {}),
+    ...(email ? { email } : {}),
   });
 }

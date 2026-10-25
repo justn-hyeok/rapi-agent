@@ -75,6 +75,8 @@ export interface DeliveryPayload {
   text: string;
   html: string;
   itemIds: string[];
+  /** Extra email headers such as List-Unsubscribe; other adapters ignore them. */
+  emailHeaders?: Record<string, string>;
   /** A Discord message (embeds and link buttons) replacing the text split. */
   discord?: {
     embeds: unknown[];

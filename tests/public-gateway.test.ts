@@ -313,3 +313,87 @@ test("public gateway forwards only the well-formed web paths and methods", async
     await new Promise<void>((resolve) => bot.close(() => resolve()));
   }
 });
+
+test("public gateway forwards only well-formed email links and webhooks", async () => {
+  const seen: string[] = [];
+  const upstream = createServer((request, response) => {
+    seen.push(`${request.method} ${request.url}`);
+    response.end("ok");
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  const address = upstream.address();
+  assert.ok(address && typeof address === "object");
+  const port = await freePort();
+  const health = await freePort();
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(process.execPath, ["ops/gateway/run.mjs"], {
+      env: {
+        ...process.env,
+        PORT: String(address.port),
+        RAPI_GATEWAY_PORT: String(port),
+        RAPI_GATEWAY_HEALTH_PORT: String(health),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await once(child.stdout!, "data");
+    const base = `http://127.0.0.1:${port}`;
+    const token = `11111111-1111-4111-8111-111111111111.1790000000.${"A".repeat(43)}`;
+    for (const [method, path] of [
+      ["GET", `/e/verify/${token}`],
+      ["POST", `/e/verify/${token}`],
+      ["GET", `/e/unsub/${token}`],
+      ["POST", `/e/unsub/${token}?x=1`],
+      ["POST", "/e/webhook/resend"],
+      ["POST", "/e/webhook/postmark"],
+    ] as const)
+      assert.equal(
+        (
+          await fetch(base + path, {
+            method,
+            ...(method === "POST" ? { body: "{}" } : {}),
+          })
+        ).status,
+        200,
+        `${method} ${path}`,
+      );
+    assert.equal(seen.length, 6);
+    const bad: Array<[string, string]> = [
+      ["GET", `/e/verify/${token}/extra`],
+      ["GET", `/e/verify/${token}x`],
+      ["GET", "/e/verify/abc"],
+      ["GET", `/e/verify/${token.replace(/\.[^.]+$/, ".short")}`],
+      ["GET", "/e/verify/..%2Finteractions"],
+      ["GET", `/e/other/${token}`],
+      ["PUT", `/e/unsub/${token}`],
+      ["DELETE", `/e/unsub/${token}`],
+      ["GET", "/e/webhook/resend"],
+      ["POST", "/e/webhook/sendgrid"],
+      ["POST", "/e/webhook/resend/extra"],
+      ["POST", "/e/webhook/Resend"],
+      ["POST", "/e/webhook/"],
+      ["POST", "/e/"],
+    ];
+    for (const [method, path] of bad)
+      assert.equal(
+        (
+          await fetch(base + path, {
+            method,
+            ...(method === "POST" ? { body: "{}" } : {}),
+          })
+        ).status,
+        404,
+        `${method} ${path}`,
+      );
+    assert.equal(seen.length, 6);
+  } finally {
+    if (child) {
+      const closed = once(child, "close");
+      child.kill("SIGTERM");
+      await closed;
+    }
+    upstream.closeAllConnections();
+    await new Promise<void>((resolve) => upstream.close(() => resolve()));
+  }
+});
