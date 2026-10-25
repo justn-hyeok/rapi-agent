@@ -1199,6 +1199,25 @@ export class PostgresStore {
     );
   }
 
+  /** Previews sent between `from` and `to` that nobody decided and nobody was reminded about. */
+  async learnerIssuesNeedingReminder(from: Date, to: Date): Promise<string[]> {
+    const result = await this.pool.query<{ id: string }>(
+      `SELECT id FROM learner_issues WHERE state='pending' AND preview_reminded_at IS NULL
+       AND preview_sent_at>=$1 AND preview_sent_at<=$2 ORDER BY preview_sent_at`,
+      [from, to],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  /** True for the one caller that may send the reminder. */
+  async learnerClaimPreviewReminder(id: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE learner_issues SET preview_reminded_at=now() WHERE id=$1 AND state='pending' AND preview_reminded_at IS NULL",
+      [id],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
   /** Moves a pending issue to 'sending' or 'skipped'; only one caller can win. */
   async learnerDecideIssue(
     id: string,
@@ -2726,6 +2745,21 @@ export class PostgresStore {
       `SELECT id FROM task_requests WHERE requester_id=$1
        AND state NOT IN ('completed','failed','rejected','expired','cancelled')
        ORDER BY updated_at DESC LIMIT 1`,
+      [ownerId],
+    );
+    return result.rows[0]?.id ?? null;
+  }
+
+  /**
+   * `/취소` for ChatOps: marks the owner's newest running run `cancel_requested`.
+   * The chat process polls this phase and stops the process; null when nothing runs.
+   */
+  async requestChatOpsCancel(ownerId: string): Promise<string | null> {
+    const result = await this.pool.query<{ id: string }>(
+      `UPDATE chatops_runs SET phase='cancel_requested'
+       WHERE id=(SELECT id FROM chatops_runs WHERE owner_id=$1 AND phase='running'
+                 ORDER BY created_at DESC LIMIT 1) AND phase='running'
+       RETURNING id`,
       [ownerId],
     );
     return result.rows[0]?.id ?? null;

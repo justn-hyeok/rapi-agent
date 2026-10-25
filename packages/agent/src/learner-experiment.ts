@@ -15,6 +15,7 @@ import {
   type LearnerItemDraft,
 } from "@rapi/core";
 import type { PostgresStore } from "@rapi/db";
+import type { ButtonOutcome } from "./button-outcome.js";
 
 type LearnerStore = Pick<
   PostgresStore,
@@ -31,6 +32,8 @@ type LearnerStore = Pick<
   | "learnerIssue"
   | "learnerIssuesAwaitingPreview"
   | "learnerMarkPreviewSent"
+  | "learnerIssuesNeedingReminder"
+  | "learnerClaimPreviewReminder"
   | "learnerDecideIssue"
   | "learnerFinishIssue"
   | "learnerIssueState"
@@ -49,6 +52,8 @@ export interface LearnerExperimentOptions {
   /** Public origin whose gateway forwards `/r/<token>` to the bot. */
   baseUrl: string;
   pauseMs?: number;
+  /** Signed web unsubscribe link for a learner; absent unless the web portal is on. */
+  webUnsubscribeUrl?: (userId: string) => string | undefined;
   /** Called once an approved issue has been sent (blog archive); failures are ignored. */
   onIssueSent?: (issue: {
     id: string;
@@ -63,6 +68,8 @@ export interface LearnerExperimentOptions {
   }) => Promise<void>;
   /** The email channel; absent unless EMAIL_ENABLED and fully configured. */
   email?: {
+    /** Null when the learner has no address row at all. */
+    statusFor?: (userId: string) => Promise<object | null>;
     sendIssue(issue: {
       id: string;
       cadence: LearnerCadence;
@@ -100,6 +107,8 @@ const PERIOD_MS: Record<LearnerCadence, number> = {
 };
 // DM content is limited to 2000 characters; stay below with headroom.
 const CONTENT_BUDGET = 1800;
+const REMINDER_AFTER_MS = 3 * 3_600_000;
+const REMINDER_MAX_AGE_MS = 24 * 3_600_000;
 
 const button = (label: string, customId: string, style = 2) => ({
   type: 2,
@@ -143,6 +152,29 @@ export class LearnerExperiment {
           button("매주", "learner_cadence:weekly", 1),
         ),
       ],
+    };
+  }
+
+  static handlesDecision(customId: string): boolean {
+    return /^learner_issue_(?:send|skip):/.test(customId);
+  }
+
+  /** [발송] / [건너뛰기]: the result goes on the preview message itself. */
+  async handleDecision(
+    identity: LearnerIdentity,
+    customId: string,
+  ): Promise<ButtonOutcome> {
+    if (!this.options.superadminIds.includes(identity.userId))
+      return { notice: "운영자만 쓸 수 있는 버튼입니다." };
+    const [action, argument = ""] = customId.split(/:(.*)/s) as [
+      string,
+      string?,
+    ];
+    return {
+      result:
+        action === "learner_issue_send"
+          ? await this.sendIssue(argument, identity.userId)
+          : await this.skipIssue(argument, identity.userId),
     };
   }
 
@@ -281,7 +313,39 @@ export class LearnerExperiment {
     }
     for (const id of await this.store.learnerIssuesAwaitingPreview())
       await this.sendPreview(id);
+    await this.remindUndecided(now);
     await this.reportIfDue(now);
+  }
+
+  /**
+   * One DM when a preview has been waiting three hours. Previews older than a
+   * day are left alone: the issue is stale by then and a late nudge is noise.
+   */
+  private async remindUndecided(now: Date): Promise<void> {
+    const ids = await this.store.learnerIssuesNeedingReminder(
+      new Date(now.getTime() - REMINDER_MAX_AGE_MS),
+      new Date(now.getTime() - REMINDER_AFTER_MS),
+    );
+    for (const id of ids) {
+      if (!(await this.store.learnerClaimPreviewReminder(id))) continue;
+      const issue = await this.store.learnerIssue(id);
+      if (!issue) continue;
+      for (const adminId of this.options.superadminIds)
+        try {
+          await this.delivery.send(
+            { channel: "discord_dm", recipientId: adminId },
+            {
+              subject: "학습자 소식 미리보기 알림",
+              text: `**학습자 소식 ${CADENCE_LABEL[issue.cadence]} · ${issue.periodKey}** 미리보기를 아직 결정하지 않았어요. 위의 미리보기 DM에서 [발송]이나 [건너뛰기]를 눌러 주세요. 결정하지 않으면 이번 호는 나가지 않고 항목도 다음 호로 넘어가지 않아요.`,
+              html: "",
+              itemIds: [],
+            },
+            `learner-reminder:${id}:${adminId}`,
+          );
+        } catch {
+          // The reminder is sent once; a blocked DM is not retried.
+        }
+    }
   }
 
   private async sendPreview(issueId: string): Promise<void> {
@@ -354,7 +418,10 @@ export class LearnerExperiment {
             text: "",
             html: "",
             itemIds: [],
-            discord: this.issueMessage(issue, subscriber),
+            discord: this.issueMessage(issue, {
+              ...subscriber,
+              hasEmail: await this.hasEmail(subscriber.userId),
+            }),
           },
           `learner:${issue.id}:${subscriber.userId}`,
         );
@@ -396,6 +463,17 @@ export class LearnerExperiment {
     return `발송했어요. DM 성공 ${counts.sent}명 · 실패 ${counts.failed}명${emailNote}`;
   }
 
+  /** True when the learner already registered an address (any state). */
+  private async hasEmail(userId: string): Promise<boolean> {
+    const statusFor = this.options.email?.statusFor;
+    if (!statusFor) return false;
+    try {
+      return (await statusFor(userId)) !== null;
+    } catch {
+      return false;
+    }
+  }
+
   issueMessage(
     issue: {
       cadence: LearnerCadence;
@@ -407,7 +485,7 @@ export class LearnerExperiment {
         url: string;
       }>;
     },
-    subscriber: { userId: string; emailAsked: boolean },
+    subscriber: { userId: string; emailAsked: boolean; hasEmail?: boolean },
     now = new Date(),
   ): {
     embeds: unknown[];
@@ -416,6 +494,10 @@ export class LearnerExperiment {
     flags: number;
   } {
     const lines = [`**라피 학습자 소식 · ${issue.periodKey}**`];
+    const unsubscribe = this.options.webUnsubscribeUrl?.(subscriber.userId);
+    const footer = unsubscribe
+      ? `\n웹에서 바로 그만 받기: <${unsubscribe}>`
+      : "";
     for (const section of LEARNER_SECTIONS) {
       const items = issue.items.filter((item) => item.section === section.id);
       if (!items.length) continue;
@@ -423,25 +505,34 @@ export class LearnerExperiment {
       for (const item of items) {
         const link = `${this.options.baseUrl.replace(/\/+$/, "")}/r/${signLearnerLink(this.key, item.id, subscriber.userId, now)}`;
         const line = `• [${item.title.replace(/[[\]]/g, "").slice(0, 60)}](<${link}>)`;
-        if (lines.join("\n").length + line.length > CONTENT_BUDGET) break;
+        if (
+          lines.join("\n").length + line.length + footer.length >
+          CONTENT_BUDGET
+        )
+          break;
         lines.push(line);
       }
     }
+    const email = this.options.email;
     const buttons = [
       button("빈도 바꾸기", "learner_change"),
       button("그만 받기", "learner_optout"),
+      // With the email channel on, keep offering the address form until the
+      // learner registers one; the "DM is enough" answer is only asked once.
+      ...(email
+        ? subscriber.hasEmail
+          ? []
+          : [button("메일로도 받기", "email_add", 1)]
+        : subscriber.emailAsked
+          ? []
+          : [button("메일로도 받고 싶어요", "learner_email:yes", 1)]),
       ...(subscriber.emailAsked
         ? []
-        : [
-            this.options.email
-              ? button("메일로도 받기", "email_add", 1)
-              : button("메일로도 받고 싶어요", "learner_email:yes", 1),
-            button("DM이면 충분해요", "learner_email:no"),
-          ]),
+        : [button("DM이면 충분해요", "learner_email:no")]),
     ];
     return {
       embeds: [],
-      content: lines.join("\n"),
+      content: lines.join("\n") + footer,
       // Suppress link previews so a crawler fetch is not mistaken for a click.
       flags: 4,
       components: [row(...buttons)],
@@ -521,7 +612,10 @@ export function createLearnerExperiment(
   },
   store: LearnerStore,
   delivery: DeliveryAdapter,
-  hooks: Pick<LearnerExperimentOptions, "onIssueSent"> = {},
+  hooks: Pick<
+    LearnerExperimentOptions,
+    "onIssueSent" | "webUnsubscribeUrl"
+  > = {},
   email?: LearnerExperimentOptions["email"],
 ): LearnerExperiment | undefined {
   if (
@@ -536,6 +630,9 @@ export function createLearnerExperiment(
     linkSecret: config.WEBHOOK_ENCRYPTION_KEY,
     baseUrl: config.RAPI_PUBLIC_BASE_URL,
     ...(hooks.onIssueSent ? { onIssueSent: hooks.onIssueSent } : {}),
+    ...(hooks.webUnsubscribeUrl
+      ? { webUnsubscribeUrl: hooks.webUnsubscribeUrl }
+      : {}),
     ...(email ? { email } : {}),
   });
 }

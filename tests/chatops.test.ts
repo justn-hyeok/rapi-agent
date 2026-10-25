@@ -96,6 +96,25 @@ const corpus: Array<[string, ChatRoute]> = [
   ["나중에 배포해줘", "answer"],
   ['"배포해줘', "answer"],
   ["중단하지 말아줘", "answer"],
+  // English change requests route to PR work like the Korean phrases.
+  ["fix the failing login test", "execute"],
+  ["Fix the failing login test", "execute"],
+  ["please add a retry to the fetcher", "execute"],
+  ["Implement pagination for /archive", "execute"],
+  ["update the README install section", "execute"],
+  ["refactor the delivery module", "execute"],
+  ["remove the unused env var", "execute"],
+  ["rename Foo to Bar", "execute"],
+  ["bump zod to the latest minor", "execute"],
+  ["write tests for the router", "execute"],
+  ["can you fix the typo in docs?", "execute"],
+  ["라피야! fix the typo in docs", "execute"],
+  ["how do I fix this error?", "answer"],
+  ["don't fix anything, just explain", "answer"],
+  ["should we add a cache?", "answer"],
+  ["explain how to add a retry", "answer"],
+  ['the word "fix" means repair', "answer"],
+  ["what does fix do", "answer"],
 ];
 for (const [input, expected] of corpus)
   test(`route ${input}`, () => assert.equal(routeIntent(input), expected));

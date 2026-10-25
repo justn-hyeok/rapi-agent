@@ -10,6 +10,8 @@ import {
   RapiAgent,
   WebhookAuthenticationError,
   WebhookManager,
+  composeButtonMessage,
+  type ButtonOutcome,
   type DiscordCommand,
 } from "@rapi/agent";
 import { verifyWebhookSignature, type ExternalItem } from "@rapi/adapters";
@@ -426,6 +428,14 @@ export function createDiscordInteractionServer(
       ): Promise<{ status: number }>;
       register(userId: string, address: string): Promise<string>;
     };
+    /** Owner decision buttons; the result is written onto the pressed message. */
+    decision?: {
+      handles(customId: string): boolean;
+      handle(
+        identity: { userId: string; guildId?: string },
+        customId: string,
+      ): Promise<ButtonOutcome>;
+    };
     component?: (
       identity: {
         userId: string;
@@ -679,6 +689,7 @@ export function createDiscordInteractionServer(
         user?: { id?: string };
         guild_id?: string;
         channel_id?: string;
+        message?: { content?: string };
         data?: {
           name?: string;
           custom_id?: string;
@@ -831,6 +842,95 @@ export function createDiscordInteractionServer(
           data: { content, flags: 64, allowed_mentions: { parse: [] } },
         });
       }
+      if (
+        interaction.type === 3 &&
+        interaction.data?.custom_id &&
+        integrations?.decision?.handles(interaction.data.custom_id)
+      ) {
+        const decision = integrations.decision;
+        const customId = interaction.data.custom_id;
+        const original = interaction.message?.content ?? "";
+        const run = async (): Promise<{
+          content: string;
+          components?: unknown[];
+          notice: boolean;
+        }> => {
+          try {
+            const outcome = await decision.handle(identity, customId);
+            if (outcome.notice)
+              return { content: outcome.notice, notice: true };
+            return {
+              content: composeButtonMessage(
+                original,
+                outcome,
+                userId,
+                new Date(),
+              ),
+              components: outcome.components ?? [],
+              notice: false,
+            };
+          } catch (error) {
+            return {
+              content:
+                error instanceof Error ? error.message : "처리하지 못했어요.",
+              notice: true,
+            };
+          }
+        };
+        if (!interaction.application_id || !interaction.token) {
+          const result = await run();
+          return json(
+            response,
+            200,
+            result.notice
+              ? {
+                  type: 4,
+                  data: {
+                    content: result.content,
+                    flags: 64,
+                    allowed_mentions: { parse: [] },
+                  },
+                }
+              : {
+                  type: 7,
+                  data: {
+                    content: result.content,
+                    components: result.components,
+                    allowed_mentions: { parse: [] },
+                  },
+                },
+          );
+        }
+        // Approving a guild or sending an issue outlives Discord's 3 second
+        // window, so acknowledge first and edit the pressed message afterwards.
+        const webhook = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}`;
+        json(response, 200, { type: 6 });
+        void run()
+          .then(async (result) => {
+            const update = await (result.notice
+              ? fetch(webhook, {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content: result.content,
+                    flags: 64,
+                    allowed_mentions: { parse: [] },
+                  }),
+                })
+              : fetch(`${webhook}/messages/@original`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({
+                    content: result.content,
+                    components: result.components,
+                    allowed_mentions: { parse: [] },
+                  }),
+                }));
+            await update.arrayBuffer();
+          })
+          .catch(() => undefined);
+        return;
+      }
       if (interaction.type === 3 && interaction.data?.custom_id) {
         const learnerId = interaction.data.custom_id;
         if (learnerId.startsWith("learner_")) {
@@ -840,32 +940,6 @@ export function createDiscordInteractionServer(
               type: 4,
               data: { content: "지금은 쓸 수 없는 버튼입니다.", flags: 64 },
             });
-          // Sending an issue takes longer than Discord's 3 second window.
-          if (
-            learnerId.startsWith("learner_issue_send:") &&
-            interaction.application_id &&
-            interaction.token
-          ) {
-            const original = `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`;
-            json(response, 200, { type: 5, data: { flags: 64 } });
-            void learner
-              .handle(identity, learnerId)
-              .then((reply) => reply.content)
-              .catch(() => "발송 중 오류가 났어요. 발송 내역을 확인해 주세요.")
-              .then(async (content) => {
-                const update = await fetch(original, {
-                  method: "PATCH",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({
-                    content,
-                    allowed_mentions: { parse: [] },
-                  }),
-                });
-                await update.arrayBuffer();
-              })
-              .catch(() => undefined);
-            return;
-          }
           const reply = await learner.handle(identity, learnerId);
           return json(response, 200, {
             type: 4,
@@ -880,10 +954,7 @@ export function createDiscordInteractionServer(
         if (!integrations?.component)
           return json(response, 400, { error: "component unavailable" });
         if (
-          (interaction.data.custom_id.startsWith("server_config_apply:") ||
-            /^(?:harness_update_(?:apply|revert)|blog_(?:publish|withdraw)):/.test(
-              interaction.data.custom_id,
-            )) &&
+          interaction.data.custom_id.startsWith("server_config_apply:") &&
           interaction.application_id &&
           interaction.token
         ) {

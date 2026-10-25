@@ -212,7 +212,18 @@ describe("commands by scope", () => {
         { userId: "owner", guildId: "stranger" },
         { name: "status", options: {} },
       ),
-      /아직 허용되지 않은 서버입니다/,
+      /아직 허용되지 않은 서버입니다.*승인을 기다리는 중.*서버 주인이 라피 운영자에게 허용을 요청/,
+    );
+  });
+
+  it("tells a guild admin which commands work in their server", async () => {
+    await assert.rejects(
+      service.execute(adminInOther, { name: "status", options: {} }),
+      (error: Error) =>
+        /운영자 서버나 DM에서만/.test(error.message) &&
+        ["/사용정책", "/서버구성", "/대화채널", "/대화해제"].every((name) =>
+          error.message.includes(name),
+        ),
     );
   });
 });

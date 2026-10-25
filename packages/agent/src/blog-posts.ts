@@ -10,6 +10,7 @@ import {
   type DeliveryAdapter,
 } from "@rapi/core";
 import type { BlogPostRecord, BlogPostsStore } from "@rapi/db";
+import type { ButtonOutcome } from "./button-outcome.js";
 
 export interface BlogPublisher {
   /** Opens (or finds) the PR that adds `apps/blog/content/<slug>.mdx`. */
@@ -54,6 +55,8 @@ type BlogStore = Pick<
   | "recordPr"
   | "awaitingPullRequest"
   | "openPullRequests"
+  | "stalePullRequests"
+  | "claimApprovalReminder"
   | "awaitingRemoval"
   | "lastCreatedAt"
   | "topicUsed"
@@ -84,10 +87,12 @@ export interface BlogIdentity {
   guildId?: string;
 }
 
-const COMPONENT = /^blog_(publish|revise|discard|withdraw):([0-9a-f-]{36})$/;
+const COMPONENT =
+  /^blog_(publish|revise|discard|discard_confirm|discard_cancel|withdraw):([0-9a-f-]{36})$/;
 const NOTE = /^blog_note:([0-9a-f-]{36})$/;
 const WEEK_MS = 7 * 86_400_000;
 const WEEKLY_RETRY_MS = 3_600_000;
+const APPROVED_REMINDER_MS = 24 * 3_600_000;
 const PREVIEW_BODY_LIMIT = 5_500;
 
 const button = (label: string, customId: string, style = 2) => ({
@@ -285,7 +290,45 @@ export class BlogService {
 
   // ---- owner buttons ------------------------------------------------------
 
-  /** Handles [게시] / [버리기] / [내리기]. [수정 요청] opens a modal first. */
+  /**
+   * Entry for the owner's decision buttons. [버리기] asks again first; the
+   * second button is what discards, and [돌아가기] restores the draft buttons.
+   */
+  async handleButton(
+    identity: BlogIdentity,
+    customId: string,
+  ): Promise<ButtonOutcome> {
+    this.assertOwner(identity);
+    const match = COMPONENT.exec(customId);
+    if (!match) throw new Error("알 수 없는 버튼입니다.");
+    const [, action, id] = match as unknown as [string, string, string];
+    if (action !== "discard" && action !== "discard_cancel")
+      return { result: await this.handleComponent(identity, customId) };
+    const post = await this.ports.store.get(id);
+    if (!post) return { result: "이미 버렸거나 없는 글이에요." };
+    if (post.status !== "draft") return { result: await this.stateMessage(id) };
+    if (action === "discard_cancel")
+      return {
+        components: [
+          row(
+            button("게시", `blog_publish:${id}`, 3),
+            button("수정 요청", `blog_revise:${id}`, 1),
+            button("버리기", `blog_discard:${id}`, 4),
+          ),
+        ],
+      };
+    return {
+      prompt: "정말 버릴까요? 버리면 되돌릴 수 없어요.",
+      components: [
+        row(
+          button("정말 버리기", `blog_discard_confirm:${id}`, 4),
+          button("돌아가기", `blog_discard_cancel:${id}`, 2),
+        ),
+      ],
+    };
+  }
+
+  /** Runs [게시] / [정말 버리기] / [내리기]. [수정 요청] opens a modal first. */
   async handleComponent(
     identity: BlogIdentity,
     customId: string,
@@ -299,7 +342,7 @@ export class BlogService {
     switch (action) {
       case "publish":
         return this.publish(post, identity.userId);
-      case "discard":
+      case "discard_confirm":
         return (await this.ports.store.discardDraft(id))
           ? "초안을 버렸어요."
           : this.stateMessage(post.id);
@@ -489,6 +532,7 @@ export class BlogService {
         await this.openPullRequest(post);
     });
     await attempt("track", () => this.trackPullRequests());
+    await attempt("remind", () => this.remindStalePullRequests(now));
     await attempt("remove", async () => {
       for (const post of await this.ports.store.awaitingRemoval())
         await this.openRemovalPullRequest(post);
@@ -521,6 +565,20 @@ export class BlogService {
           ],
         );
       }
+    }
+  }
+
+  /** One DM per post that has sat in `approved` with an open PR for a day. */
+  private async remindStalePullRequests(now: Date): Promise<void> {
+    const stale = await this.ports.store.stalePullRequests(
+      new Date(now.getTime() - APPROVED_REMINDER_MS),
+    );
+    for (const post of stale) {
+      if (!(await this.ports.store.claimApprovalReminder(post.id))) continue;
+      await this.dm(
+        `**블로그 글이 하루 넘게 병합을 기다리고 있어요** — ${post.title.slice(0, 80)}\nPR을 병합해야 공개돼요: <${post.prUrl}>\n올리지 않기로 했다면 PR을 닫으면 글이 초안으로 돌아가요.`,
+        `blog-reminder:${post.id}`,
+      );
     }
   }
 

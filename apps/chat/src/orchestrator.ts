@@ -18,11 +18,15 @@ import { ChatOpsStore } from "@rapi/db";
 import { routeIntent } from "./router.js";
 import type { Executor, ProcessResult } from "./executor.js";
 import {
+  isIgnoredHarnessPrefix,
+  NON_OWNER_HARNESS_NOTICE,
   ownerHarnessDirective,
   parseBlogDraftDirective,
   type HarnessId,
 } from "./harness.js";
 import type { DiscordTyping } from "./typing.js";
+
+const CANCEL_POLL_MS = 2000;
 
 export function memoryPack(memories: ChatMemory[]): string {
   const rows: string[] = [];
@@ -143,6 +147,8 @@ type Interpreted = {
 };
 
 export class ChatOrchestrator {
+  /** How often a running run is checked for a `/취소` from the bot process. */
+  cancelPollMs = CANCEL_POLL_MS;
   private queues = new Map<string, Promise<void>>();
   private active = new Map<string, Active>();
   private stopping = false;
@@ -242,6 +248,11 @@ export class ChatOrchestrator {
     }
     const interpreted = this.interpret(request, accessLevel);
     const { text, route } = interpreted;
+    // The prefix stays in the request text, so say once why it had no effect.
+    if (isIgnoredHarnessPrefix(request, accessLevel))
+      await this.reply(scope.channel, NON_OWNER_HARNESS_NOTICE).catch(
+        () => undefined,
+      );
     // Code, server and memory work is only taken in the home guild.
     const homeGuild = chatOpsExecutionAllowed(scope.guild, this.homeGuildId);
     if (!homeGuild && route !== "answer") {
@@ -542,6 +553,20 @@ export class ChatOrchestrator {
               `작업 ${run!.id}: 시도 ${attempt} 실행 중입니다. 아직 종료 결과는 없습니다. 상태 조회나 ‘멈춰’를 사용할 수 있습니다.`,
             ).catch(() => undefined);
           }, 30000);
+        // `/취소` from the bot process only flips the phase; stop the process here.
+        let cancelWatch: NodeJS.Timeout | undefined;
+        if (run) {
+          const watched = run.id;
+          cancelWatch = setInterval(() => {
+            void this.store
+              .get(watched)
+              .then((current) => {
+                if (current.phase === "cancel_requested")
+                  active.controller.abort();
+              })
+              .catch(() => undefined);
+          }, this.cancelPollMs);
+        }
         let result: ProcessResult;
         try {
           result = await executor.run({
@@ -562,6 +587,7 @@ export class ChatOrchestrator {
           });
         } finally {
           if (progress) clearTimeout(progress);
+          if (cancelWatch) clearInterval(cancelWatch);
         }
         const after = await executor.observe();
         const evidence: RunEvidence = {

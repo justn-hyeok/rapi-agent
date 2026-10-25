@@ -1,6 +1,7 @@
 import {
   assertDiscordLevel,
   assertDiscordScope,
+  GUILD_NOT_ALLOWED_MESSAGE,
   isGuildAllowed,
   resolveDiscordAccess,
   splitDiscordMessage,
@@ -86,6 +87,14 @@ const guildScopedCommands: ReadonlySet<DiscordCommand["name"]> = new Set([
   "chat_enable",
   "chat_disable",
 ]);
+
+/** Slash names a guild-scoped admin can use in their own server. */
+const GUILD_ADMIN_COMMAND_LABELS = [
+  "/사용정책",
+  "/서버구성",
+  "/대화채널",
+  "/대화해제",
+];
 
 /** Whether a command only changes the guild it runs in, or reaches all of Rapi. */
 export function commandScope(
@@ -212,7 +221,7 @@ export class DiscordCommandService {
           await this.operations.guildAllowlist(),
         )
       )
-        throw new Error("아직 허용되지 않은 서버입니다.");
+        throw new Error(GUILD_NOT_ALLOWED_MESSAGE);
     }
     const access = resolveDiscordAccess(identity, this.allowlists);
     const level = access.level;
@@ -221,7 +230,7 @@ export class DiscordCommandService {
       access.scope === "guild" && commandScope(command.name) === "guild";
     let required = requiredCommandAccess(command.name);
     if (required !== "user" && commandScope(command.name) === "global")
-      assertDiscordScope(access, "global");
+      assertDiscordScope(access, "global", GUILD_ADMIN_COMMAND_LABELS);
     if (guildAdmin && required === "superadmin") required = "admin";
     assertDiscordLevel(level, required);
     const ownerId = identity.userId;
@@ -644,10 +653,19 @@ export class DiscordCommandService {
         const taskId =
           optionalString(command.options, "taskId") ??
           (await this.agent.store.latestCancellableTask(ownerId));
-        if (!taskId)
+        if (!taskId) {
+          // A running ChatOps run belongs to the chat process, which polls this flag.
+          const chatRun = await this.agent.store.requestChatOpsCancel(ownerId);
+          if (chatRun)
+            return {
+              messages: [
+                `실행 중인 ChatOps 작업 ${chatRun}의 중단을 요청했어요. 몇 초 안에 멈추고 채널에 결과가 올라와요.`,
+              ],
+            };
           throw new Error(
-            "취소할 작업이 없습니다. 실행 중인 ChatOps 작업은 채널에서 ‘라피야! 멈춰’로 중단하세요.",
+            "취소할 작업이 없습니다. 접수만 되고 아직 실행 전인 요청은 채널에서 ‘라피야! 멈춰’로 중단하세요.",
           );
+        }
         await this.agent.cancelTask(taskId);
         return { messages: ["작업 중단과 취소 상태를 확인했습니다."] };
       }

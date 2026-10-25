@@ -78,6 +78,12 @@ const button = (label: string, customId: string, style: number) => ({
   custom_id: customId,
 });
 
+export const CONFIRM_BUTTON_REMINDER = "버튼을 눌러 확정해 주세요.";
+const CONFIRM_BY_BUTTON = `아래 ${CONFIRM_BUTTON_REMINDER}`;
+// A bare "yes" cannot confirm anything: only the button, which names the user, does.
+const SHORT_YES =
+  /^(?:응|네|넵|넹|예|ㅇㅇ|ㅇㅋ|오케이|그래|좋아|맞아|yes|y|yep|ok|okay)[.!~\s]*$/i;
+
 export const CHATBOT_SUBSCRIPTION_PREFIX = "chatbot_sub:";
 
 /** The id names the one user who may press it; the handler checks it again. */
@@ -104,11 +110,18 @@ export class ChatbotService {
     scopeKey?: string;
     text: string;
   }): Promise<ChatbotPlan> {
-    const intent = classifyChatbotIntent(input.text);
     const reply = (content: string, components?: unknown[]): ChatbotPlan => ({
       kind: "reply",
       reply: components ? { content, components } : { content },
     });
+    if (SHORT_YES.test(input.text.trim())) {
+      const lastAnswer = [...(await this.history(input))]
+        .reverse()
+        .find((turn) => turn.role === "assistant");
+      if (lastAnswer?.content.includes(CONFIRM_BUTTON_REMINDER))
+        return reply(CONFIRM_BUTTON_REMINDER);
+    }
+    const intent = classifyChatbotIntent(input.text);
     switch (intent.kind) {
       case "small_talk":
         return reply(SMALL_TALK_REPLY);
@@ -205,8 +218,8 @@ export class ChatbotService {
       kind: "reply",
       reply: {
         content: stop
-          ? "학습자 소식 받기를 그만둘까요? 내 구독만 바뀌어요."
-          : `내 학습자 소식을 ${CADENCE_LABEL[intent.cadence]} 받는 것으로 바꿀까요?`,
+          ? `학습자 소식 받기를 그만둘까요? 내 구독만 바뀌어요. ${CONFIRM_BY_BUTTON}`
+          : `내 학습자 소식을 ${CADENCE_LABEL[intent.cadence]} 받는 것으로 바꿀까요? ${CONFIRM_BY_BUTTON}`,
         components: [
           {
             type: 1,

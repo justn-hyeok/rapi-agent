@@ -33,8 +33,8 @@ const SAFE_ID = /^[\w.:-]{1,128}$/;
 const FIELD_MAX = 500;
 
 const INDEX_ENTRIES = [
-  ["/admin/subscribe", "구독 만들기", "/구독", "ADMIN"],
-  ["/admin/unsubscribe", "구독 해제", "/구독해제", "ADMIN"],
+  ["/admin/subscribe", "운영자 브리핑 구독", "/구독", "ADMIN"],
+  ["/admin/unsubscribe", "운영자 브리핑 구독 해제", "/구독해제", "ADMIN"],
   ["/admin/sources", "수집원 상태", "/수집원", "ADMIN"],
   ["/admin/deliveries", "발송내역", "/발송내역", "ADMIN"],
   ["/admin/status", "운영 상태", "/상태", "ADMIN"],
@@ -230,17 +230,17 @@ export function webAdminRoutes(options: WebAdminOptions): WebRoute[] {
   const subscribeForm = (c: WebRouteContext): WebResponse =>
     view(
       c,
-      "구독 만들기",
+      "운영자 브리핑 구독",
       `<form method="post" action="/admin/subscribe" class="card">${csrf(c)}
 <label class="field">이름<input type="text" name="name" maxlength="100" required></label>
 <label class="field">분야 (쉼표로 구분)<input type="text" name="categories" maxlength="200"></label>
 <label class="field">키워드 (쉼표로 구분)<input type="text" name="keywords" maxlength="200"></label>
 <label class="field">주기<select name="cadence"><option value="매일">매일</option><option value="즉시">즉시</option><option value="매주">매주</option></select></label>
-<p class="muted">브리핑은 Discord DM으로 와요.</p>
+<p class="muted">운영자용 브리핑 구독이에요. 학습자 소식 구독은 /me의 “내 구독”에서 바꿔요. 브리핑은 Discord DM으로 와요.</p>
 <p><button class="primary" type="submit">구독 저장</button></p></form>`,
     );
 
-  const subscribe = post("구독 만들기", async (c, user) => {
+  const subscribe = post("운영자 브리핑 구독", async (c, user) => {
     const form = c.request.form;
     const outcome = await run(user, "subscribe", {
       name: field(form, "name"),
@@ -249,26 +249,32 @@ export function webAdminRoutes(options: WebAdminOptions): WebRoute[] {
       cadence: field(form, "cadence"),
     });
     if (!outcome.ok)
-      return failure(c, "구독 만들기", outcome.status, outcome.message);
-    return done(c, "구독 만들기", outcome.result, "/admin/subscribe");
+      return failure(c, "운영자 브리핑 구독", outcome.status, outcome.message);
+    return done(c, "운영자 브리핑 구독", outcome.result, "/admin/subscribe");
   });
 
   const unsubscribeForm = (c: WebRouteContext): WebResponse =>
     view(
       c,
-      "구독 해제",
+      "운영자 브리핑 구독 해제",
       `<form method="post" action="/admin/unsubscribe" class="card">${csrf(c)}
 <label class="field">구독 이름<input type="text" name="name" maxlength="100" required></label>
 <p><button class="primary" type="submit">해제하기</button></p></form>`,
     );
 
-  const unsubscribe = post("구독 해제", async (c, user) => {
+  const unsubscribe = post("운영자 브리핑 구독 해제", async (c, user) => {
     const name = field(c.request.form, "name");
-    if (!name) return failure(c, "구독 해제", 400, "구독 이름을 적어 주세요.");
+    if (!name)
+      return failure(
+        c,
+        "운영자 브리핑 구독 해제",
+        400,
+        "구독 이름을 적어 주세요.",
+      );
     if (c.request.form.get("confirm") !== "1")
       return confirmPage(
         c,
-        "구독 해제",
+        "운영자 브리핑 구독 해제",
         `“${name}” 구독을 해제할까요?`,
         "/admin/unsubscribe",
         { name },
@@ -276,8 +282,18 @@ export function webAdminRoutes(options: WebAdminOptions): WebRoute[] {
       );
     const outcome = await run(user, "unsubscribe", { name });
     if (!outcome.ok)
-      return failure(c, "구독 해제", outcome.status, outcome.message);
-    return done(c, "구독 해제", outcome.result, "/admin/unsubscribe");
+      return failure(
+        c,
+        "운영자 브리핑 구독 해제",
+        outcome.status,
+        outcome.message,
+      );
+    return done(
+      c,
+      "운영자 브리핑 구독 해제",
+      outcome.result,
+      "/admin/unsubscribe",
+    );
   });
 
   const policy = async (c: WebRouteContext): Promise<WebResponse> => {

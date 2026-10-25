@@ -17,6 +17,7 @@ import {
   type Harness,
   type HarnessId,
   type HarnessReadiness,
+  withSenpiLoginHint,
 } from "./harness.js";
 const exec = promisify(execFile);
 export const MODEL = DEFAULT_CODEX_MODEL;
@@ -258,6 +259,9 @@ export class CodexExecutor implements Executor {
       if (!built.reportFile)
         return {
           ...result,
+          ...(selection.id === "senpi"
+            ? { output: withSenpiLoginHint(result) }
+            : {}),
           ...(selection.notice ? { notice: selection.notice } : {}),
         };
       let output = "";

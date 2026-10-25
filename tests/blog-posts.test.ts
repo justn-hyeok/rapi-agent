@@ -27,6 +27,9 @@ const stranger = "223456789012345678";
 
 class FakeStore {
   posts: BlogPostRecord[] = [];
+  /** When each post was last approved; the reminder looks at its age. */
+  approvedAt = new Map<string, Date>();
+  reminded = new Set<string>();
   private seq = 0;
   async create(input: NewBlogPost) {
     if (
@@ -72,6 +75,8 @@ class FakeStore {
     if (!post || !from.includes(post.status)) return false;
     assert(canTransitionBlogPost(post.status, to));
     post.status = to;
+    this.reminded.delete(id);
+    if (to === "approved") this.approvedAt.set(id, new Date());
     if (to === "published") post.publishedAt = new Date();
     if (to === "draft") post.prUrl = post.prBranch = null;
     return true;
@@ -113,6 +118,20 @@ class FakeStore {
   }
   async openPullRequests() {
     return this.pick((p) => p.status === "approved" && !!p.prUrl);
+  }
+  async stalePullRequests(cutoff: Date) {
+    return this.pick(
+      (p) =>
+        p.status === "approved" &&
+        !!p.prUrl &&
+        !this.reminded.has(p.id) &&
+        (this.approvedAt.get(p.id) ?? new Date(0)) < cutoff,
+    );
+  }
+  async claimApprovalReminder(id: string) {
+    if (this.reminded.has(id)) return false;
+    this.reminded.add(id);
+    return true;
   }
   async awaitingRemoval() {
     return this.pick(
@@ -377,7 +396,13 @@ test("SUPERADMIN only: strangers cannot request, press or open the modal", async
   const id = store.posts[0]!.id;
   const intruder = { userId: stranger };
   await assert.rejects(service.requestDraft(intruder, "x", "2"), /소유자/);
-  for (const action of ["publish", "discard", "withdraw", "revise"])
+  for (const action of [
+    "publish",
+    "discard",
+    "discard_confirm",
+    "withdraw",
+    "revise",
+  ])
     await assert.rejects(
       service.handleComponent(intruder, `blog_${action}:${id}`),
       /소유자/,
@@ -411,18 +436,27 @@ test("[버리기] deletes a draft once and refuses approved posts", async () => 
   await service.requestDraft({ userId: owner }, "주제", "1");
   const id = store.posts[0]!.id;
   assert.match(
-    await service.handleComponent({ userId: owner }, `blog_discard:${id}`),
+    await service.handleComponent(
+      { userId: owner },
+      `blog_discard_confirm:${id}`,
+    ),
     /버렸어요/,
   );
   assert.match(
-    await service.handleComponent({ userId: owner }, `blog_discard:${id}`),
+    await service.handleComponent(
+      { userId: owner },
+      `blog_discard_confirm:${id}`,
+    ),
     /이미 버렸/,
   );
   await service.requestDraft({ userId: owner }, "주제2", "2");
   const second = store.posts[0]!.id;
   await service.handleComponent({ userId: owner }, `blog_publish:${second}`);
   assert.match(
-    await service.handleComponent({ userId: owner }, `blog_discard:${second}`),
+    await service.handleComponent(
+      { userId: owner },
+      `blog_discard_confirm:${second}`,
+    ),
     /이미 게시를 승인/,
   );
   assert.equal(store.posts.length, 1);
@@ -655,4 +689,58 @@ test("withdrawal list is written before the state changes; a write failure keeps
     /내렸어요/,
   );
   assert.equal(store.posts[0]!.status, "withdrawn");
+});
+
+test("[버리기] asks first; only [정말 버리기] discards, [돌아가기] restores the buttons", async () => {
+  const { store, service } = setup({ model: model() });
+  await service.requestDraft({ userId: owner }, "주제", "1");
+  const id = store.posts[0]!.id;
+  const first = await service.handleButton(
+    { userId: owner },
+    `blog_discard:${id}`,
+  );
+  assert.match(first.prompt ?? "", /정말 버릴까요/);
+  assert.equal(first.result, undefined);
+  const ids = JSON.stringify(first.components);
+  assert.ok(ids.includes(`blog_discard_confirm:${id}`));
+  assert.ok(ids.includes(`blog_discard_cancel:${id}`));
+  assert.equal(store.posts.length, 1);
+  const back = await service.handleButton(
+    { userId: owner },
+    `blog_discard_cancel:${id}`,
+  );
+  assert.equal(back.prompt, undefined);
+  assert.ok(JSON.stringify(back.components).includes(`blog_publish:${id}`));
+  assert.equal(store.posts.length, 1);
+  const done = await service.handleButton(
+    { userId: owner },
+    `blog_discard_confirm:${id}`,
+  );
+  assert.match(done.result ?? "", /버렸어요/);
+  assert.equal(store.posts.length, 0);
+  // A stale first-step button answers the state instead of asking again.
+  assert.match(
+    (await service.handleButton({ userId: owner }, `blog_discard:${id}`))
+      .result ?? "",
+    /이미 버렸/,
+  );
+});
+
+test("a post stuck in approved with an open PR gets one reminder with the PR link", async () => {
+  const { store, sent, service } = setup({ model: model() });
+  await service.requestDraft({ userId: owner }, "주제", "1");
+  const id = store.posts[0]!.id;
+  await service.handleComponent({ userId: owner }, `blog_publish:${id}`);
+  const dms = () =>
+    sent.filter((entry) => entry.payload.subject === "블로그").length;
+  const before = dms();
+  const approved = store.approvedAt.get(id)!;
+  await service.runDue(new Date(approved.getTime() + 23 * 3_600_000));
+  assert.equal(dms(), before);
+  await service.runDue(new Date(approved.getTime() + 25 * 3_600_000));
+  assert.equal(dms(), before + 1);
+  const reminder = sent.at(-1)!.payload;
+  assert.match(reminder.text, /https:\/\/github\.com\/x\/y\/pull\/1/);
+  await service.runDue(new Date(approved.getTime() + 49 * 3_600_000));
+  assert.equal(dms(), before + 1);
 });

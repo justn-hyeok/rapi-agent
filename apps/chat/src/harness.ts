@@ -179,3 +179,31 @@ export function parseBlogDraftDirective(input: string): string | null {
     .match(/^(?:블로그\s*초안|blog\s*draft)\s*[:：]\s*([\s\S]*)$/i);
   return match ? match[1]!.trim() : null;
 }
+
+export const SENPI_LOGIN_HINT =
+  "senpi 로그인이 필요할 수 있어요: docs/operations.md 참고";
+
+// A failed senpi run that looks like a missing login gets a pointer to the setup docs.
+export function withSenpiLoginHint(result: {
+  exitCode: number | null;
+  output: string;
+}): string {
+  const failed = result.exitCode !== 0;
+  return failed &&
+    /log\s?in|sign(?:ed)?\s?in|authenticat|unauthori[sz]ed|\b40[13]\b|api[_\s-]?key|credential|로그인|인증/i.test(
+      result.output,
+    )
+    ? `${result.output.trimEnd()}\n\n${SENPI_LOGIN_HINT}`
+    : result.output;
+}
+
+export const NON_OWNER_HARNESS_NOTICE =
+  "하네스 선택(센파이로/senpi:)은 소유자만 쓸 수 있어요. 접두사는 그대로 두고 요청을 처리할게요.";
+
+// True when a non-owner typed the owner-only harness prefix.
+export function isIgnoredHarnessPrefix(
+  input: string,
+  accessLevel: string,
+): boolean {
+  return accessLevel !== "superadmin" && !!parseHarnessDirective(input).harness;
+}

@@ -177,6 +177,8 @@ interface Issue {
   periodKey: string;
   state: string;
   previewed: boolean;
+  previewedAt?: Date;
+  reminded?: boolean;
   items: Array<{
     id: string;
     section: "core" | "tools";
@@ -213,6 +215,8 @@ function fakeStore() {
     deliveries,
     clicks,
     posts,
+    /** What `learnerMarkPreviewSent` stamps as the preview time. */
+    previewClock: new Date("2100-01-01T00:00:00Z"),
     async learnerSubscribe(input: {
       userId: string;
       cadence: "daily" | "weekly";
@@ -303,7 +307,27 @@ function fakeStore() {
         .map((i) => i.id);
     },
     async learnerMarkPreviewSent(id: string) {
-      issues.find((i) => i.id === id)!.previewed = true;
+      const issue = issues.find((i) => i.id === id)!;
+      issue.previewed = true;
+      issue.previewedAt = store.previewClock;
+    },
+    async learnerIssuesNeedingReminder(from: Date, to: Date) {
+      return issues
+        .filter(
+          (i) =>
+            i.state === "pending" &&
+            !i.reminded &&
+            i.previewedAt &&
+            i.previewedAt >= from &&
+            i.previewedAt <= to,
+        )
+        .map((i) => i.id);
+    },
+    async learnerClaimPreviewReminder(id: string) {
+      const issue = issues.find((i) => i.id === id)!;
+      if (issue.reminded || issue.state !== "pending") return false;
+      issue.reminded = true;
+      return true;
     },
     async learnerDecideIssue(id: string, to: string) {
       const issue = issues.find((i) => i.id === id);
@@ -352,7 +376,9 @@ function fakeStore() {
   return store;
 }
 
-function setup() {
+function setup(
+  extra: Partial<ConstructorParameters<typeof LearnerExperiment>[2]> = {},
+) {
   const store = fakeStore();
   const sent: Array<{
     target: DeliveryTarget;
@@ -374,6 +400,7 @@ function setup() {
       linkSecret: "s".repeat(32),
       baseUrl: "https://rapi.example",
       pauseMs: 0,
+      ...extra,
     },
   );
   store.posts.push({
@@ -629,4 +656,159 @@ test("new free models are summarised into one core item", async () => {
   assert.equal(items[0]!.title, "새 무료 모델 2개");
   assert.equal(items[0]!.section, "core");
   assert.equal(items.length, 2);
+});
+
+const emailAddressStatus = (known: Set<string>) => ({
+  async statusFor(userId: string) {
+    return known.has(userId) ? { state: "verified" } : null;
+  },
+  async sendIssue() {
+    return { sent: 0, failed: 0 };
+  },
+});
+
+async function sentDm(
+  setupResult: ReturnType<typeof setup>,
+): Promise<{ content: string; components: unknown[] }> {
+  const { store, sent, experiment } = setupResult;
+  await experiment.handleComponent(
+    { userId: user, guildId: "5" },
+    "learner_cadence:daily",
+  );
+  await experiment.runDue(new Date("2026-10-26T01:00:00Z"));
+  await experiment.sendIssue(store.issues[0]!.id, owner.userId);
+  return sent.find((entry) => entry.target.recipientId === user)!.payload
+    .discord as { content: string; components: unknown[] };
+}
+
+test("issue DMs end with the web unsubscribe link only when the web is on", async () => {
+  const withWeb = await sentDm(
+    setup({
+      webUnsubscribeUrl: (userId) => `https://rapi.example/u/token-${userId}`,
+    }),
+  );
+  assert.match(
+    withWeb.content,
+    /<https:\/\/rapi\.example\/u\/token-123456789012345678>/,
+  );
+  assert.ok(withWeb.content.length <= 2000);
+  assert.ok(JSON.stringify(withWeb.components).includes("learner_optout"));
+  // The portal exists but returns no link (web off): no footer line.
+  const noLink = await sentDm(setup({ webUnsubscribeUrl: () => undefined }));
+  assert.ok(!noLink.content.includes("/u/"));
+  const without = await sentDm(setup());
+  assert.ok(!without.content.includes("/u/"));
+});
+
+test("the email button repeats on every issue until an address exists; the DM-is-enough answer is asked once", async () => {
+  const known = new Set<string>();
+  const experiment = setup({ email: emailAddressStatus(known) });
+  const issue = (userId: string, asked: boolean, hasEmail: boolean) =>
+    JSON.stringify(
+      experiment.experiment.issueMessage(
+        { cadence: "daily", periodKey: "2026-10-26", items: [] },
+        { userId, emailAsked: asked, hasEmail },
+      ).components,
+    );
+  // First issue: both buttons.
+  let ids = issue(user, false, false);
+  assert.ok(ids.includes("email_add") && ids.includes("learner_email:no"));
+  // Later issues: still offered, but "DM이면 충분해요" is not repeated.
+  ids = issue(user, true, false);
+  assert.ok(ids.includes("email_add"));
+  assert.ok(!ids.includes("learner_email:no"));
+  // Once an address row exists nothing email-related is shown.
+  ids = issue(user, true, true);
+  assert.ok(!ids.includes("email_add"));
+  // End to end: sendIssue asks the email service about the subscriber.
+  const dm = await sentDm(experiment);
+  assert.ok(JSON.stringify(dm.components).includes("email_add"));
+  known.add(user);
+  const again = setup({ email: emailAddressStatus(known) });
+  assert.ok(
+    !JSON.stringify((await sentDm(again)).components).includes("email_add"),
+  );
+});
+
+test("decision buttons return the outcome for the original message; non-owners get a notice", async () => {
+  const { store, experiment } = setup();
+  await experiment.handleComponent(
+    { userId: user, guildId: "5" },
+    "learner_cadence:daily",
+  );
+  await experiment.runDue(new Date("2026-10-26T01:00:00Z"));
+  const id = store.issues[0]!.id;
+  assert.ok(LearnerExperiment.handlesDecision(`learner_issue_send:${id}`));
+  assert.ok(!LearnerExperiment.handlesDecision("learner_optout"));
+  assert.deepEqual(
+    await experiment.handleDecision(
+      { userId: user },
+      `learner_issue_skip:${id}`,
+    ),
+    { notice: "운영자만 쓸 수 있는 버튼입니다." },
+  );
+  const skipped = await experiment.handleDecision(
+    owner,
+    `learner_issue_skip:${id}`,
+  );
+  assert.match(skipped.result ?? "", /건너뛰었/);
+  const stale = await experiment.handleDecision(
+    owner,
+    `learner_issue_send:${id}`,
+  );
+  assert.match(stale.result ?? "", /이미 건너뛴/);
+});
+
+test("an undecided preview gets exactly one reminder after three hours", async () => {
+  const { store, sent, experiment } = setup();
+  await experiment.handleComponent(
+    { userId: user, guildId: "5" },
+    "learner_cadence:daily",
+  );
+  const start = new Date("2026-10-26T01:00:00Z");
+  store.previewClock = start;
+  await experiment.runDue(start);
+  const reminders = () =>
+    sent.filter(
+      (entry) => entry.payload.subject === "학습자 소식 미리보기 알림",
+    );
+  await experiment.runDue(new Date(start.getTime() + 2 * 3_600_000));
+  assert.equal(reminders().length, 0);
+  await experiment.runDue(new Date(start.getTime() + 3 * 3_600_000 + 60_000));
+  // One per pending issue (the daily and the weekly one), not per tick.
+  assert.equal(reminders().length, 2);
+  assert.equal(reminders()[0]!.target.recipientId, owner.userId);
+  assert.match(reminders()[0]!.payload.text, /발송|건너뛰기/);
+  await experiment.runDue(new Date(start.getTime() + 5 * 3_600_000));
+  assert.equal(reminders().length, 2);
+});
+
+test("a decided preview and a day-old preview get no reminder", async () => {
+  const decided = setup();
+  const start = new Date("2026-10-26T01:00:00Z");
+  await decided.experiment.handleComponent(
+    { userId: user, guildId: "5" },
+    "learner_cadence:daily",
+  );
+  decided.store.previewClock = start;
+  await decided.experiment.runDue(start);
+  for (const issue of decided.store.issues)
+    await decided.experiment.skipIssue(issue.id, owner.userId);
+  await decided.experiment.runDue(new Date(start.getTime() + 4 * 3_600_000));
+  assert.ok(
+    !decided.sent.some(
+      (e) => e.payload.subject === "학습자 소식 미리보기 알림",
+    ),
+  );
+  const old = setup();
+  await old.experiment.handleComponent(
+    { userId: user, guildId: "5" },
+    "learner_cadence:daily",
+  );
+  old.store.previewClock = start;
+  await old.experiment.runDue(start);
+  await old.experiment.runDue(new Date(start.getTime() + 30 * 3_600_000));
+  assert.ok(
+    !old.sent.some((e) => e.payload.subject === "학습자 소식 미리보기 알림"),
+  );
 });

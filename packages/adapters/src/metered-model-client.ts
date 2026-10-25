@@ -107,7 +107,7 @@ export class MeteredModelClient implements ModelClient {
     this.options.onWarning?.(message);
   }
 
-  /** Cap check; alerts once per month and level, never fails a call by itself. */
+  /** Cap check; alerts once per month, level and budget amount, never fails a call by itself. */
   private async check(
     feature: ModelRequest["feature"],
     onlyAlert: boolean,
@@ -128,7 +128,9 @@ export class MeteredModelClient implements ModelClient {
       budgetMicroUsd: budget,
       publicFeature: PUBLIC_MODEL_FEATURES.has(feature),
     });
-    if (decision.alert) await this.alert(month.key, decision.alert, spent);
+    // The budget is part of the key, so raising the cap re-arms both alerts.
+    if (decision.alert)
+      await this.alert(`${month.key}@${budget}`, decision.alert, spent);
     if (!onlyAlert && decision.blocked)
       throw new ModelBudgetExceededError(feature);
   }

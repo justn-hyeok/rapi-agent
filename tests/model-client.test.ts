@@ -469,3 +469,37 @@ test("api summarizer maps a JSON reply to summaries", async () => {
   assert.equal(result.get("a"), "요약 문장");
   assert.deepEqual(seen, ["summary"]);
 });
+
+test("raising the budget re-arms the alerts for the same month", async () => {
+  const ledger = new FakeLedger();
+  const messages: string[] = [];
+  const notifier: ModelBudgetNotifier = {
+    async notifySuperadmins(text) {
+      messages.push(text);
+      return true;
+    },
+  };
+  const at = (budgetUsd: number) =>
+    new MeteredModelClient(costly(microUsdFromUsd(9)), ledger, {
+      budgetMicroUsd: microUsdFromUsd(budgetUsd),
+      notifier,
+      now: () => new Date("2026-10-10T00:00:00Z"),
+    });
+  const first = at(10);
+  const call = (client: MeteredModelClient) =>
+    client.complete({ ...request, feature: "summary" });
+  await call(first); // $9 spent: 90%, warn
+  await call(first); // $18 spent: exceeded
+  await call(first);
+  await call(first);
+  assert.equal(messages.length, 2);
+  assert.match(messages[0]!, /80%/);
+  assert.match(messages[1]!, /넘었습니다/);
+  // The owner raises the cap to $30 (spent is $36, past it): the same month
+  // alerts again, once.
+  const raised = at(30);
+  await call(raised);
+  await call(raised);
+  assert.equal(messages.length, 3);
+  assert.match(messages[2]!, /넘었습니다/);
+});

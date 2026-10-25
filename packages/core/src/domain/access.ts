@@ -118,7 +118,15 @@ export function resolveDiscordAccess(
 export function assertDiscordScope(
   access: DiscordAccess,
   effect: DiscordAccessScope,
+  /** Commands the caller can use in this guild, shown in the refusal. */
+  usable: readonly string[] = [],
 ): void {
   if (effect === "global" && access.scope === "guild")
-    throw new Error("이 명령은 운영자 서버나 DM에서만 사용할 수 있습니다.");
+    throw new Error(
+      `이 명령은 운영자 서버나 DM에서만 사용할 수 있습니다.${
+        usable.length
+          ? ` 이 서버에서는 ${usable.join(", ")}을(를) 쓸 수 있어요.`
+          : ""
+      }`,
+    );
 }

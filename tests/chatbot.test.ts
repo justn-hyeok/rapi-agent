@@ -566,3 +566,45 @@ test("deploying changes nothing: chatbot flags off and the codex backend stays t
     true,
   );
 });
+
+test("the confirm message points at the button and a bare yes does not search", async () => {
+  const archive = new FakeArchive();
+  archive.subscription = { cadence: "daily", active: true };
+  const service = new ChatbotService(archive, forbiddenLearner, {
+    l2Enabled: false,
+  });
+  const input = { userId: user, scopeKey: "discord:g:c" };
+  const asked = asReply(
+    await service.plan({ ...input, text: "빈도 주 1회로 바꿔줘" }),
+  );
+  assert.match(asked.content, /아래 버튼을 눌러 확정해 주세요/);
+  await service.remember(
+    { ...input, text: "빈도 주 1회로 바꿔줘" },
+    asked.content,
+  );
+  for (const yes of ["응", "네", "ㅇㅇ", "yes", "Yes!", "넵."]) {
+    const reply = asReply(await service.plan({ ...input, text: yes }));
+    assert.equal(reply.content, "버튼을 눌러 확정해 주세요.");
+    assert.equal(reply.components, undefined);
+    // The reminder itself keeps the thread in the confirm state.
+    await service.remember({ ...input, text: yes }, reply.content);
+  }
+  // The stop confirmation says the same thing.
+  const stop = asReply(await service.plan({ ...input, text: "그만 받을래" }));
+  assert.match(stop.content, /아래 버튼을 눌러 확정해 주세요/);
+});
+
+test("a bare yes without a pending confirmation is not answered with the button reminder", async () => {
+  const service = new ChatbotService(new FakeArchive(), forbiddenLearner, {
+    l2Enabled: false,
+  });
+  const plan = await service.plan({
+    userId: user,
+    scopeKey: "discord:g:c",
+    text: "응",
+  });
+  assert.notEqual(
+    plan.kind === "reply" ? plan.reply.content : "",
+    "버튼을 눌러 확정해 주세요.",
+  );
+});

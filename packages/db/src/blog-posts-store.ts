@@ -129,7 +129,8 @@ export class BlogPostsStore {
          published_at=CASE WHEN $3='published' THEN now() ELSE published_at END,
          withdrawn_at=CASE WHEN $3='withdrawn' THEN now() ELSE withdrawn_at END,
          pr_url=CASE WHEN $3='draft' THEN NULL ELSE pr_url END,
-         pr_branch=CASE WHEN $3='draft' THEN NULL ELSE pr_branch END
+         pr_branch=CASE WHEN $3='draft' THEN NULL ELSE pr_branch END,
+         approved_reminded_at=NULL
        WHERE id=$1 AND status=ANY($2::text[])`,
       [id, from, to, actor ?? null],
     );
@@ -186,6 +187,26 @@ export class BlogPostsStore {
     return this.list(
       "status='approved' AND pr_url IS NOT NULL ORDER BY created_at",
     );
+  }
+
+  /** Approved posts with an open PR since before `cutoff` that were not reminded about yet. */
+  async stalePullRequests(cutoff: Date): Promise<BlogPostRecord[]> {
+    const result = await this.db.pool.query(
+      `SELECT ${COLUMNS} FROM blog_posts
+       WHERE status='approved' AND pr_url IS NOT NULL AND approved_reminded_at IS NULL
+         AND COALESCE(decided_at,created_at)<$1 ORDER BY created_at`,
+      [cutoff],
+    );
+    return result.rows.map((row) => record(row as Row));
+  }
+
+  /** True for the one caller that may send the reminder. */
+  async claimApprovalReminder(id: string): Promise<boolean> {
+    const result = await this.db.pool.query(
+      "UPDATE blog_posts SET approved_reminded_at=now() WHERE id=$1 AND status='approved' AND approved_reminded_at IS NULL",
+      [id],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   /** Withdrawn posts whose MDX file still has to leave the repository. */

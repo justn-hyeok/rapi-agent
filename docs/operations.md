@@ -324,7 +324,8 @@ PI_CODING_AGENT_DIR=/var/lib/rapi/senpi/agent senpi   # 대화창에서 /login
 ```
 
 `curl -s localhost:3100/ready`의 `senpi` 항목이 `ok`면 바이너리와 설정 파일이 있다는
-뜻일 뿐 로그인 상태는 아니다. 로그인 전에는 `센파이로`가 실패하므로 2번을 먼저 한다.
+뜻일 뿐 로그인 상태는 아니다. 로그인 전에는 `센파이로`가 실패하므로 2번을 먼저 한다. 인증 오류처럼 보이는 실패에는 ChatOps가
+"senpi 로그인이 필요할 수 있어요"를 덧붙인다.
 `SENPI_BIN`, `SENPI_HOME`은 기본 경로를 바꿀 때만 설정한다.
 
 ## 하네스 버전 갱신 (선택)
@@ -383,6 +384,7 @@ DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 �
 - 사용량 조회: `SELECT feature, count(*), sum(cost_micro_usd)/1e6 AS usd FROM model_usage
   WHERE at >= date_trunc('month', now() AT TIME ZONE 'Asia/Seoul') GROUP BY 1;`
 - 마이그레이션 `0026_model_usage.sql`을 먼저 적용한다(`npm run db:migrate`).
+- 80%/100% 알림은 월·단계·`MODEL_MONTHLY_BUDGET_USD` 금액별로 한 번씩 간다. 한도를 올리면 같은 달에도 새 한도에서 다시 알린다.
 
 연결 범위: 봇·chat·워커가 각자 같은 방식으로 이 클라이언트를 만들어 블로그 초안(`blog_draft`)과
 주간 GitHub 리포트(`repo_report`)에 넘긴다. `MODEL_API_*`가 없으면 초안은 "꺼져 있어요"라고
@@ -545,9 +547,9 @@ GITHUB_REPORT_TARGET=dm
 | 순서 | 플래그 | 필요한 것 | 소유자 작업 | 자세히 |
 | --- | --- | --- | --- | --- |
 | 1 | `MODEL_API_BASE_URL` + `MODEL_API_KEY` (플래그 없음) | `MODEL_DEFAULT`, 선택 `MODEL_MONTHLY_BUDGET_USD`, 마이그레이션 `0026` | LiteLLM 설치와 공급자 키, 가격표 확인 | [LiteLLM 켜기](#litellm-켜기-선택) |
-| 2 | `LEARNER_EXPERIMENT_ENABLED` | `WEBHOOK_ENCRYPTION_KEY`, `RAPI_PUBLIC_BASE_URL`, `DISCORD_SUPERADMIN_USER_IDS`, `0019` | 없음(Discord 안에서 소유자 승인으로 발송) | `.env.example` |
+| 2 | `LEARNER_EXPERIMENT_ENABLED` | `WEBHOOK_ENCRYPTION_KEY`, `RAPI_PUBLIC_BASE_URL`, `DISCORD_SUPERADMIN_USER_IDS`, `0019`, `0027`(재알림) | 없음(Discord 안에서 소유자 승인으로 발송) | `.env.example` |
 | 3 | `WEB_ENABLED` | `DISCORD_OAUTH_CLIENT_ID/SECRET`, `RAPI_PUBLIC_BASE_URL`, `WEBHOOK_ENCRYPTION_KEY`, `0021`(구독 폼은 2번이 켜져야 작동) | Discord 개발자 포털에 `${RAPI_PUBLIC_BASE_URL}/auth/discord/callback` redirect 등록, 게이트웨이 재시작 | README, `docs/ux-notes/w1-web.md` |
-| 4 | `BLOG_PUBLISH_ENABLED`, `BLOG_DRAFTS_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0022`, 초안은 1번 | VM의 `gh` 로그인, 블로그 PR 병합, `RAPI_BLOG_WITHDRAWALS_FILE` 쓰기 권한 | `docs/ux-notes/m2-blog.md` |
+| 4 | `BLOG_PUBLISH_ENABLED`, `BLOG_DRAFTS_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0022`, `0027`(상태 전이·재알림), 초안은 1번 | VM의 `gh` 로그인, 블로그 PR 병합, `RAPI_BLOG_WITHDRAWALS_FILE` 쓰기 권한 | `docs/ux-notes/m2-blog.md` |
 | 5 | `EMAIL_ENABLED` | 2번, `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`, `EMAIL_WEBHOOK_SECRET`, `0023` | 발송 도메인 SPF/DKIM/DMARC, 업체 웹훅 등록, 게이트웨이 재시작 | [메일 켜기](#메일-켜기-선택) |
 | 6 | `PUBLIC_AGENT_ENABLED` + `PUBLIC_AGENT_BACKEND=api` | 실행기 쪽 `PUBLIC_AGENT_API_KEY/MODEL`(1번과 별개). 월 상한·가격표는 봇 `.env`의 `MODEL_MONTHLY_BUDGET_USD`와 `ops/model-prices.json` | `/etc/rapi-public-agent.env`에 같은 백엔드·키 설정, 배포 뒤 실행기 재시작(안 하면 사용량 기록이 오지 않는다) | 위 LiteLLM 절 |
 | 7 | `CHATBOT_ENABLED`, `CHATBOT_L2_ENABLED` | 6번, `0025`, 블로그 색인은 `RAPI_PUBLIC_BASE_URL`(https) | 봇 `.env`와 실행기 env 둘 다 `api`인지 확인 | `docs/ux-notes/q5-chatbot.md` |
@@ -565,3 +567,9 @@ GITHUB_REPORT_TARGET=dm
   상한이 없다(기록만).
 
 끄는 순서는 반대다. 플래그를 `false`로 되돌리고 서비스를 재시작하면 된다.
+
+## 소유자 재알림 (U8)
+
+마이그레이션 `0027_owner_reminders.sql`(`npm run db:migrate`, 자동 배포는 스스로 적용)을 봇·워커보다 먼저 적용한다. 블로그 상태 전이도 새 컬럼을 쓰므로 필수다. 학습자 미리보기를 3시간 동안
+결정하지 않으면, 블로그 글이 PR이 열린 채 24시간 `approved`에 머물면 SUPERADMIN에게 DM을 한 번 보낸다(반복 없음).
+새 환경 변수는 없다.

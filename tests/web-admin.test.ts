@@ -559,3 +559,19 @@ test("/검색 adds the archive link only when the web is on", async () => {
   );
   assert.equal(on.data, undefined);
 });
+
+test("the operator briefing pages are not confused with the learner's 내 구독", async () => {
+  const h = harness();
+  const { cookie } = h.session(ADMIN);
+  for (const [path, label] of [
+    ["/admin/subscribe", "운영자 브리핑 구독"],
+    ["/admin/unsubscribe", "운영자 브리핑 구독 해제"],
+  ] as const) {
+    const page = await h.portal.handle(h.request("GET", path, { cookie }));
+    assert.equal(page!.status, 200);
+    assert.ok(page!.body.includes(label), path);
+  }
+  const index = await h.portal.handle(h.request("GET", "/admin", { cookie }));
+  assert.ok(index!.body.includes("운영자 브리핑 구독 해제"));
+  assert.ok(!index!.body.includes("구독 만들기"));
+});

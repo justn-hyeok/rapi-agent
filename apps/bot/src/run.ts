@@ -23,6 +23,9 @@ import {
   createHarnessUpdates,
   createEmailService,
   createLearnerExperiment,
+  LearnerExperiment,
+  decideGuildButton,
+  isGuildDecision,
   createWebPortal,
   HarnessUpdateService,
   CHATBOT_SUBSCRIPTION_PREFIX,
@@ -38,6 +41,7 @@ import {
   createGuildGate,
   formatModelCostReport,
   microUsdFromUsd,
+  GUILD_NOT_ALLOWED_MESSAGE,
   isGuildAllowed,
   resolveHomeGuildId,
   summarizeReadiness,
@@ -193,7 +197,11 @@ const learner = createLearnerExperiment(
   config,
   store,
   discord,
-  blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {},
+  {
+    ...(blog ? { onIssueSent: (issue) => blog.onIssueSent(issue) } : {}),
+    // `web` is created below; it only exists when WEB_ENABLED is on.
+    webUnsubscribeUrl: (userId) => web?.unsubscribeUrl(userId),
+  },
   emailService,
 );
 const harnessUpdates = createHarnessUpdates(
@@ -490,70 +498,76 @@ const server = createDiscordInteractionServer(
           },
         }
       : {}),
-    component: async (identity, customId) => {
-      if (
-        customId.startsWith("guild_allow:") ||
-        customId.startsWith("guild_reject:")
-      ) {
+    decision: {
+      handles: (customId) =>
+        isGuildDecision(customId) ||
+        LearnerExperiment.handlesDecision(customId) ||
+        BlogService.handles(customId) ||
+        HarnessUpdateService.handles(customId),
+      handle: async (identity, customId) => {
         // Pressed in the owner's DM; only a SUPERADMIN may decide.
-        assertDiscordAccess(identity, allowlists, "superadmin");
-        const allow = customId.startsWith("guild_allow:");
-        const guildId = customId.slice(customId.indexOf(":") + 1);
-        if (!/^\d+$/.test(guildId)) throw new Error("알 수 없는 버튼입니다.");
-        const decided = await store.decideDiscordGuild(
-          guildId,
-          allow ? "allowed" : "rejected",
-          identity.userId,
-        );
-        guildGate.invalidate();
-        if (!decided) return "이미 처리했거나 요청이 없는 서버입니다.";
-        if (!allow) {
-          const left = await fetch(
-            `https://discord.com/api/v10/users/@me/guilds/${guildId}`,
+        if (isGuildDecision(customId)) {
+          assertDiscordAccess(identity, allowlists, "superadmin");
+          return decideGuildButton(
             {
-              method: "DELETE",
-              headers: { authorization: `Bot ${config.DISCORD_BOT_TOKEN}` },
-              signal: AbortSignal.timeout(10_000),
+              decide: (guildId, status, actorId) =>
+                store.decideDiscordGuild(guildId, status, actorId),
+              invalidate: () => guildGate.invalidate(),
+              leave: async (guildId) => {
+                const left = await fetch(
+                  `https://discord.com/api/v10/users/@me/guilds/${guildId}`,
+                  {
+                    method: "DELETE",
+                    headers: {
+                      authorization: `Bot ${config.DISCORD_BOT_TOKEN}`,
+                    },
+                    signal: AbortSignal.timeout(10_000),
+                  },
+                );
+                await left.arrayBuffer();
+                return left.ok;
+              },
+              registerCommands: (guildId) =>
+                registerSlashCommands(
+                  config.DISCORD_APPLICATION_ID,
+                  config.DISCORD_BOT_TOKEN,
+                  guildId,
+                ),
+              serverConfigUrl:
+                web && config.RAPI_PUBLIC_BASE_URL
+                  ? `${config.RAPI_PUBLIC_BASE_URL.replace(/\/+$/, "")}/admin/server-config`
+                  : undefined,
             },
+            customId,
+            identity.userId,
           );
-          await left.arrayBuffer();
-          return left.ok
-            ? "서버를 거절하고 라피가 나갔습니다."
-            : "서버를 거절했지만 라피가 나가지 못했습니다. 직접 내보내 주세요.";
         }
-        try {
-          await registerSlashCommands(
-            config.DISCORD_APPLICATION_ID,
-            config.DISCORD_BOT_TOKEN,
-            guildId,
-          );
-        } catch {
-          return "서버를 허용했습니다. slash 명령 등록은 실패했으니 나중에 다시 등록해 주세요.";
+        if (LearnerExperiment.handlesDecision(customId)) {
+          if (!learner) return { notice: "지금은 쓸 수 없는 버튼입니다." };
+          return learner.handleDecision(identity, customId);
         }
-        return "서버를 허용했습니다. slash 명령도 등록했습니다.";
-      }
-      if (BlogService.handles(customId)) {
-        // Pressed in the owner's DM; only a SUPERADMIN may decide.
         assertDiscordAccess(identity, allowlists, "superadmin");
-        if (!blog) return "지금은 쓸 수 없는 버튼입니다.";
-        return blog.handleComponent(identity, customId);
-      }
+        if (BlogService.handles(customId)) {
+          if (!blog) return { notice: "지금은 쓸 수 없는 버튼입니다." };
+          return blog.handleButton(identity, customId);
+        }
+        if (!harnessUpdates) return { notice: "지금은 쓸 수 없는 버튼입니다." };
+        return {
+          result: await harnessUpdates.handleComponent(identity, customId),
+        };
+      },
+    },
+    component: async (identity, customId) => {
       if (customId.startsWith(CHATBOT_SUBSCRIPTION_PREFIX)) {
         // Any member may press their own confirm button; the id and the
         // presser must match, and only that person's subscription changes.
         if (!config.CHATBOT_ENABLED) return "지금은 쓸 수 없는 버튼입니다.";
         return handleChatbotSubscriptionComponent(store, identity, customId);
       }
-      if (HarnessUpdateService.handles(customId)) {
-        // Pressed in the owner's DM; only a SUPERADMIN may decide.
-        assertDiscordAccess(identity, allowlists, "superadmin");
-        if (!harnessUpdates) return "지금은 쓸 수 없는 버튼입니다.";
-        return harnessUpdates.handleComponent(identity, customId);
-      }
       if (!identity.guildId)
         throw new Error("서버에서만 사용할 수 있는 버튼입니다.");
       if (!isGuildAllowed(identity.guildId, await guildGate.allowed()))
-        throw new Error("아직 허용되지 않은 서버입니다.");
+        throw new Error(GUILD_NOT_ALLOWED_MESSAGE);
       if (customId === "rapi_verify:v1")
         return layout.verifyMember(identity.guildId, identity.userId);
       if (customId.startsWith("server_config_apply:")) {
