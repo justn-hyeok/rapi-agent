@@ -226,7 +226,7 @@ export class AgentResearchBrowser implements ResearchBrowser {
         ...(cookie.httpOnly ? ["--httpOnly"] : []),
         ...(cookie.sameSite ? ["--sameSite", cookie.sameSite] : []),
         ...(cookie.expires !== undefined && cookie.expires > 0
-          ? ["--expires", String(cookie.expires)]
+          ? ["--expires", String(Math.floor(cookie.expires))]
           : []),
       ]);
     }
