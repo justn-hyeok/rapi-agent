@@ -57,33 +57,41 @@ export function parseExpansion(text: string): string[] {
 }
 
 /**
- * Relevance 0-3 per candidate key from a model reply. Keys the model invented
- * or scored out of range are ignored, so it can only rank what it was given.
+ * Relevance 0-3 per candidate id from a model reply, e.g. `{"2":3,"5":1}`.
+ * Ids the model invented or scores out of range are ignored, so it can only
+ * rank what it was given. A reply cut off mid-way still yields the pairs that
+ * arrived whole.
  */
 export function parseRelevance(
   text: string,
-  candidateKeys: ReadonlySet<string>,
+  candidateIds: ReadonlySet<string>,
 ): Map<string, number> {
-  const parsed = parseJson(text);
-  const list = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === "object" && "ranking" in parsed
-      ? (parsed as { ranking: unknown }).ranking
-      : null;
   const result = new Map<string, number>();
-  if (!Array.isArray(list)) return result;
-  for (const row of list) {
-    if (!row || typeof row !== "object") continue;
-    const { key, relevance } = row as { key?: unknown; relevance?: unknown };
+  const accept = (id: unknown, relevance: unknown) => {
+    const key = typeof id === "number" ? String(id) : id;
     if (
       typeof key === "string" &&
-      candidateKeys.has(key) &&
+      candidateIds.has(key) &&
       typeof relevance === "number" &&
       Number.isInteger(relevance) &&
       relevance >= 0 &&
       relevance <= 3
     )
       result.set(key, relevance);
+  };
+  const parsed = parseJson(text);
+  if (Array.isArray(parsed)) {
+    for (const row of parsed)
+      if (row && typeof row === "object")
+        accept(
+          (row as { id?: unknown }).id,
+          (row as { relevance?: unknown }).relevance,
+        );
+  } else if (parsed && typeof parsed === "object") {
+    for (const [id, relevance] of Object.entries(parsed)) accept(id, relevance);
+  } else {
+    for (const match of text.matchAll(/"(\d{1,3})"\s*:\s*(\d)\b/g))
+      accept(match[1], Number(match[2]));
   }
   return result;
 }
