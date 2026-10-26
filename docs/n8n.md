@@ -61,11 +61,11 @@ docker compose --project-name rapi-n8n-local exec n8n n8n import:workflow --inpu
 워크플로를 가져오려면 컨테이너 안에서 `n8n import:workflow --input=...`를 쓰고 `n8n update:workflow
 --id=rapiBlogAnnounce1 --active=true` 뒤 컨테이너를 재시작한다.
 
-**검증 기록(2026-10-26)**: n8n 2.22.5 컨테이너(로컬 이미지)로 가져오기·활성화 후, 라피의
-`AutomationNotifier`가 만든 실제 요청을 보냈다. 틀린 비밀의 요청은 Discord 대역 서버에 아무것도
-보내지 않았고, 올바른 요청은 `@`가 제거된 제목과 `allowed_mentions: {parse: []}`가 붙은
-공지를 보냈다. compose가 고정한 2.43.3 이미지는 받는 데 시간이 걸려 이 시험에 쓰지 못했다.
-같은 시험을 고정 버전으로 한 번 더 한 뒤 운영에 올리는 것이 좋다.
+**검증 기록(2026-10-27)**: compose가 고정한 n8n 2.43.3 컨테이너(새 볼륨)에서 워크플로를 가져와 활성화한 뒤,
+서명된 요청 네 건을 보냈다. 틀린 비밀, 10분 지난 시각, 다른 이벤트 종류의 요청은 Discord 대역 서버에
+아무것도 보내지 않았고, 올바른 요청만 `@`와 `<`, `>`가 제거된 제목과 `allowed_mentions: {parse: []}`가
+붙은 공지를 보냈다. 서버가 완전히 뜨기 전에 `import:workflow`를 실행하면 마이그레이션이 깨지므로,
+`/healthz`가 200이 된 뒤에 가져오고 활성화한 다음 컨테이너를 재시작한다. 이전(2026-10-26) 시험은 2.22.5였다.
 
 워크플로를 가져온 뒤 n8n에서 활성화하고 `DISCORD_ANNOUNCE_WEBHOOK`을 시험용 주소로 둔 채,
 서명된 이벤트를 `POST http://127.0.0.1:5678/webhook/rapi-blog`로 보내 실행 기록을 확인한다.
