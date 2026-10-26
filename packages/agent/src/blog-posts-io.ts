@@ -7,6 +7,7 @@ import { learnerItemFromPost, type DeliveryAdapter } from "@rapi/core";
 import type { BlogPostsStore, PostgresStore } from "@rapi/db";
 import {
   BlogService,
+  type BlogPorts,
   type BlogPublisher,
   type BlogTopic,
   type BlogWithdrawals,
@@ -226,6 +227,7 @@ export function createBlogService(
   postgres: Pick<PostgresStore, "learnerCandidatePosts">,
   delivery: DeliveryAdapter,
   models?: ModelClient,
+  guides?: BlogPorts["guides"],
 ): BlogService | undefined {
   if (
     !(config.BLOG_PUBLISH_ENABLED || config.BLOG_DRAFTS_ENABLED) ||
@@ -248,6 +250,7 @@ export function createBlogService(
           }
         : {}),
       ...(models ? { models } : {}),
+      ...(guides ? { guides } : {}),
       recentTopics: communityTopics(postgres),
     },
     {

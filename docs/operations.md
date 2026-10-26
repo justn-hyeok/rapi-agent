@@ -638,7 +638,7 @@ GITHUB_REPORT_TARGET=dm
 | 8 | `GITHUB_APP_ENABLED` | `GITHUB_APP_ID/PRIVATE_KEY_PATH/WEBHOOK_SECRET/ALLOWED_OWNERS/OWNER_LOGINS`, `0024` | GitHub App 등록·설치·웹훅 URL | [GitHub App 만들기](#github-app-만들기-선택) |
 | 9 | `HARNESS_UPDATES_ENABLED` | `DISCORD_SUPERADMIN_USER_IDS`, `0020` | VM의 `gh` 로그인, 제안 PR 검토 | [하네스 버전 갱신](#하네스-버전-갱신-선택) |
 | 10 | `BILLING_ENABLED` (+ `BILLING_LIVE`) | 3번, `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY`, `RAPI_PUBLIC_BASE_URL`, `0028`. 사업자 등록 전에는 테스트 키만 | 사업자 등록(통신판매업 신고), Toss 가맹 계약·라이브 키, 웹훅 URL 등록, 법적 페이지, 게이트웨이 재시작 | [결제 (꺼짐)](#결제-꺼짐) |
-| 11 | `ARCHIVE_SOURCES_ENABLED`, `CHATBOT_RERANK_ENABLED`, `GRAPH_INDEX_ENABLED`, `CHATBOT_GRAPH_ENABLED` | 7번, `0031`, `0032`, `MODEL_API_*`, `node scripts/graph-admin.mjs estimate` | 모델 비용(`/비용`), 그래프 `report` | [출처가 붙은 입문 가이드](guide-pipeline.md) |
+| 11 | `ARCHIVE_SOURCES_ENABLED`, `CHATBOT_RERANK_ENABLED`, `GRAPH_INDEX_ENABLED`, `CHATBOT_GRAPH_ENABLED`, `BLOG_GUIDE_GRAPH_ENABLED` | 7번, `0031`, `0032`, `MODEL_API_*`, `node scripts/graph-admin.mjs estimate` | 모델 비용(`/비용`), 그래프 `report` | [출처가 붙은 입문 가이드](guide-pipeline.md) |
 
 켜고 나서 한 번씩 확인할 것:
 

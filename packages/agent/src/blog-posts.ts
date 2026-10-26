@@ -11,6 +11,7 @@ import {
 } from "@rapi/core";
 import type { BlogPostRecord, BlogPostsStore } from "@rapi/db";
 import type { ButtonOutcome } from "./button-outcome.js";
+import type { GuideDraft, GuideDrafter } from "./guide-graph.js";
 
 export interface BlogPublisher {
   /** Opens (or finds) the PR that adds `apps/blog/content/<slug>.mdx`. */
@@ -78,6 +79,15 @@ export interface BlogPorts {
   publisher: BlogPublisher;
   withdrawals?: BlogWithdrawals | undefined;
   models?: ModelClient | undefined;
+  /** Researches the archive before an owner-requested draft (needs `models`). */
+  guides?:
+    | {
+        compose(
+          topic: string,
+          drafter: GuideDrafter,
+        ): Promise<GuideDraft | string>;
+      }
+    | undefined;
   /** Recent `setup`/`stars` community posts the weekly job may pick from. */
   recentTopics?: ((since: Date) => Promise<BlogTopic[]>) | undefined;
 }
@@ -274,7 +284,13 @@ export class BlogService {
     origin: "owner" | "weekly",
     topic: string,
   ): Promise<BlogPostRecord | string> {
-    const generated = await this.generate(slug, material);
+    // An owner request is researched in the archive first; weekly drafts already carry their material.
+    const generated =
+      origin === "owner" && this.ports.guides
+        ? await this.ports.guides.compose(topic, (prepared) =>
+            this.generate(slug, prepared),
+          )
+        : await this.generate(slug, material);
     if (typeof generated === "string") return generated;
     const post = await this.ports.store.create({
       slug,

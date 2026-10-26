@@ -6,6 +6,7 @@ import {
   GhBlogPullRequests,
   createBlogService,
   type BlogPublisher,
+  type BlogPorts,
 } from "@rapi/agent";
 import {
   canTransitionBlogPost,
@@ -151,7 +152,12 @@ class FakeStore {
 }
 
 function setup(
-  options: { publish?: boolean; drafts?: boolean; model?: ModelClient } = {},
+  options: {
+    publish?: boolean;
+    drafts?: boolean;
+    model?: ModelClient;
+    guides?: BlogPorts["guides"];
+  } = {},
 ) {
   const store = new FakeStore();
   const sent: Array<{ target: DeliveryTarget; payload: DeliveryPayload }> = [];
@@ -184,6 +190,7 @@ function setup(
       publisher,
       withdrawals: { record: async (slug) => void withdrawn.push(slug) },
       ...(options.model ? { models: options.model } : {}),
+      ...(options.guides ? { guides: options.guides } : {}),
     } as ConstructorParameters<typeof BlogService>[0],
     {
       superadminIds: [owner],
@@ -743,4 +750,45 @@ test("a post stuck in approved with an open PR gets one reminder with the PR lin
   assert.match(reminder.text, /https:\/\/github\.com\/x\/y\/pull\/1/);
   await service.runDue(new Date(approved.getTime() + 49 * 3_600_000));
   assert.equal(dms(), before + 1);
+});
+
+test("an owner draft request goes through the guide pipeline and still waits for approval", async () => {
+  const seen: string[] = [];
+  const { store, sent, service } = setup({
+    model: model(),
+    guides: {
+      async compose(topic, drafter) {
+        seen.push(topic);
+        const result = await drafter("주제: 준비된 자료");
+        return typeof result === "string" ? result : result;
+      },
+    },
+  });
+  assert.match(
+    await service.requestDraft({ userId: owner }, "Codex 입문", "777"),
+    /DM으로 보냈어요/,
+  );
+  assert.deepEqual(seen, ["Codex 입문"]);
+  assert.equal(store.posts[0]!.status, "draft");
+  assert.match(
+    JSON.stringify(sent.at(-1)!.payload.discord!.components),
+    /blog_publish:/,
+  );
+});
+
+test("a pipeline that finds no usable evidence tells the owner and stores nothing", async () => {
+  const { store, sent, service } = setup({
+    model: model(),
+    guides: {
+      async compose() {
+        return "아카이브에서 이 주제의 근거를 충분히 찾지 못했어요.";
+      },
+    },
+  });
+  assert.match(
+    await service.requestDraft({ userId: owner }, "없는 주제", "778"),
+    /근거를 충분히 찾지 못했어요/,
+  );
+  assert.equal(store.posts.length, 0);
+  assert.equal(sent.length, 0);
 });

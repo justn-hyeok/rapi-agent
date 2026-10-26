@@ -13,6 +13,7 @@ import {
 import {
   ChatbotService,
   GraphRetriever,
+  GuideComposer,
   HybridRetriever,
   LlmRerankRetriever,
   PublicCommunityService,
@@ -254,6 +255,9 @@ const chat = new ChatOrchestrator(
     store,
     discord,
     modelClient ?? undefined,
+    config.BLOG_GUIDE_GRAPH_ENABLED && modelClient
+      ? new GuideComposer(searchRetriever, modelClient)
+      : undefined,
   ),
   new BrowserResearchService({
     enabled: config.BROWSER_RESEARCH_ENABLED,
