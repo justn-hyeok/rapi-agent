@@ -1,5 +1,7 @@
 import {
+  CARD_COLOR,
   LEARNER_SECTIONS,
+  cardPayload,
   isLearnerCadence,
   learnerIssueBoundary,
   learnerItemFromPost,
@@ -11,6 +13,7 @@ import {
   signLearnerLink,
   verifyLearnerLink,
   type DeliveryAdapter,
+  type DiscordCard,
   type LearnerCadence,
   type LearnerItemDraft,
 } from "@rapi/core";
@@ -334,12 +337,25 @@ export class LearnerExperiment {
         try {
           await this.delivery.send(
             { channel: "discord_dm", recipientId: adminId },
-            {
-              subject: "학습자 소식 미리보기 알림",
-              text: `**학습자 소식 ${CADENCE_LABEL[issue.cadence]} · ${issue.periodKey}** 미리보기를 아직 결정하지 않았어요. 위의 미리보기 DM에서 [발송]이나 [건너뛰기]를 눌러 주세요. 결정하지 않으면 이번 호는 나가지 않고 항목도 다음 호로 넘어가지 않아요.`,
-              html: "",
-              itemIds: [],
-            },
+            cardPayload(
+              "학습자 소식 미리보기 알림",
+              `학습자 소식 ${CADENCE_LABEL[issue.cadence]} · ${issue.periodKey} 미리보기를 아직 결정하지 않았어요. 위의 미리보기 DM에서 [발송]이나 [건너뛰기]를 눌러 주세요. 결정하지 않으면 이번 호는 나가지 않고 항목도 다음 호로 넘어가지 않아요.`,
+              [
+                {
+                  title: `학습자 소식 ${CADENCE_LABEL[issue.cadence]} · ${issue.periodKey}`,
+                  description:
+                    "미리보기를 아직 결정하지 않았어요. 위의 미리보기 DM에서 **발송**이나 **건너뛰기**를 눌러 주세요.",
+                  fields: [
+                    {
+                      name: "결정하지 않으면",
+                      value:
+                        "이번 호는 나가지 않고, 항목도 다음 호로 넘어가지 않아요.",
+                    },
+                  ],
+                  color: CARD_COLOR.warn,
+                },
+              ],
+            ),
             `learner-reminder:${id}:${adminId}`,
           );
         } catch {
@@ -543,12 +559,16 @@ export class LearnerExperiment {
     const boundary = learnerReportBoundary(now);
     if (!(await this.store.learnerReportClaim(boundary.key))) return;
     const from = new Date(boundary.at.getTime() - PERIOD_MS.weekly);
-    const text = await this.report(from, boundary.at, boundary.key);
+    const { text, cards } = await this.reportCards(
+      from,
+      boundary.at,
+      boundary.key,
+    );
     for (const adminId of this.options.superadminIds)
       try {
         await this.delivery.send(
           { channel: "discord_dm", recipientId: adminId },
-          { subject: "학습자 실험 주간 리포트", text, html: "", itemIds: [] },
+          cardPayload("학습자 실험 주간 리포트", text, cards),
           `learner-report:${boundary.key}:${adminId}`,
         );
       } catch {
@@ -557,6 +577,14 @@ export class LearnerExperiment {
   }
 
   async report(from: Date, to: Date, label: string): Promise<string> {
+    return (await this.reportCards(from, to, label)).text;
+  }
+
+  async reportCards(
+    from: Date,
+    to: Date,
+    label: string,
+  ): Promise<{ text: string; cards: DiscordCard[] }> {
     const data = await this.store.learnerReportData(from, to);
     const verdict = learnerVerdict({
       activeSubscribers: data.active,
@@ -570,17 +598,42 @@ export class LearnerExperiment {
       verdict.clickRate === null
         ? "-"
         : `${Math.round(verdict.clickRate * 100)}%`;
-    return [
+    const rows = [
+      ["구독자", `${data.active}명 (매일 ${data.daily} · 매주 ${data.weekly})`],
+      [
+        "옵트아웃",
+        `이번 주 ${data.optOutsWeek}명 · 누적 ${data.optOutsTotal}명`,
+      ],
+      ["링크 클릭", `이번 주 1회 이상 ${data.clickers}명 (${percent})`],
+      [
+        "자발적 답장",
+        `이번 주 ${data.repliesWeek}건 · 누적 ${data.repliesTotal}건 (공유는 직접 확인)`,
+      ],
+      [
+        "메일 의향",
+        `예 ${data.emailYes} · 아니오 ${data.emailNo} · 미응답 ${data.emailUnknown}`,
+      ],
+    ] as const;
+    const criteria =
+      "기준: 클릭 30%↑·답장 2건↑·옵트아웃 1명↓ 성공 / 클릭 10%↓ 또는 옵트아웃 2명↑ 중단 (답장·옵트아웃은 누적)";
+    const text = [
       `**학습자 DM 실험 주간 리포트 · ${label}**`,
-      `구독자: ${data.active}명 (매일 ${data.daily} · 매주 ${data.weekly})`,
-      `옵트아웃: 이번 주 ${data.optOutsWeek}명 · 누적 ${data.optOutsTotal}명`,
-      `링크 클릭: 이번 주 1회 이상 ${data.clickers}명 (${percent})`,
-      `자발적 답장: 이번 주 ${data.repliesWeek}건 · 누적 ${data.repliesTotal}건 (공유는 직접 확인)`,
-      `메일 의향: 예 ${data.emailYes} · 아니오 ${data.emailNo} · 미응답 ${data.emailUnknown}`,
+      ...rows.map(([name, value]) => `${name}: ${value}`),
       `판정: **${verdict.label}** → ${verdict.action}`,
       ...(verdict.emailBranch ? [`분기: ${verdict.emailBranch}`] : []),
-      "기준: 클릭 30%↑·답장 2건↑·옵트아웃 1명↓ 성공 / 클릭 10%↓ 또는 옵트아웃 2명↑ 중단 (답장·옵트아웃은 누적)",
+      criteria,
     ].join("\n");
+    return {
+      text,
+      cards: [
+        {
+          title: `학습자 DM 실험 주간 리포트 · ${label}`,
+          description: `**판정: ${verdict.label}** → ${verdict.action}${verdict.emailBranch ? `\n분기: ${verdict.emailBranch}` : ""}`,
+          fields: rows.map(([name, value]) => ({ name, value, inline: false })),
+          footer: criteria,
+        },
+      ],
+    };
   }
 }
 
