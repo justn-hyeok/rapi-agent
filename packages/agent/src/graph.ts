@@ -1,6 +1,7 @@
 import type { ModelClient } from "@rapi/adapters";
 import {
   fuseRankings,
+  parseModelJson,
   sanitizeExtraction,
   type ArchiveDocument,
   type ArchiveHit,
@@ -38,21 +39,9 @@ export class GraphExtractor {
       maxOutputTokens: 800,
     });
     return {
-      extraction: sanitizeExtraction(parseObject(reply.text)),
+      extraction: sanitizeExtraction(parseModelJson(reply.text)),
       model: reply.model,
     };
-  }
-}
-
-function parseObject(text: string): unknown {
-  const body = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  try {
-    return JSON.parse(body);
-  } catch {
-    return null;
   }
 }
 

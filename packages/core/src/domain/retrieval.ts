@@ -40,7 +40,7 @@ const MAX_EXPANSION_TERMS = 8;
 
 /** Keywords from a model reply; anything that is not a JSON string array yields none. */
 export function parseExpansion(text: string): string[] {
-  const parsed = parseJson(text);
+  const parsed = parseModelJson(text);
   const list = Array.isArray(parsed)
     ? parsed
     : parsed && typeof parsed === "object" && "keywords" in parsed
@@ -79,7 +79,7 @@ export function parseRelevance(
     )
       result.set(key, relevance);
   };
-  const parsed = parseJson(text);
+  const parsed = parseModelJson(text);
   if (Array.isArray(parsed)) {
     for (const row of parsed)
       if (row && typeof row === "object")
@@ -96,7 +96,8 @@ export function parseRelevance(
   return result;
 }
 
-function parseJson(text: string): unknown {
+/** JSON from a model reply, with an optional ```json fence removed; null when it is not JSON. */
+export function parseModelJson(text: string): unknown {
   const body = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
