@@ -78,6 +78,10 @@ function decodeEntities(value: string): string {
   );
 }
 
+// Only real HTML tags: a title such as "Agents <ship>" or "Vec<String>" stays as written.
+const HTML_TAG =
+  /<\/?(?:a|abbr|article|aside|audio|b|blockquote|body|br|button|center|code|dd|del|details|div|dl|dt|em|figcaption|figure|font|footer|form|h[1-6]|head|header|hr|html|i|iframe|img|input|ins|label|li|main|mark|nav|ol|p|path|picture|pre|s|section|small|source|span|strong|sub|summary|sup|svg|table|tbody|td|th|thead|time|tr|u|ul|video)\b[^>]*>/gi;
+
 /**
  * Feed text as people read it: entity-escaped HTML is decoded first, then tags,
  * comments, scripts and styles go. Anything shown in Discord or mail goes through this.
@@ -90,7 +94,7 @@ export function plainText(value: string, limit = 2000): string {
     text
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-      .replace(/<\/?[a-zA-Z!][^>]*>/g, " "),
+      .replace(HTML_TAG, " "),
   )
     .replace(/\s+/g, " ")
     .trim()

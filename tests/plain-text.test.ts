@@ -14,8 +14,12 @@ test("plainText decodes escaped markup before dropping it", () => {
   assert.equal(plainText("Fast &amp; Local Agents"), "Fast & Local Agents");
 });
 
-test("plainText keeps a bare angle bracket that is not a tag", () => {
+test("plainText keeps angle brackets that are not HTML tags", () => {
   assert.equal(plainText("1 < 2 and 3 > 2"), "1 < 2 and 3 > 2");
+  assert.equal(
+    plainText("Agents <ship> and Vec<String>"),
+    "Agents <ship> and Vec<String>",
+  );
 });
 
 test("the stored rule summary is plain text", () => {
