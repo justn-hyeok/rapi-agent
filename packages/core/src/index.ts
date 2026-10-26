@@ -24,3 +24,5 @@ export * from "./domain/chatbot.js";
 export * from "./domain/email.js";
 export * from "./domain/billing.js";
 export * from "./domain/html-source.js";
+export * from "./domain/retrieval.js";
+export * from "./domain/graph.js";

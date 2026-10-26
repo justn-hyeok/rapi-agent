@@ -12,11 +12,16 @@ import {
 } from "@rapi/adapters";
 import {
   ChatbotService,
+  GraphRetriever,
+  HybridRetriever,
+  LlmRerankRetriever,
   PublicCommunityService,
   createBlogService,
   createGithubRepoReader,
   BrowserResearchService,
   RapiAgent,
+  lexicalRetriever,
+  withRetriever,
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
@@ -37,6 +42,7 @@ import {
 import {
   BlogPostsStore,
   ChatbotStore,
+  PostgresGraphStore,
   PostgresStore,
   ChatOpsStore,
   GitHubStore,
@@ -106,8 +112,24 @@ const modelClient = createModelClient(
 );
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
 const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL);
+// A model-backed reranker only when asked for and a model API exists; otherwise keyword search.
+const keywordRetriever = lexicalRetriever(chatbotStore);
+const textRetriever =
+  config.CHATBOT_RERANK_ENABLED && modelClient
+    ? new LlmRerankRetriever(keywordRetriever, modelClient)
+    : keywordRetriever;
+const searchRetriever = config.CHATBOT_GRAPH_ENABLED
+  ? new HybridRetriever(
+      [textRetriever, new GraphRetriever(new PostgresGraphStore(store))],
+      [2, 1],
+    )
+  : textRetriever;
+const chatbotArchive =
+  searchRetriever === keywordRetriever
+    ? chatbotStore
+    : withRetriever(chatbotStore, searchRetriever);
 const chatbot = config.CHATBOT_ENABLED
-  ? new ChatbotService(chatbotStore, store, {
+  ? new ChatbotService(chatbotArchive, store, {
       l2Enabled: config.CHATBOT_L2_ENABLED,
       readRepo: createGithubRepoReader(),
     })

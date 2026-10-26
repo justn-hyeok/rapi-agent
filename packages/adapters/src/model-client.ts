@@ -11,7 +11,8 @@ export type ModelFeature =
   | "public_qa"
   | "chatbot"
   | "blog_draft"
-  | "repo_report";
+  | "repo_report"
+  | "graph_extract";
 
 /** Public features stop at 100% of the monthly cap; owner features keep running. */
 export const PUBLIC_MODEL_FEATURES: ReadonlySet<ModelFeature> = new Set([
@@ -19,6 +20,7 @@ export const PUBLIC_MODEL_FEATURES: ReadonlySet<ModelFeature> = new Set([
   "public_qa",
   "chatbot",
   "rewrite",
+  "graph_extract",
 ]);
 
 export interface ModelMessage {
