@@ -105,13 +105,19 @@ export class ChatbotStore {
                     regexp_replace(si.body, '<[^>]*>', ' ', 'g'),
                     '&nbsp;', ' '), '&quot;', '"'), '&#39;', ''''),
                     '&lt;', '<'), '&gt;', '>'), '&amp;', '&'),
-                  '\\s+', ' ', 'g')) AS lead
+                  '\\s+', ' ', 'g')) AS lead,
+                btrim(regexp_replace(
+                  replace(replace(replace(replace(replace(replace(
+                    regexp_replace(si.title, '<[^>]*>', ' ', 'g'),
+                    '&nbsp;', ' '), '&quot;', '"'), '&#39;', ''''),
+                    '&lt;', '<'), '&gt;', '>'), '&amp;', '&'),
+                  '\\s+', ' ', 'g')) AS clean_title
            FROM source_items si
           WHERE si.visibility = 'public'
             AND si.collected_at > now() - interval '90 days'
        ), eligible AS (
          SELECT DISTINCT ON (si.content_fingerprint)
-                si.id, si.title, si.lead, si.canonical_url,
+                si.id, si.clean_title AS title, si.lead, si.canonical_url,
                 COALESCE(si.published_at, si.collected_at) AS at
            FROM cleaned si
            JOIN raw_events re ON re.id = si.raw_event_id
@@ -121,7 +127,7 @@ export class ChatbotStore {
             AND COALESCE(s.collection_policy->>'visibility','public') = 'public'
             AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
             AND si.canonical_url LIKE 'https://%'
-            AND char_length(trim(si.title)) > 0
+            AND char_length(si.clean_title) > 0
             AND char_length(si.lead) >= 40
             AND si.collected_at > now() - interval '90 days'
           ORDER BY si.content_fingerprint, si.collected_at DESC
