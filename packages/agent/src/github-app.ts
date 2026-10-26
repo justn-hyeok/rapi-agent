@@ -2,10 +2,12 @@ import type { IncomingHttpHeaders } from "node:http";
 import type { GitHubAppClient, ModelClient } from "@rapi/adapters";
 import {
   buildRepoReport,
+  cardPayload,
   classifyGitHubEvent,
   reportDue,
   verifyGitHubSignature,
   type DeliveryAdapter,
+  type DiscordCard,
   type GitHubAccessPolicy,
   type RepoWeekData,
 } from "@rapi/core";
@@ -142,7 +144,13 @@ export class GitHubWeeklyReport {
       try {
         await this.ports.delivery.send(
           { channel: "discord_dm", recipientId: adminId },
-          { subject: "GitHub 주간 리포트", text: body, html: "", itemIds: [] },
+          cardPayload("GitHub 주간 리포트", body, [
+            {
+              title: `Rapi GitHub 주간 리포트 · ${boundary.key}`,
+              ...(summary ? { description: summary } : {}),
+            },
+            ...sections.map((s) => repoCard(s.text)),
+          ]),
           `github-report:${boundary.key}:${adminId}`,
         );
       } catch {
@@ -207,4 +215,13 @@ export function createGitHubReport(
     superadminIds: config.DISCORD_SUPERADMIN_USER_IDS,
     target: config.GITHUB_REPORT_TARGET,
   });
+}
+
+/** `**repo**` + bullet lines (see buildRepoReport) as a card; Discord renders the nested bullets. */
+function repoCard(text: string): DiscordCard {
+  const [head = "", ...rest] = text.split("\n");
+  return {
+    title: head.replace(/\*\*/g, "").trim() || "GitHub",
+    description: rest.join("\n"),
+  };
 }

@@ -505,10 +505,12 @@ test("report builder lists merged PRs, issues, failing checks and stale PRs", ()
 
 function reportService(model?: { text: string } | "fail") {
   const sent: string[] = [];
+  const embeds: unknown[][] = [];
   const claims = new Set<string>();
   const delivery: DeliveryAdapter = {
     send: async (_t, payload) => {
       sent.push(payload.text);
+      embeds.push(payload.discord?.embeds ?? []);
       return {} as never;
     },
   };
@@ -545,7 +547,7 @@ function reportService(model?: { text: string } | "fail") {
             },
           },
   });
-  return { service, sent };
+  return { service, sent, embeds };
 }
 
 test("weekly report: once per week, allowed owners only, model summary optional", async () => {
@@ -566,6 +568,20 @@ test("weekly report: once per week, allowed owners only, model summary optional"
     await reportService().service.runDue(new Date("2026-10-31T01:00:00Z")),
     0,
   );
+});
+
+test("weekly report goes out as embeds: a summary card, then one card per repo", async () => {
+  const { service, embeds } = reportService({ text: "조용했습니다." });
+  await service.runDue(new Date("2026-10-26T01:00:00Z"));
+  const [first, repo] = embeds[0] as Array<{
+    title: string;
+    description?: string;
+  }>;
+  assert.match(first!.title, /GitHub 주간 리포트 · 2026-10-26/);
+  assert.equal(first!.description, "조용했습니다.");
+  assert.equal(repo!.title, "owner/app");
+  assert.match(repo!.description!, /머지된 PR 1건\n {2}- #1 Fix login/);
+  assert.ok(!repo!.description!.includes("**"));
 });
 
 test("GitHub App is off by default and validated when enabled", () => {

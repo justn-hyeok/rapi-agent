@@ -1,6 +1,7 @@
 export * from "./domain/state-machine.js";
 export * from "./domain/models.js";
 export * from "./domain/content.js";
+export * from "./domain/discord-card.js";
 export * from "./domain/delivery-period.js";
 export * from "./domain/delivery-selection.js";
 export * from "./domain/briefing-page.js";
