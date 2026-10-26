@@ -280,7 +280,7 @@ const issue = {
     {
       id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       section: "core" as const,
-      title: "제목 <b>",
+      title: "제목 <b>굵게</b>",
       summary: "요약",
       url: "https://original.example/post",
     },
@@ -353,7 +353,9 @@ test("an issue is mailed to verified addresses with unsubscribe headers and trac
   );
   assert.ok(message.html.includes("https://rapi.example/r/bbbbbbbb-"));
   assert.ok(!message.html.includes("original.example"));
-  assert.ok(message.html.includes("제목 &lt;b&gt;"));
+  // Markup in a feed title is dropped, not shown as text.
+  assert.ok(message.html.includes("제목 굵게"));
+  assert.ok(!message.html.includes("&lt;b&gt;"));
   // A repeat send neither mails again nor retries the failure.
   await service.sendIssue(issue, now);
   assert.equal(
