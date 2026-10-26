@@ -157,6 +157,7 @@ function setup(
     drafts?: boolean;
     model?: ModelClient;
     guides?: BlogPorts["guides"];
+    automation?: BlogPorts["automation"];
   } = {},
 ) {
   const store = new FakeStore();
@@ -191,6 +192,7 @@ function setup(
       withdrawals: { record: async (slug) => void withdrawn.push(slug) },
       ...(options.model ? { models: options.model } : {}),
       ...(options.guides ? { guides: options.guides } : {}),
+      ...(options.automation ? { automation: options.automation } : {}),
     } as ConstructorParameters<typeof BlogService>[0],
     {
       superadminIds: [owner],
@@ -791,4 +793,43 @@ test("a pipeline that finds no usable evidence tells the owner and stores nothin
   );
   assert.equal(store.posts.length, 0);
   assert.equal(sent.length, 0);
+});
+
+test("a merged post is announced to automation once, and a failing sink changes nothing", async () => {
+  const events: unknown[] = [];
+  const { store, state, service } = setup({
+    automation: {
+      async notify(event) {
+        events.push(event);
+        return true;
+      },
+    },
+  });
+  await service.onIssueSent(issue);
+  await service.runDue(new Date());
+  assert.deepEqual(events, []);
+  state.value = "merged";
+  await service.runDue(new Date());
+  await service.runDue(new Date());
+  assert.deepEqual(events, [
+    {
+      type: "blog.published",
+      data: {
+        slug: "learner-daily-2026-10-26",
+        title: store.posts[0]!.title,
+        url: "https://rapi.example/blog/learner-daily-2026-10-26.html",
+      },
+    },
+  ]);
+  const down = setup({
+    automation: {
+      async notify() {
+        return false;
+      },
+    },
+  });
+  await down.service.onIssueSent(issue);
+  down.state.value = "merged";
+  await down.service.runDue(new Date());
+  assert.equal(down.store.published().length, 1);
 });

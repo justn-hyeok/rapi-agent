@@ -26,3 +26,4 @@ export * from "./domain/billing.js";
 export * from "./domain/html-source.js";
 export * from "./domain/retrieval.js";
 export * from "./domain/graph.js";
+export * from "./domain/automation.js";

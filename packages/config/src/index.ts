@@ -1,5 +1,20 @@
 import { z } from "zod";
 
+// Same rule as isAllowedAutomationUrl in @rapi/core (config cannot import it); tests keep them equal.
+function allowedAutomationUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) return false;
+    if (url.protocol === "https:") return true;
+    return (
+      url.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const csvIds = z
   .string()
   .min(1)
@@ -104,6 +119,9 @@ export const environmentSchema = z
     CHATBOT_GRAPH_ENABLED: booleanString,
     ARCHIVE_SOURCES_ENABLED: booleanString,
     BLOG_GUIDE_GRAPH_ENABLED: booleanString,
+    // Both or neither: signed events to an automation tool such as n8n.
+    AUTOMATION_WEBHOOK_URL: z.url().optional(),
+    AUTOMATION_WEBHOOK_SECRET: z.string().min(16).optional(),
     GRAPH_INDEX_ENABLED: booleanString,
     GRAPH_INDEX_BATCH: z.coerce.number().int().min(1).max(50).default(10),
     PUBLIC_AGENT_READY_URL: z.url().default("http://127.0.0.1:3500/ready"),
@@ -232,6 +250,25 @@ export const environmentSchema = z
         code: "custom",
         path: ["CHATBOT_ENABLED"],
         message: "CHATBOT_ENABLED requires PUBLIC_AGENT_BACKEND=api",
+      });
+    }
+    if (!value.AUTOMATION_WEBHOOK_URL !== !value.AUTOMATION_WEBHOOK_SECRET) {
+      context.addIssue({
+        code: "custom",
+        path: ["AUTOMATION_WEBHOOK_URL"],
+        message:
+          "AUTOMATION_WEBHOOK_URL and AUTOMATION_WEBHOOK_SECRET must be set together",
+      });
+    }
+    if (
+      value.AUTOMATION_WEBHOOK_URL &&
+      !allowedAutomationUrl(value.AUTOMATION_WEBHOOK_URL)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["AUTOMATION_WEBHOOK_URL"],
+        message:
+          "AUTOMATION_WEBHOOK_URL must be https, or http on this machine without credentials",
       });
     }
     if (

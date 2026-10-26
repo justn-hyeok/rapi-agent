@@ -20,6 +20,7 @@ import {
   superadminDmNotifier,
 } from "@rapi/adapters";
 import {
+  createAutomationNotifier,
   createBlogService,
   createCommunityFeeds,
   createGitHubReport,
@@ -158,12 +159,15 @@ const githubReport =
         model: modelClient ?? undefined,
       })
     : undefined;
+// Only the worker sees a post go live (it tracks the pull requests), so only it tells automation.
 const blog = createBlogService(
   config,
   new BlogPostsStore(store),
   store,
   discord,
   modelClient ?? undefined,
+  undefined,
+  createAutomationNotifier(config, (message) => console.warn(message)),
 );
 const learner = createLearnerExperiment(
   config,
