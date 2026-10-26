@@ -71,14 +71,22 @@ docker compose --project-name rapi-n8n-local exec n8n n8n import:workflow --inpu
 서명된 이벤트를 `POST http://127.0.0.1:5678/webhook/rapi-blog`로 보내 실행 기록을 확인한다.
 잘못된 서명, 오래된 시각, 다른 이벤트 종류는 "Rejected"로 끝나야 한다.
 
-## 운영에 올릴 때 (소유자 결정 필요)
+## 운영 배포 현황 (2026-10-27)
 
-새 서비스를 VM에 하나 더 띄우는 일이라 아직 하지 않았다. 올리려면:
+운영 VM에 올라가 있다.
 
-1. `n8n.env`를 만든다(비밀은 소유자가 직접 채운다).
-2. `docker compose ... up --detach`로 n8n을 띄운다. 포트는 127.0.0.1에만 열려 있어 외부에서
-   접근할 수 없다. 관리 화면이 필요하면 SSH 터널로 연다. 첫 접속 때 소유자 계정을 만든다.
-3. 워크플로를 가져와 활성화하고, 라피 `.env`에 위 두 값을 넣은 뒤 `rapi-worker`를 재시작한다.
-4. 시험 게시로 공지가 한 번 가는지 확인한다.
+- 컨테이너 `rapi-n8n-n8n-1`(프로젝트 `rapi-n8n`), 이미지 2.43.3, `127.0.0.1:5678`에만 바인딩. 데이터는 볼륨
+  `rapi-n8n_n8n-data`.
+- 비밀은 `/home/justn/secrets/n8n.env`(0600)에 있다. 라피 `.env`에는 `AUTOMATION_WEBHOOK_URL`과
+  `AUTOMATION_WEBHOOK_SECRET`(위 파일의 `RAPI_AUTOMATION_SECRET`과 같은 값)이 있다.
+- 공지 채널은 `#라피-블로그-공지`다. 서명된 시험 이벤트 한 건은 공지 하나가 되고, 틀린 서명은 버려졌다.
+- 관리 화면은 `ssh -L 5678:127.0.0.1:5678 rapi-agent` 터널로 연다. 소유자 계정은 아직 만들지 않았다.
 
-n8n 이미지는 약 2.6GB이고 VM 디스크 여유는 약 16GB다.
+다시 올리거나 다른 기계에 옮길 때:
+
+1. `n8n.env`를 만든다(비밀은 무작위로 생성하고 출력하지 않는다).
+2. `docker compose --project-name rapi-n8n --env-file <n8n.env> -f ops/n8n/compose.yaml up --detach`.
+3. `/healthz`가 200이 된 뒤에 워크플로를 가져와 활성화하고 컨테이너를 재시작한다(위 로컬 검증 참고).
+4. 라피 `.env`에 위 두 값을 넣고 `rapi-worker`를 재시작한 뒤, 시험 이벤트로 공지가 한 번 가는지 확인한다.
+
+n8n 이미지는 약 1.8GB다.
