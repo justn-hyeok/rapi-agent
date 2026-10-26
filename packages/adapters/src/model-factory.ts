@@ -25,6 +25,7 @@ export interface ModelClientConfig {
   MODEL_FOR_CHATBOT?: string | undefined;
   MODEL_FOR_BLOG_DRAFT?: string | undefined;
   MODEL_FOR_REPO_REPORT?: string | undefined;
+  MODEL_FOR_GRAPH_EXTRACT?: string | undefined;
 }
 
 const FEATURES: ModelFeature[] = [
@@ -35,6 +36,7 @@ const FEATURES: ModelFeature[] = [
   "chatbot",
   "blog_draft",
   "repo_report",
+  "graph_extract",
 ];
 
 export function loadPrices(

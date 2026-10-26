@@ -22,3 +22,5 @@ export * from "./billing-plans.js";
 export * from "./billing-service.js";
 export * from "./web-billing.js";
 export * from "./browser-research.js";
+export * from "./retrieval.js";
+export * from "./graph.js";

@@ -79,6 +79,7 @@ const FEATURE_LABELS: Record<string, string> = {
   chatbot: "챗봇",
   blog_draft: "블로그 초안",
   repo_report: "저장소 리포트",
+  graph_extract: "지식 그래프 추출",
 };
 
 /** Korean report lines: model cost per feature, this month and last month. */

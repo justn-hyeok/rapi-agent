@@ -24,6 +24,8 @@ import {
   createCommunityFeeds,
   createGitHubReport,
   createHarnessUpdates,
+  GraphExtractor,
+  GraphIndexer,
   createLearnerExperiment,
   CompositeDeliveryAdapter,
   DEFAULT_SUMMARY_MODEL,
@@ -34,7 +36,9 @@ import { loadEnvironment } from "@rapi/config";
 import {
   BlogPostsStore,
   GitHubStore,
+  ChatbotStore,
   HarnessUpdatesStore,
+  PostgresGraphStore,
   ModelUsageStore,
   PostgresStore,
 } from "@rapi/db";
@@ -173,6 +177,16 @@ const harnessUpdates = createHarnessUpdates(
   discord,
 );
 
+// Extracts entities/relations from archive posts a few at a time; off unless asked for.
+const graphIndexer =
+  config.GRAPH_INDEX_ENABLED && modelClient
+    ? new GraphIndexer(
+        new PostgresGraphStore(store),
+        new GraphExtractor(modelClient),
+        { batchSize: config.GRAPH_INDEX_BATCH },
+      )
+    : undefined;
+
 type LoopState = {
   running?: boolean;
   lastStartedAt?: string;
@@ -188,7 +202,8 @@ const loops: Record<
   | "learner"
   | "harness"
   | "github"
-  | "blog",
+  | "blog"
+  | "graph",
   LoopState
 > = {
   collection: {},
@@ -199,6 +214,7 @@ const loops: Record<
   harness: {},
   github: {},
   blog: {},
+  graph: {},
 };
 
 async function runLoop(
@@ -306,6 +322,18 @@ const harnessTimer = harnessUpdates
       10 * 60_000,
     )
   : undefined;
+const archiveSync = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL);
+const graphTimer = graphIndexer
+  ? setInterval(
+      () =>
+        void runLoop("graph", async () => {
+          // The archive is otherwise synced only when someone asks the chatbot.
+          await archiveSync.syncArchive();
+          await graphIndexer.runDue();
+        }),
+      10 * 60_000,
+    )
+  : undefined;
 // The report is claimed per week, so a frequent check is cheap and restart-safe.
 const githubTimer = githubReport
   ? setInterval(
@@ -409,6 +437,7 @@ const healthServer = createLocalHealthServer(
               name !== "harness" &&
               name !== "github" &&
               name !== "blog" &&
+              name !== "graph" &&
               (name !== "webhook" || !!webhookWorker),
             ...(readiness ? { details: { outcome: readiness.outcome } } : {}),
             ...(state.lastSuccessAt
@@ -434,6 +463,7 @@ const shutdown = (): void => {
   if (curationTimer) clearInterval(curationTimer);
   if (learnerTimer) clearInterval(learnerTimer);
   if (harnessTimer) clearInterval(harnessTimer);
+  if (graphTimer) clearInterval(graphTimer);
   if (githubTimer) clearInterval(githubTimer);
   if (blogTimer) clearInterval(blogTimer);
   if (deliveryTimer) clearInterval(deliveryTimer);

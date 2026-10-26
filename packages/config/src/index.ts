@@ -100,6 +100,10 @@ export const environmentSchema = z
     PUBLIC_AGENT_BACKEND: z.enum(["codex", "api"]).default("codex"),
     CHATBOT_ENABLED: booleanString,
     CHATBOT_L2_ENABLED: booleanString,
+    CHATBOT_RERANK_ENABLED: booleanString,
+    CHATBOT_GRAPH_ENABLED: booleanString,
+    GRAPH_INDEX_ENABLED: booleanString,
+    GRAPH_INDEX_BATCH: z.coerce.number().int().min(1).max(50).default(10),
     PUBLIC_AGENT_READY_URL: z.url().default("http://127.0.0.1:3500/ready"),
     PUBLIC_AGENT_HEALTH_PORT: z.coerce
       .number()
@@ -168,6 +172,7 @@ export const environmentSchema = z
     MODEL_FOR_CHATBOT: z.string().min(1).optional(),
     MODEL_FOR_BLOG_DRAFT: z.string().min(1).optional(),
     MODEL_FOR_REPO_REPORT: z.string().min(1).optional(),
+    MODEL_FOR_GRAPH_EXTRACT: z.string().min(1).optional(),
     SUMMARIZER_BACKEND: z.enum(["codex", "api"]).default("codex"),
     GITHUB_APP_ENABLED: booleanString,
     GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
@@ -225,6 +230,31 @@ export const environmentSchema = z
         code: "custom",
         path: ["CHATBOT_ENABLED"],
         message: "CHATBOT_ENABLED requires PUBLIC_AGENT_BACKEND=api",
+      });
+    }
+    if (value.CHATBOT_GRAPH_ENABLED && !value.CHATBOT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["CHATBOT_GRAPH_ENABLED"],
+        message: "CHATBOT_GRAPH_ENABLED requires CHATBOT_ENABLED",
+      });
+    }
+    if (
+      value.GRAPH_INDEX_ENABLED &&
+      !(value.MODEL_API_BASE_URL && value.MODEL_API_KEY)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["GRAPH_INDEX_ENABLED"],
+        message:
+          "GRAPH_INDEX_ENABLED requires MODEL_API_BASE_URL and MODEL_API_KEY",
+      });
+    }
+    if (value.CHATBOT_RERANK_ENABLED && !value.CHATBOT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["CHATBOT_RERANK_ENABLED"],
+        message: "CHATBOT_RERANK_ENABLED requires CHATBOT_ENABLED",
       });
     }
     if (value.CHATBOT_L2_ENABLED && !value.CHATBOT_ENABLED) {
