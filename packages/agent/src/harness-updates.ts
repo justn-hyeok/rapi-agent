@@ -309,6 +309,12 @@ export function releaseFor(
       };
 }
 
+/**
+ * The VM cannot judge any release (for example the harness is not installed or
+ * logged in), so the result says nothing about the release itself.
+ */
+export class HarnessEnvironmentError extends Error {}
+
 export type HarnessUpdateStorePort = Pick<
   HarnessUpdatesStore,
   | "detect"
@@ -316,6 +322,7 @@ export type HarnessUpdateStorePort = Pick<
   | "pendingEvaluation"
   | "saveEvaluation"
   | "awaitingNotice"
+  | "lastNoticeAt"
   | "markNotified"
   | "dueReminders"
   | "clearReminder"
@@ -356,6 +363,8 @@ export interface HarnessUpdateOptions {
   superadminIds: string[];
   laterMs?: number;
   detectEveryMs?: number;
+  /** Minimum gap between announcements of one harness; default one week. */
+  noticeEveryMs?: number;
 }
 
 export interface HarnessUpdateIdentity {
@@ -364,6 +373,7 @@ export interface HarnessUpdateIdentity {
 
 const COMPONENT = /^harness_update_(apply|skip|later|revert):([0-9a-f-]{36})$/;
 const DAY_MS = 86_400_000;
+const DEFAULT_NOTICE_EVERY_MS = 7 * DAY_MS;
 
 export class HarnessUpdateService {
   private lastDetectAt = 0;
@@ -399,7 +409,7 @@ export class HarnessUpdateService {
       });
     }
     await attempt("evaluate", () => this.evaluatePending());
-    await attempt("notify", () => this.notifyEvaluated());
+    await attempt("notify", () => this.notifyEvaluated(now));
     await attempt("remind", () => this.remind(now));
     await attempt("track", () => this.trackPullRequests());
     if (failures.length) throw new Error(failures.join("; ").slice(0, 300));
@@ -435,6 +445,17 @@ export class HarnessUpdateService {
           result.checks,
         );
       } catch (error) {
+        if (error instanceof HarnessEnvironmentError) {
+          await this.ports.store.transition(
+            update.id,
+            ["pending_evaluation"],
+            "skipped",
+            undefined,
+            "environment_unavailable",
+            { reason: error.message.slice(0, 200) },
+          );
+          continue;
+        }
         evaluation = evaluationFrom(parseReleaseNotes(update.releaseBody), [
           {
             name: "sha256",
@@ -497,10 +518,33 @@ export class HarnessUpdateService {
     return delivered;
   }
 
-  async notifyEvaluated(): Promise<void> {
-    for (const update of await this.ports.store.awaitingNotice())
+  /**
+   * Announces only the newest evaluated release per harness, and at most once
+   * per `noticeEveryMs`. Older evaluated releases are dropped as superseded;
+   * the newest one waits for the interval and stays replaceable meanwhile.
+   */
+  async notifyEvaluated(now = new Date()): Promise<void> {
+    const newest = new Map<string, HarnessUpdateRecord>();
+    for (const update of await this.ports.store.awaitingNotice()) {
+      const older = newest.get(update.harness);
+      newest.set(update.harness, update);
+      if (older)
+        await this.ports.store.transition(
+          older.id,
+          ["pending_evaluation"],
+          "skipped",
+          undefined,
+          "superseded",
+          { by: update.toVersion },
+        );
+    }
+    const every = this.options.noticeEveryMs ?? DEFAULT_NOTICE_EVERY_MS;
+    for (const update of newest.values()) {
+      const last = await this.ports.store.lastNoticeAt(update.harness);
+      if (last && now.getTime() - last.getTime() < every) continue;
       if (await this.announce(update, `harness-update:${update.id}`))
         await this.ports.store.markNotified(update.id);
+    }
   }
 
   async remind(now: Date): Promise<void> {

@@ -147,6 +147,16 @@ export class HarnessUpdatesStore {
     return result.rows.map((row) => record(row as Row));
   }
 
+  /** When this harness was last announced to the owner, if ever. */
+  async lastNoticeAt(harness: string): Promise<Date | null> {
+    const result = await this.db.pool.query(
+      "SELECT max(notified_at) AS at FROM harness_updates WHERE harness=$1",
+      [harness],
+    );
+    const row = result.rows[0] as { at?: Date | null } | undefined;
+    return row?.at ?? null;
+  }
+
   async markNotified(id: string): Promise<void> {
     const changed = await this.db.pool.query(
       "UPDATE harness_updates SET state='notified',notified_at=now(),remind_at=NULL WHERE id=$1 AND state='pending_evaluation'",
