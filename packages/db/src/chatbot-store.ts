@@ -31,6 +31,8 @@ const toDocument = (row: DocumentRow): ArchiveDocument => ({
 
 // Refreshing is idempotent; a few minutes of staleness is fine for Q&A.
 const SYNC_INTERVAL_MS = 5 * 60_000;
+/** Newest public items kept in the archive; bounds search and graph extraction cost. */
+const SOURCE_DOCUMENT_LIMIT = 2000;
 
 /** Archive search and 24-hour thread context for the public chatbot. */
 export class ChatbotStore {
@@ -39,6 +41,9 @@ export class ChatbotStore {
   constructor(
     readonly db: PostgresStore,
     private readonly blogBaseUrl?: string,
+    private readonly sources: { enabled: boolean; limit?: number } = {
+      enabled: false,
+    },
   ) {}
 
   /**
@@ -81,7 +86,47 @@ export class ChatbotStore {
          AND key NOT IN (SELECT 'blog:'||slug FROM blog_posts WHERE status='published')`,
       );
     }
+    if (this.sources.enabled) await this.syncSources();
     this.lastSync = Date.now();
+  }
+
+  /**
+   * Titles, short summaries and links of the newest public collected items.
+   * Only public items of active public sources count, retention-expired and
+   * deleted items drop out on the next sync, and one row stands for each
+   * distinct content. The archive never holds bodies, only a 400 character lead.
+   */
+  private async syncSources(): Promise<void> {
+    await this.db.pool.query(
+      `WITH eligible AS (
+         SELECT DISTINCT ON (si.content_fingerprint)
+                si.id, si.title, si.body, si.canonical_url,
+                COALESCE(si.published_at, si.collected_at) AS at
+           FROM source_items si
+           JOIN raw_events re ON re.id = si.raw_event_id
+           JOIN sources s ON s.id = re.source_id
+          WHERE si.visibility = 'public'
+            AND s.state = 'active'
+            AND COALESCE(s.collection_policy->>'visibility','public') = 'public'
+            AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
+            AND si.canonical_url LIKE 'https://%'
+            AND char_length(trim(si.title)) > 0
+            AND si.collected_at > now() - interval '90 days'
+          ORDER BY si.content_fingerprint, si.collected_at DESC
+       ), newest AS (
+         SELECT * FROM eligible ORDER BY at DESC, id LIMIT $1
+       ), pruned AS (
+         DELETE FROM archive_documents
+          WHERE kind = 'source' AND key NOT IN (SELECT 'source:'||id FROM newest)
+       )
+       INSERT INTO archive_documents(key,kind,title,summary,url,published_at)
+       SELECT 'source:'||id, 'source', left(trim(title),160),
+              left(regexp_replace(body,'\\s+',' ','g'),400), canonical_url, at
+         FROM newest
+       ON CONFLICT (key) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
+         url=EXCLUDED.url, published_at=EXCLUDED.published_at`,
+      [this.sources.limit ?? SOURCE_DOCUMENT_LIMIT],
+    );
   }
 
   async upsertArchiveDocuments(documents: ArchiveDocument[]): Promise<void> {

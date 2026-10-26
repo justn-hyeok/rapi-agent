@@ -89,7 +89,7 @@ export function classifyChatbotIntent(raw: string): ChatbotIntent {
 
 export interface ArchiveDocument {
   key: string;
-  kind: "learner" | "community" | "blog";
+  kind: "learner" | "community" | "blog" | "source";
   title: string;
   summary: string;
   url: string;

@@ -111,7 +111,9 @@ const modelClient = createModelClient(
   superadminDmNotifier(discord, config.DISCORD_SUPERADMIN_USER_IDS ?? []),
 );
 const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
-const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL);
+const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL, {
+  enabled: config.ARCHIVE_SOURCES_ENABLED,
+});
 // A model-backed reranker only when asked for and a model API exists; otherwise keyword search.
 const keywordRetriever = lexicalRetriever(chatbotStore);
 const textRetriever =
