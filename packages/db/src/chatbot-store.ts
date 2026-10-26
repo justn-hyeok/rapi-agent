@@ -98,11 +98,22 @@ export class ChatbotStore {
    */
   private async syncSources(): Promise<void> {
     await this.db.pool.query(
-      `WITH eligible AS (
-         SELECT DISTINCT ON (si.content_fingerprint)
-                si.id, si.title, si.body, si.canonical_url,
-                COALESCE(si.published_at, si.collected_at) AS at
+      `WITH cleaned AS (
+         SELECT si.*,
+                btrim(regexp_replace(
+                  replace(replace(replace(replace(replace(replace(
+                    regexp_replace(si.body, '<[^>]*>', ' ', 'g'),
+                    '&nbsp;', ' '), '&quot;', '"'), '&#39;', ''''),
+                    '&lt;', '<'), '&gt;', '>'), '&amp;', '&'),
+                  '\\s+', ' ', 'g')) AS lead
            FROM source_items si
+          WHERE si.visibility = 'public'
+            AND si.collected_at > now() - interval '90 days'
+       ), eligible AS (
+         SELECT DISTINCT ON (si.content_fingerprint)
+                si.id, si.title, si.lead, si.canonical_url,
+                COALESCE(si.published_at, si.collected_at) AS at
+           FROM cleaned si
            JOIN raw_events re ON re.id = si.raw_event_id
            JOIN sources s ON s.id = re.source_id
           WHERE si.visibility = 'public'
@@ -111,6 +122,7 @@ export class ChatbotStore {
             AND si.metadata->>'retentionExpired' IS DISTINCT FROM 'true'
             AND si.canonical_url LIKE 'https://%'
             AND char_length(trim(si.title)) > 0
+            AND char_length(si.lead) >= 40
             AND si.collected_at > now() - interval '90 days'
           ORDER BY si.content_fingerprint, si.collected_at DESC
        ), newest AS (
@@ -121,7 +133,7 @@ export class ChatbotStore {
        )
        INSERT INTO archive_documents(key,kind,title,summary,url,published_at)
        SELECT 'source:'||id, 'source', left(trim(title),160),
-              left(regexp_replace(body,'\\s+',' ','g'),400), canonical_url, at
+              left(lead,400), canonical_url, at
          FROM newest
        ON CONFLICT (key) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
          url=EXCLUDED.url, published_at=EXCLUDED.published_at`,
