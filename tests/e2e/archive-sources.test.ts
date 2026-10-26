@@ -4,6 +4,8 @@ import { test } from "node:test";
 import { ChatbotStore, PostgresStore } from "@rapi/db";
 
 const url = process.env.DATABASE_URL;
+const LEAD =
+  "첫 줄 요약은 아카이브에 들어가려면 충분히 길어야 하고 스무 글자를 훌쩍 넘어 마흔 글자도 넘겨야 합니다.\n\n둘째   줄";
 if (!url || new URL(url).pathname !== "/rapi_test")
   throw new Error("Archive sources E2E requires rapi_test");
 
@@ -52,7 +54,7 @@ test("only public, live, distinct collected items reach the archive, and they le
           raw,
           input.link ?? `https://news.example/${item}`,
           input.title ?? `title ${item}`,
-          input.body ?? "첫 줄 요약\n\n둘째   줄",
+          input.body ?? LEAD,
           at,
           input.visibility ?? "public",
           input.fingerprint ?? item,
@@ -78,6 +80,10 @@ test("only public, live, distinct collected items reach the archive, and they le
     await addItem(publicSource, { daysAgo: 120 });
     await addItem(publicSource, { metadata: { retentionExpired: "true" } });
     await addItem(publicSource, { title: "   " });
+    await addItem(publicSource, { body: "너무 짧은 요약" });
+    const html = await addItem(publicSource, {
+      body: '<p>Cursor &amp; <b>Claude</b> &quot;팁&quot; &lt;3&nbsp;<a href="https://x.example">link</a> 그리고 충분히 긴 설명 문장입니다.</p>',
+    });
     const first = await addItem(publicSource, {
       fingerprint: "dup",
       daysAgo: 3,
@@ -103,11 +109,25 @@ test("only public, live, distinct collected items reach the archive, and they le
     const keys = rows.rows.map((r) => r.key).sort();
     assert.deepEqual(
       keys,
-      [`source:${good}`, `source:${good2}`, `source:${first}`].sort(),
+      [
+        `source:${good}`,
+        `source:${good2}`,
+        `source:${first}`,
+        `source:${html}`,
+      ].sort(),
     );
     const title = rows.rows.find((r) => r.key === `source:${good}`)!;
     assert.equal(title.title, "좋은 글");
-    assert.equal(title.summary, "첫 줄 요약 둘째 줄");
+    assert.equal(
+      title.summary,
+      "첫 줄 요약은 아카이브에 들어가려면 충분히 길어야 하고 스무 글자를 훌쩍 넘어 마흔 글자도 넘겨야 합니다. 둘째 줄",
+    );
+
+    const cleaned = rows.rows.find((r) => r.key === `source:${html}`)!;
+    assert.equal(
+      cleaned.summary,
+      'Cursor & Claude "팁" <3 link 그리고 충분히 긴 설명 문장입니다.',
+    );
 
     // An item that is deleted or loses public status leaves on the next sync.
     await db.pool.query(
@@ -123,8 +143,8 @@ test("only public, live, distinct collected items reach the archive, and they le
       "SELECT key FROM archive_documents WHERE kind='source'",
     );
     assert.deepEqual(
-      after.rows.map((r) => r.key),
-      [`source:${first}`],
+      after.rows.map((r) => r.key).sort(),
+      [`source:${first}`, `source:${html}`].sort(),
     );
 
     // The limit keeps the newest.
