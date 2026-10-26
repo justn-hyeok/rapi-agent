@@ -337,6 +337,11 @@ PI_CODING_AGENT_DIR=/var/lib/rapi/senpi/agent senpi   # 대화창에서 /login
 DM을 보낸다. 버튼은 `[반영]` `[건너뛰기]` `[나중에]`(24시간 뒤 재알림)이고 소유자만
 누를 수 있다. 자동으로 바뀌는 것은 없다.
 
+소음을 줄이는 규칙: 새 버전이 연달아 나오면 가장 최신 것만 알리고 이전 것은 `superseded`로
+건너뛴다. 같은 하네스는 마지막 알림 뒤 7일이 지나야 다시 알린다(그동안 더 새 버전이 나오면
+그것으로 바뀐다). VM에 하네스 로그인 정보가 없어 평가 자체가 불가능하면(`No API key`)
+`보류 추천` DM·PR 없이 `environment_unavailable`로 건너뛴다.
+
 - `[반영]`: VM에 로그인된 `gh`로 `HARNESS_UPDATES_REPO`를 임시 clone해 브랜치
   `chore/harness-<이름>-<버전>`에 고정값을 바꾸고 PR을 연다. 새 자격 증명은 없다.
 - PR이 머지되면 DM에 `[되돌리기]`가 오고, 누르면 이전 고정값 복원 PR을 연다.

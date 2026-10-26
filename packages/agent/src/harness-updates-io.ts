@@ -18,6 +18,7 @@ import { pipeline } from "node:stream/promises";
 import type { HarnessUpdateRecord } from "@rapi/db";
 import {
   bumpManifest,
+  HarnessEnvironmentError,
   HarnessUpdateService,
   type HarnessCheck,
   type HarnessManifest,
@@ -30,6 +31,7 @@ export const ISOLATED_SETTINGS = {
   defaultProjectTrust: "never",
 } as const;
 export const SMOKE_PROMPT = "Reply with exactly: RAPI_SMOKE_OK";
+const NO_CREDENTIALS = /no api key found/i;
 
 /** Parses `sha256sum` output into name → hex digest. */
 export function parseChecksums(text: string): Map<string, string> {
@@ -132,6 +134,7 @@ async function timed(
   try {
     return { name, ...(await work()), durationMs: Date.now() - started };
   } catch (error) {
+    if (error instanceof HarnessEnvironmentError) throw error;
     return {
       name,
       ok: false,
@@ -139,6 +142,14 @@ async function timed(
       durationMs: Date.now() - started,
     };
   }
+}
+
+/** True when the live agent directory holds anything beyond settings.json. */
+async function hasCredentials(directory: string): Promise<boolean> {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(
+    () => [],
+  );
+  return entries.some((e) => e.isFile() && e.name !== "settings.json");
 }
 
 async function download(url: string, to: string): Promise<void> {
@@ -208,6 +219,11 @@ export class SandboxEvaluator {
     const exec = this.options.exec ?? run;
     const fetchTo = this.options.download ?? download;
     const checks: HarnessCheck[] = [];
+    const live = this.options.liveAgentDirectory;
+    if (live && !(await hasCredentials(live)))
+      throw new HarnessEnvironmentError(
+        "VM에 하네스 로그인 정보가 없어 평가할 수 없습니다.",
+      );
     const work = await mkdtemp(join(tmpdir(), "rapi-harness-update-"));
     let sha256: string | null = null;
     try {
@@ -262,7 +278,6 @@ export class SandboxEvaluator {
         `${JSON.stringify(ISOLATED_SETTINGS)}\n`,
         { mode: 0o600 },
       );
-      const live = this.options.liveAgentDirectory;
       if (live)
         for (const entry of await readdir(live, { withFileTypes: true }).catch(
           () => [],
@@ -323,6 +338,10 @@ export class SandboxEvaluator {
               timeoutMs: this.options.smokeTimeoutMs ?? 120_000,
             },
           );
+          if (NO_CREDENTIALS.test(result.stderr))
+            throw new HarnessEnvironmentError(
+              "VM에 하네스 로그인 정보가 없어 스모크를 실행할 수 없습니다.",
+            );
           if (result.code !== 0) throw new Error(`종료 코드 ${result.code}`);
           if (!result.stdout.includes("RAPI_SMOKE_OK"))
             throw new Error("응답에 기대한 문구가 없습니다.");

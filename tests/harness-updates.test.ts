@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
   GhPullRequests,
+  HarnessEnvironmentError,
   HarnessUpdateService,
   SandboxEvaluator,
   branchName,
@@ -137,6 +140,10 @@ class FakeStore {
   rows = new Map<string, HarnessUpdateRecord>();
   events: string[] = [];
   remindAt = new Map<string, Date>();
+  lastNotice: Date | null = null;
+  async lastNoticeAt() {
+    return this.lastNotice;
+  }
   async detect(
     input: Omit<HarnessUpdateRecord, never> & Record<string, unknown>,
   ) {
@@ -251,6 +258,7 @@ function setup(
     sha?: string | null;
     body?: string;
     prState?: "open" | "merged" | "closed";
+    evaluate?: HarnessUpdatePorts["evaluator"]["run"];
   } = {},
 ) {
   const store = new FakeStore();
@@ -267,10 +275,12 @@ function setup(
     store: store as unknown as HarnessUpdatePorts["store"],
     releases: { latest: async () => release },
     evaluator: {
-      run: async () => ({
-        checks: options.checks ?? allOk,
-        sha256: options.sha === undefined ? "f".repeat(64) : options.sha,
-      }),
+      run:
+        options.evaluate ??
+        (async () => ({
+          checks: options.checks ?? allOk,
+          sha256: options.sha === undefined ? "f".repeat(64) : options.sha,
+        })),
     },
     git: {
       openPullRequest: async (input) => {
@@ -666,4 +676,126 @@ test("the senpi pin names the repository that releases are read from", async () 
     senpi: { repo: string };
   };
   assert.equal(pins.senpi.repo, "code-yeongyu/senpi");
+});
+
+test("an environment failure skips the release without a DM", async () => {
+  const { store, sent, service } = setup({
+    evaluate: async () => {
+      throw new HarnessEnvironmentError("VM에 하네스 로그인 정보가 없습니다.");
+    },
+  });
+  await service.runDue(new Date("2026-10-26T00:00:00Z"));
+  const row = [...store.rows.values()][0]!;
+  assert.equal(row.state, "skipped");
+  assert.equal(row.recommendation, null);
+  assert.ok(store.events.includes("environment_unavailable"));
+  assert.equal(sent.length, 0);
+});
+
+test("only the newest evaluated release is announced; older ones are superseded", async () => {
+  const { store, sent, service } = setup();
+  const base = {
+    harness: "senpi",
+    repo: "code-yeongyu/senpi",
+    fromVersion: "1.0.0",
+    fromSha256: "a".repeat(64),
+    asset: "pi-linux-x64.tar.gz",
+    releaseUrl: "u",
+    releaseBody: "",
+  };
+  for (const toVersion of ["1.1.0", "1.2.0", "1.3.0"]) {
+    const row = await store.detect({ ...base, toVersion } as never);
+    await store.saveEvaluation(row!.id, null, "apply", null);
+  }
+  await service.notifyEvaluated(new Date("2026-10-26T00:00:00Z"));
+  const byVersion = (v: string) =>
+    [...store.rows.values()].find((r) => r.toVersion === v)!;
+  assert.equal(byVersion("1.1.0").state, "skipped");
+  assert.equal(byVersion("1.2.0").state, "skipped");
+  assert.equal(byVersion("1.3.0").state, "notified");
+  assert.ok(store.events.includes("superseded"));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.content, /1\.3\.0/);
+});
+
+test("a release waits for the weekly interval and a newer one replaces it", async () => {
+  const { store, sent, service } = setup();
+  const now = new Date("2026-10-26T00:00:00Z");
+  store.lastNotice = new Date(now.getTime() - 86_400_000);
+  await service.runDue(now);
+  const first = [...store.rows.values()][0]!;
+  assert.equal(first.state, "pending_evaluation");
+  assert.equal(first.recommendation, "apply");
+  assert.equal(sent.length, 0);
+  await service.runDue(new Date(now.getTime() + 8 * 86_400_000));
+  assert.equal(first.state, "notified");
+  assert.equal(sent.length, 1);
+});
+
+test("sandbox evaluator refuses to judge a release without live credentials", async () => {
+  const live = await mkdtemp(join(tmpdir(), "rapi-live-agent-"));
+  try {
+    await writeFile(join(live, "settings.json"), "{}");
+    const exec: string[] = [];
+    const evaluator = new SandboxEvaluator({
+      liveAgentDirectory: live,
+      exec: async (command) => {
+        exec.push(command);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    });
+    await assert.rejects(
+      evaluator.run(
+        { asset: "pi-linux-x64.tar.gz" } as HarnessUpdateRecord,
+        null,
+      ),
+      HarnessEnvironmentError,
+    );
+    assert.deepEqual(exec, []);
+  } finally {
+    await rm(live, { recursive: true, force: true });
+  }
+});
+
+test("a smoke run that reports no API key is an environment failure, not a bad release", async () => {
+  const live = await mkdtemp(join(tmpdir(), "rapi-live-agent-"));
+  try {
+    await writeFile(join(live, "auth.json"), "{}");
+    const evaluator = new SandboxEvaluator({
+      liveAgentDirectory: live,
+      exec: async (_command, args) =>
+        args.includes("-p")
+          ? {
+              code: 1,
+              stdout: "",
+              stderr: "No API key found for the selected model.",
+            }
+          : { code: 0, stdout: "1.0.0\n", stderr: "" },
+      download: async (url, to) =>
+        writeFile(
+          to,
+          url.endsWith("SUMS")
+            ? `${createHash("sha256").update("archive").digest("hex")}  pi-linux-x64.tar.gz\n`
+            : "archive",
+        ),
+    });
+    const release: ReleaseInfo = {
+      version: "2.0.0",
+      url: "u",
+      body: "",
+      assets: [
+        { name: "pi-linux-x64.tar.gz", url: "https://x/pi-linux-x64.tar.gz" },
+        { name: "SHA256SUMS", url: "https://x/SHA256SUMS" },
+      ],
+    };
+    await assert.rejects(
+      evaluator.run(
+        { asset: "pi-linux-x64.tar.gz" } as HarnessUpdateRecord,
+        release,
+      ),
+      HarnessEnvironmentError,
+    );
+  } finally {
+    await rm(live, { recursive: true, force: true });
+  }
 });
