@@ -15,6 +15,7 @@ import {
   type EmailProvider,
   type LearnerCadence,
   type RenderedEmail,
+  plainText,
 } from "@rapi/core";
 import type { EmailStore } from "@rapi/db";
 
@@ -323,8 +324,8 @@ export class EmailService {
           unsubscribeUrl: this.url(`/e/unsub/${unsubscribeToken}`),
           items: issue.items.map((item) => ({
             section: item.section,
-            title: item.title,
-            summary: item.summary ?? "",
+            title: plainText(item.title, 300),
+            summary: plainText(item.summary ?? "", 600),
             link: this.url(
               `/r/${signLearnerLink(this.clickKey, item.id, recipient.userId, now)}`,
             ),

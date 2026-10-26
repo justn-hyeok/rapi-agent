@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { plainText } from "./content.js";
 
 export const BRIEFING_LINK_DAYS = 14;
 
@@ -302,8 +303,8 @@ export function renderBriefingPage(
       .map(
         (entry) => `<article class="item" data-item="${escape(entry.id)}">
 <div class="meta"><span class="src">${escape(entry.source)}</span>${entry.meta ? `<span>${escape(entry.meta)}</span>` : ""}</div>
-<h3><a${entry.repository ? ' class="repo"' : ""} href="${escape(entry.url)}" target="_blank" rel="noopener noreferrer">${escape(entry.title)}</a></h3>
-<p>${escape(entry.summary)}</p>${entry.why ? `\n<span class="why">${escape(entry.why)}</span>` : ""}
+<h3><a${entry.repository ? ' class="repo"' : ""} href="${escape(entry.url)}" target="_blank" rel="noopener noreferrer">${escape(plainText(entry.title, 300) || entry.title)}</a></h3>
+<p>${escape(plainText(entry.summary, 600) || entry.summary)}</p>${entry.why ? `\n<span class="why">${escape(entry.why)}</span>` : ""}
 ${actions(entry)}
 </article>`,
       )

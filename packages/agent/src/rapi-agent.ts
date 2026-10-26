@@ -559,7 +559,7 @@ export class RapiAgent {
       sourceId,
       normalizerVersion: "source-v1",
       canonicalUrl: canonicalizeUrl(item.url),
-      title: item.title.trim(),
+      title: plainText(item.title, 300) || item.title.trim(),
       body: item.body.trim(),
       author: item.author,
       publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,

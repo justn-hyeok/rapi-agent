@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { plainText } from "@rapi/core";
 import type { ModelClient } from "./model-client.js";
 
 export interface SummaryInput {
@@ -62,44 +63,7 @@ const schema = {
   additionalProperties: false,
 };
 
-function decodeEntities(value: string): string {
-  return value.replace(
-    /&(nbsp|amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi,
-    (_, entity: string) => {
-      const lower = entity.toLowerCase();
-      if (lower.startsWith("#x"))
-        return String.fromCodePoint(parseInt(lower.slice(2), 16));
-      if (lower.startsWith("#"))
-        return String.fromCodePoint(Number(lower.slice(1)));
-      return (
-        {
-          nbsp: " ",
-          amp: "&",
-          lt: "<",
-          gt: ">",
-          quot: '"',
-          apos: "'",
-        }[lower] ?? ""
-      );
-    },
-  );
-}
-
-// Feed bodies are often entity-escaped HTML, so decode before stripping tags.
-export function plainText(value: string, limit = 2000): string {
-  let text = value;
-  for (let pass = 0; pass < 2 && /&(lt|gt|amp);/i.test(text); pass += 1)
-    text = decodeEntities(text);
-  return decodeEntities(
-    text
-      .replace(/<!--[\s\S]*?-->/g, " ")
-      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-      .replace(/<[^>]+>/g, " "),
-  )
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, limit);
-}
+export { plainText };
 
 export function summaryPrompt(items: SummaryInput[]): string {
   return [
