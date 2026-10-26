@@ -11,6 +11,7 @@ import {
 } from "@rapi/core";
 import type { BlogPostRecord, BlogPostsStore } from "@rapi/db";
 import type { ButtonOutcome } from "./button-outcome.js";
+import type { AutomationSink } from "./automation-events.js";
 import type { GuideDraft, GuideDrafter } from "./guide-graph.js";
 
 export interface BlogPublisher {
@@ -88,6 +89,8 @@ export interface BlogPorts {
         ): Promise<GuideDraft | string>;
       }
     | undefined;
+  /** Told when a post goes live; failures never affect publishing. */
+  automation?: AutomationSink | undefined;
   /** Recent `setup`/`stars` community posts the weekly job may pick from. */
   recentTopics?: ((since: Date) => Promise<BlogTopic[]>) | undefined;
 }
@@ -605,6 +608,10 @@ export class BlogService {
       `blog-published:${post.id}`,
       [row(button("내리기", `blog_withdraw:${post.id}`, 4))],
     );
+    await this.ports.automation?.notify({
+      type: "blog.published",
+      data: { slug: post.slug, title: post.title, url },
+    });
   }
 
   /** At most one weekly proposal per week, from a not-yet-used setup/stars post. */

@@ -1,0 +1,29 @@
+# n8n for Rapi automations. Local only: the port is bound to 127.0.0.1 and nothing
+# here is reachable from the internet. Secrets come from an env file kept outside
+# the repository, see docs/n8n.md.
+#
+#   docker compose --project-name rapi-n8n --env-file /home/justn/secrets/n8n.env \
+#     -f ops/n8n/compose.yaml up --detach
+services:
+  n8n:
+    image: n8nio/n8n:2.43.3
+    restart: unless-stopped
+    ports: ["127.0.0.1:5678:5678"]
+    environment:
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in the env file}
+      RAPI_AUTOMATION_SECRET: ${RAPI_AUTOMATION_SECRET:?set RAPI_AUTOMATION_SECRET in the env file}
+      DISCORD_ANNOUNCE_WEBHOOK: ${DISCORD_ANNOUNCE_WEBHOOK:-}
+      # The signature check reads the shared secret and hashes the raw body.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      N8N_DEFAULT_BINARY_DATA_MODE: default
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: Asia/Seoul
+      TZ: Asia/Seoul
+    volumes:
+      - n8n-data:/home/node/.n8n
+volumes:
+  n8n-data:

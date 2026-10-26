@@ -1,0 +1,154 @@
+{
+  "id": "rapiBlogAnnounce1",
+  "name": "Rapi blog announcement",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rapi-blog",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "Rapi event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "b1000000-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst item = $input.first();\nconst raw = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\nconst timestamp = String(item.json.headers['x-rapi-timestamp'] || '');\nconst given = String(item.json.headers['x-rapi-signature'] || '');\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', $env.RAPI_AUTOMATION_SECRET)\n  .update(timestamp + '.' + raw)\n  .digest('hex');\nconst a = Buffer.from(given);\nconst b = Buffer.from(expected);\nconst sameLength = a.length === b.length;\nconst matches = sameLength && crypto.timingSafeEqual(a, b);\nconst ageSeconds = Math.abs(Date.now() / 1000 - Number(timestamp));\n// Wrong signature or a request older than five minutes (replay) is dropped.\nconst valid = matches && Number.isFinite(ageSeconds) && ageSeconds <= 300;\nlet event = null;\nif (valid) {\n  try { event = JSON.parse(raw); } catch (error) { event = null; }\n}\nreturn [{ json: { valid: valid && event !== null && event.type === 'blog.published', event } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const { event } = $input.first().json;\nconst clean = (value, limit) => String(value || '').replace(/[\\r\\n]+/g, ' ').replace(/[@<>]/g, '').slice(0, limit);\nconst url = String(event.data.url || '');\nconst link = url.startsWith('https://') ? '\\n' + url : '';\nreturn [{ json: {\n  content: '새 입문 글이 올라왔어요: **' + clean(event.data.title, 120) + '**' + link,\n  allowed_mentions: { parse: [] },\n} }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Format announcement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_ANNOUNCE_WEBHOOK }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, -80]
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Rejected",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [720, 120]
+    }
+  ],
+  "connections": {
+    "Rapi event": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Format announcement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format announcement": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

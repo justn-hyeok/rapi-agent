@@ -228,6 +228,7 @@ export function createBlogService(
   delivery: DeliveryAdapter,
   models?: ModelClient,
   guides?: BlogPorts["guides"],
+  automation?: BlogPorts["automation"],
 ): BlogService | undefined {
   if (
     !(config.BLOG_PUBLISH_ENABLED || config.BLOG_DRAFTS_ENABLED) ||
@@ -251,6 +252,7 @@ export function createBlogService(
         : {}),
       ...(models ? { models } : {}),
       ...(guides ? { guides } : {}),
+      ...(automation ? { automation } : {}),
       recentTopics: communityTopics(postgres),
     },
     {
