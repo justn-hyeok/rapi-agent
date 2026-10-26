@@ -26,6 +26,8 @@ const PLAN_SYSTEM = [
 ].join(" ");
 
 const MIN_EVIDENCE = 2;
+/** Looser matches (a keyword hit or a neighbour entity) do not count as evidence for a guide. */
+const MIN_EVIDENCE_SCORE = 0.5;
 const MAX_EVIDENCE = 8;
 const MIN_CITED_SOURCES = 2;
 const MAX_ATTEMPTS = 2;
@@ -203,7 +205,10 @@ export class GuideComposer {
         });
       }
     }
-    return { evidence: [...seen.values()].slice(0, MAX_EVIDENCE) };
+    const relevant = [...seen.values()].filter(
+      (hit) => hit.score >= MIN_EVIDENCE_SCORE,
+    );
+    return { evidence: relevant.slice(0, MAX_EVIDENCE) };
   }
 
   private async write(state: GuideState): Promise<Partial<GuideState>> {

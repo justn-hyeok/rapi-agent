@@ -17,7 +17,7 @@ const hit = (n: number, extra: Partial<ArchiveHit> = {}): ArchiveHit => ({
   summary: `요약 ${n}`,
   url: `https://news.example/${n}`,
   publishedAt: new Date(Date.UTC(2026, 9, n)),
-  score: 0.5,
+  score: 0.67,
   ...extra,
 });
 
@@ -86,6 +86,25 @@ test("without enough evidence nothing is drafted and the owner is told why", asy
   });
   assert.equal(calls, 0);
   assert.equal(typeof result, "string");
+  assert.match(result as string, /근거를 충분히 찾지 못했어요/);
+});
+
+test("loosely related posts are not evidence for a guide", async () => {
+  let calls = 0;
+  const composer = new GuideComposer(
+    retrieverOf(() => [
+      hit(1, { score: 0.33 }),
+      hit(2, { score: 0.25 }),
+      hit(3, { score: 0.5 }),
+    ]),
+    planner("[]"),
+  );
+  const result = await composer.compose("주제", async () => {
+    calls += 1;
+    return draftWith(2);
+  });
+  // Only one post clears the bar, which is below the two a guide needs.
+  assert.equal(calls, 0);
   assert.match(result as string, /근거를 충분히 찾지 못했어요/);
 });
 

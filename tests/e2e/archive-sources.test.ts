@@ -81,6 +81,9 @@ test("only public, live, distinct collected items reach the archive, and they le
     await addItem(publicSource, { metadata: { retentionExpired: "true" } });
     await addItem(publicSource, { title: "   " });
     await addItem(publicSource, { body: "너무 짧은 요약" });
+    const entityTitle = await addItem(publicSource, {
+      title: "Cursor &amp; &quot;Claude&quot; <b>팁</b>",
+    });
     const html = await addItem(publicSource, {
       body: '<p>Cursor &amp; <b>Claude</b> &quot;팁&quot; &lt;3&nbsp;<a href="https://x.example">link</a> 그리고 충분히 긴 설명 문장입니다.</p>',
     });
@@ -114,6 +117,7 @@ test("only public, live, distinct collected items reach the archive, and they le
         `source:${good2}`,
         `source:${first}`,
         `source:${html}`,
+        `source:${entityTitle}`,
       ].sort(),
     );
     const title = rows.rows.find((r) => r.key === `source:${good}`)!;
@@ -123,6 +127,10 @@ test("only public, live, distinct collected items reach the archive, and they le
       "첫 줄 요약은 아카이브에 들어가려면 충분히 길어야 하고 스무 글자를 훌쩍 넘어 마흔 글자도 넘겨야 합니다. 둘째 줄",
     );
 
+    assert.equal(
+      rows.rows.find((r) => r.key === `source:${entityTitle}`)!.title,
+      'Cursor & "Claude" 팁',
+    );
     const cleaned = rows.rows.find((r) => r.key === `source:${html}`)!;
     assert.equal(
       cleaned.summary,
@@ -144,7 +152,7 @@ test("only public, live, distinct collected items reach the archive, and they le
     );
     assert.deepEqual(
       after.rows.map((r) => r.key).sort(),
-      [`source:${first}`, `source:${html}`].sort(),
+      [`source:${first}`, `source:${html}`, `source:${entityTitle}`].sort(),
     );
 
     // The limit keeps the newest.
