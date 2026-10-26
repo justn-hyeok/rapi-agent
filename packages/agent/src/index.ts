@@ -24,3 +24,4 @@ export * from "./web-billing.js";
 export * from "./browser-research.js";
 export * from "./retrieval.js";
 export * from "./graph.js";
+export * from "./guide-graph.js";
