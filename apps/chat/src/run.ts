@@ -12,16 +12,13 @@ import {
 } from "@rapi/adapters";
 import {
   ChatbotService,
-  GraphRetriever,
   GuideComposer,
-  HybridRetriever,
-  LlmRerankRetriever,
   PublicCommunityService,
+  createArchiveRetriever,
   createBlogService,
   createGithubRepoReader,
   BrowserResearchService,
   RapiAgent,
-  lexicalRetriever,
   withRetriever,
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
@@ -115,25 +112,13 @@ const publicAgent = new PublicAgentClient(config.PUBLIC_AGENT_SOCKET);
 const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL, {
   enabled: config.ARCHIVE_SOURCES_ENABLED,
 });
-// A model-backed reranker only when asked for and a model API exists; otherwise keyword search.
-const keywordRetriever = lexicalRetriever(chatbotStore);
-const textRetriever =
-  config.CHATBOT_RERANK_ENABLED && modelClient
-    ? new LlmRerankRetriever(keywordRetriever, modelClient, {
-        onFallback: (reason) =>
-          console.warn(`archive rerank fallback: ${reason}`),
-      })
-    : keywordRetriever;
-const searchRetriever = config.CHATBOT_GRAPH_ENABLED
-  ? new HybridRetriever(
-      [textRetriever, new GraphRetriever(new PostgresGraphStore(store))],
-      [2, 1],
-    )
-  : textRetriever;
-const chatbotArchive =
-  searchRetriever === keywordRetriever
-    ? chatbotStore
-    : withRetriever(chatbotStore, searchRetriever);
+const searchRetriever = createArchiveRetriever(config, {
+  archive: chatbotStore,
+  model: modelClient,
+  graph: new PostgresGraphStore(store),
+  onWarning: (message) => console.warn(message),
+});
+const chatbotArchive = withRetriever(chatbotStore, searchRetriever);
 const chatbot = config.CHATBOT_ENABLED
   ? new ChatbotService(chatbotArchive, store, {
       l2Enabled: config.CHATBOT_L2_ENABLED,

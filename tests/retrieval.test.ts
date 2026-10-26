@@ -3,12 +3,14 @@ import { test } from "node:test";
 import type { ModelClient, ModelRequest } from "@rapi/adapters";
 import {
   LlmRerankRetriever,
+  createArchiveRetriever,
   lexicalRetriever,
   withRetriever,
   type ChatbotArchive,
 } from "@rapi/agent";
 import {
   fuseRankings,
+  parseModelJson,
   parseExpansion,
   parseRelevance,
   rankArchiveDocuments,
@@ -245,4 +247,104 @@ test("withRetriever swaps only the search and keeps turns in the store", async (
   assert.equal(found!.score, 4);
   await archive.appendTurns("s", "u", []);
   assert.equal(store.appended, 1);
+});
+
+test("the archive retriever is assembled from the flags", async () => {
+  const archive = new FakeStoreArchive();
+  const calls: ModelRequest[] = [];
+  const modelClient = model(
+    (request) =>
+      isExpansion(request)
+        ? '["무료"]'
+        : scoreByTitle(request, { "무료 크레딧": 3 }),
+    calls,
+  );
+  let graphAsked = 0;
+  const graph = {
+    async findEntities() {
+      graphAsked += 1;
+      return [{ id: "e", name: "Cursor", kind: "tool" as const, aliases: [] }];
+    },
+    async neighborDocuments() {
+      return [{ ...hit("models"), score: 1 }];
+    },
+  } as never;
+  const off = { CHATBOT_RERANK_ENABLED: false, CHATBOT_GRAPH_ENABLED: false };
+
+  // Nothing on: plain keyword search, no model, no graph.
+  const plain = createArchiveRetriever(off, {
+    archive,
+    model: modelClient,
+    graph,
+  });
+  assert.deepEqual(
+    (await plain.retrieve("cursor 무료", 3)).map((h) => h.key),
+    (await archive.searchArchive("cursor 무료", 3)).map((h) => h.key),
+  );
+  assert.equal(calls.length, 0);
+  assert.equal(graphAsked, 0);
+
+  // Rerank on but no model API: still keyword search.
+  const noModel = createArchiveRetriever(
+    { ...off, CHATBOT_RERANK_ENABLED: true },
+    { archive, model: null, graph },
+  );
+  assert.ok((await noModel.retrieve("cursor 무료", 3)).length > 0);
+  assert.equal(calls.length, 0);
+
+  // Rerank on: the model is asked (expansion and scoring).
+  const reranked = createArchiveRetriever(
+    { ...off, CHATBOT_RERANK_ENABLED: true },
+    { archive, model: modelClient, graph },
+  );
+  assert.equal((await reranked.retrieve("cursor 무료", 3))[0]!.key, "credit");
+  assert.equal(calls.length, 2);
+  assert.equal(graphAsked, 0);
+
+  // Graph on: graph hits are fused in, and a failing graph store only drops its share.
+  const withGraph = createArchiveRetriever(
+    { ...off, CHATBOT_GRAPH_ENABLED: true },
+    { archive, model: null, graph },
+  );
+  const keys = (await withGraph.retrieve("cursor 무료", 5)).map((h) => h.key);
+  assert.ok(keys.includes("credit") && keys.includes("models"));
+  assert.equal(graphAsked, 1);
+  const brokenGraph = createArchiveRetriever(
+    { ...off, CHATBOT_GRAPH_ENABLED: true },
+    {
+      archive,
+      model: null,
+      graph: {
+        async findEntities() {
+          throw new Error("graph down");
+        },
+      } as never,
+    },
+  );
+  assert.ok((await brokenGraph.retrieve("cursor 무료", 5)).length > 0);
+
+  // Fallbacks are reported through onWarning with a prefix operators can grep.
+  const warnings: string[] = [];
+  const failing = createArchiveRetriever(
+    { ...off, CHATBOT_RERANK_ENABLED: true },
+    {
+      archive,
+      model: {
+        async complete() {
+          throw new Error("budget");
+        },
+      },
+      graph,
+      onWarning: (message) => warnings.push(message),
+    },
+  );
+  await failing.retrieve("cursor 무료", 3);
+  assert.ok(warnings.every((w) => w.startsWith("archive rerank fallback:")));
+  assert.ok(warnings.length >= 2);
+});
+
+test("model JSON parsing strips a code fence and rejects non-JSON", () => {
+  assert.deepEqual(parseModelJson('```json\n{"a":1}\n```'), { a: 1 });
+  assert.deepEqual(parseModelJson("[1,2]"), [1, 2]);
+  assert.equal(parseModelJson("sorry, no"), null);
 });
