@@ -102,6 +102,7 @@ export const environmentSchema = z
     CHATBOT_L2_ENABLED: booleanString,
     CHATBOT_RERANK_ENABLED: booleanString,
     CHATBOT_GRAPH_ENABLED: booleanString,
+    ARCHIVE_SOURCES_ENABLED: booleanString,
     GRAPH_INDEX_ENABLED: booleanString,
     GRAPH_INDEX_BATCH: z.coerce.number().int().min(1).max(50).default(10),
     PUBLIC_AGENT_READY_URL: z.url().default("http://127.0.0.1:3500/ready"),
@@ -230,6 +231,13 @@ export const environmentSchema = z
         code: "custom",
         path: ["CHATBOT_ENABLED"],
         message: "CHATBOT_ENABLED requires PUBLIC_AGENT_BACKEND=api",
+      });
+    }
+    if (value.ARCHIVE_SOURCES_ENABLED && !value.CHATBOT_ENABLED) {
+      context.addIssue({
+        code: "custom",
+        path: ["ARCHIVE_SOURCES_ENABLED"],
+        message: "ARCHIVE_SOURCES_ENABLED requires CHATBOT_ENABLED",
       });
     }
     if (value.CHATBOT_GRAPH_ENABLED && !value.CHATBOT_ENABLED) {

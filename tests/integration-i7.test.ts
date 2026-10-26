@@ -546,6 +546,7 @@ test("every feature flag is off by default (DELIVERY_ENABLED is the old kill swi
     "CHATBOT_ENABLED",
     "CHATBOT_L2_ENABLED",
     "CHATBOT_RERANK_ENABLED",
+    "ARCHIVE_SOURCES_ENABLED",
     "BLOG_PUBLISH_ENABLED",
     "BLOG_DRAFTS_ENABLED",
     "GITHUB_APP_ENABLED",

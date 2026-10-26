@@ -322,7 +322,9 @@ const harnessTimer = harnessUpdates
       10 * 60_000,
     )
   : undefined;
-const archiveSync = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL);
+const archiveSync = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL, {
+  enabled: config.ARCHIVE_SOURCES_ENABLED,
+});
 const graphTimer = graphIndexer
   ? setInterval(
       () =>
