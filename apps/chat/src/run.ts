@@ -118,7 +118,10 @@ const chatbotStore = new ChatbotStore(store, config.RAPI_PUBLIC_BASE_URL, {
 const keywordRetriever = lexicalRetriever(chatbotStore);
 const textRetriever =
   config.CHATBOT_RERANK_ENABLED && modelClient
-    ? new LlmRerankRetriever(keywordRetriever, modelClient)
+    ? new LlmRerankRetriever(keywordRetriever, modelClient, {
+        onFallback: (reason) =>
+          console.warn(`archive rerank fallback: ${reason}`),
+      })
     : keywordRetriever;
 const searchRetriever = config.CHATBOT_GRAPH_ENABLED
   ? new HybridRetriever(
