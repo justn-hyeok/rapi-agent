@@ -240,6 +240,61 @@ export function renderBriefing(
   };
 }
 
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+/**
+ * Discord does not draw Markdown tables, so a table becomes one bullet per row:
+ * the first column in bold, the others as "heading: value". Code blocks stay as written.
+ */
+export function discordMarkdown(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let fenced = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const next = lines[index + 1];
+    if (
+      !fenced &&
+      line.includes("|") &&
+      next !== undefined &&
+      next.includes("-") &&
+      TABLE_SEPARATOR.test(next)
+    ) {
+      const heads = tableCells(line);
+      let row = index + 2;
+      while (row < lines.length && lines[row]!.includes("|")) {
+        const cells = tableCells(lines[row]!);
+        const rest = cells
+          .slice(1)
+          .map((cell, column) =>
+            cell
+              ? `${heads[column + 1] ?? ""}: ${cell}`.replace(/^: /, "")
+              : "",
+          )
+          .filter(Boolean);
+        out.push(
+          `- **${cells[0] ?? ""}**${rest.length ? ` — ${rest.join(" · ")}` : ""}`,
+        );
+        row += 1;
+      }
+      index = row - 1;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 export function splitDiscordMessage(message: string, limit = 1900): string[] {
   if (message.length <= limit) return [message];
   const chunks: string[] = [];
