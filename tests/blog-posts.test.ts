@@ -22,6 +22,7 @@ import type {
   BlogPostsStore,
   NewBlogPost,
 } from "@rapi/db";
+import { shown } from "./discord-shown.js";
 
 const owner = "123456789012345678";
 const stranger = "223456789012345678";
@@ -307,7 +308,7 @@ test("issue sent → approved post, PR opened once, merge publishes and DMs", as
     /blog_withdraw:00000000-0000-4000-8000-000000000001/,
   );
   assert.match(
-    dm.content!,
+    shown(dm),
     /rapi\.example\/blog\/learner-daily-2026-10-26\.html/,
   );
 });

@@ -15,6 +15,7 @@ import {
   type LearnerMetrics,
 } from "@rapi/core";
 import { countDirectReply } from "../apps/chat/src/direct-message.js";
+import { shown } from "./discord-shown.js";
 
 const key = learnerLinkKey("k".repeat(32));
 const item = "11111111-1111-4111-8111-111111111111";
@@ -510,8 +511,8 @@ test("issue DMs carry signed links, opt-out and preference buttons; email is ask
     "learner_email:no",
   ])
     assert.ok(ids.includes(id), id);
-  const token = /\/r\/([^)>]+)>/.exec(discord.content)![1]!;
-  assert.ok(!discord.content.includes("docs.example"));
+  const token = /\/r\/([^)>]+)>/.exec(shown(discord))![1]!;
+  assert.ok(!shown(discord).includes("docs.example"));
   assert.equal(
     verifyLearnerLink(learnerLinkKey("s".repeat(32)), token)?.userId,
     user,
@@ -688,16 +689,16 @@ test("issue DMs end with the web unsubscribe link only when the web is on", asyn
     }),
   );
   assert.match(
-    withWeb.content,
+    shown(withWeb),
     /<https:\/\/rapi\.example\/u\/token-123456789012345678>/,
   );
-  assert.ok(withWeb.content.length <= 2000);
+  assert.ok(shown(withWeb).length <= 2000);
   assert.ok(JSON.stringify(withWeb.components).includes("learner_optout"));
   // The portal exists but returns no link (web off): no footer line.
   const noLink = await sentDm(setup({ webUnsubscribeUrl: () => undefined }));
-  assert.ok(!noLink.content.includes("/u/"));
+  assert.ok(!shown(noLink).includes("/u/"));
   const without = await sentDm(setup());
-  assert.ok(!without.content.includes("/u/"));
+  assert.ok(!shown(without).includes("/u/"));
 });
 
 test("the email button repeats on every issue until an address exists; the DM-is-enough answer is asked once", async () => {

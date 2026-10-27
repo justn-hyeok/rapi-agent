@@ -2,6 +2,8 @@ import {
   CARD_COLOR,
   LEARNER_SECTIONS,
   cardPayload,
+  contentCard,
+  discordEmbed,
   isLearnerCadence,
   learnerIssueBoundary,
   learnerItemFromPost,
@@ -389,9 +391,7 @@ export class LearnerExperiment {
             html: "",
             itemIds: [],
             discord: {
-              embeds: [],
-              content: fit(lines.join("\n"), 1900),
-              flags: 4,
+              embeds: [discordEmbed(contentCard(lines.join("\n")))],
               components: [
                 row(
                   button("발송", `learner_issue_send:${issue.id}`, 3),
@@ -506,18 +506,19 @@ export class LearnerExperiment {
   ): {
     embeds: unknown[];
     components: unknown[];
-    content: string;
-    flags: number;
   } {
-    const lines = [`**라피 학습자 소식 · ${issue.periodKey}**`];
+    const lines: string[] = [];
     const unsubscribe = this.options.webUnsubscribeUrl?.(subscriber.userId);
     const footer = unsubscribe
       ? `\n웹에서 바로 그만 받기: <${unsubscribe}>`
       : "";
+    // Links stay in the card body, where Discord never unfurls them, so a
+    // crawler fetch is not mistaken for a click.
     for (const section of LEARNER_SECTIONS) {
       const items = issue.items.filter((item) => item.section === section.id);
       if (!items.length) continue;
-      lines.push("", `**${section.label}**`);
+      if (lines.length) lines.push("");
+      lines.push(`**${section.label}**`);
       for (const item of items) {
         const link = `${this.options.baseUrl.replace(/\/+$/, "")}/r/${signLearnerLink(this.key, item.id, subscriber.userId, now)}`;
         const line = `• [${item.title.replace(/[[\]]/g, "").slice(0, 60)}](<${link}>)`;
@@ -547,10 +548,12 @@ export class LearnerExperiment {
         : [button("DM이면 충분해요", "learner_email:no")]),
     ];
     return {
-      embeds: [],
-      content: lines.join("\n") + footer,
-      // Suppress link previews so a crawler fetch is not mistaken for a click.
-      flags: 4,
+      embeds: [
+        discordEmbed({
+          title: `라피 학습자 소식 · ${issue.periodKey}`,
+          description: lines.join("\n") + footer,
+        }),
+      ],
       components: [row(...buttons)],
     };
   }
@@ -635,10 +638,6 @@ export class LearnerExperiment {
       ],
     };
   }
-}
-
-function fit(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
 function stateMessage(state: string | null): string {

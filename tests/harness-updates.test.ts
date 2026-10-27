@@ -22,6 +22,7 @@ import {
   type ReleaseInfo,
 } from "@rapi/agent";
 import type { HarnessUpdateRecord, HarnessUpdateState } from "@rapi/db";
+import { shown } from "./discord-shown.js";
 
 const owner = "123456789012345678";
 const stranger = "223456789012345678";
@@ -295,7 +296,7 @@ function setup(
       send: async (target, payload) => {
         sent.push({
           to: target.recipientId,
-          content: payload.discord?.content ?? "",
+          content: shown(payload.discord),
           components: payload.discord?.components ?? [],
         });
         return { providerId: "m" };

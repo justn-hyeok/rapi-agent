@@ -71,3 +71,20 @@ export function cardPayload(
   }
   return { subject, text, html: "", itemIds: [], discord: { embeds } };
 }
+
+/**
+ * A message written as text (first line = headline, the rest = body) as a card.
+ * Keeps decision messages one-liners to write while they show as embeds.
+ */
+export function contentCard(
+  content: string,
+  color: number = CARD_COLOR.info,
+): DiscordCard {
+  const [head = "", ...rest] = content.trim().split("\n");
+  const title = head.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  return {
+    title: title || "라피",
+    description: rest.join("\n").trim(),
+    color,
+  };
+}
