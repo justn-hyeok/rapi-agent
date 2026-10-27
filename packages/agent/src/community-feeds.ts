@@ -7,6 +7,7 @@ import {
   kstDateKey,
   kstReached,
   kstWeekday,
+  plainText,
   selectProjectRepositories,
   selectFeedTargets,
   type CitationCandidate,
@@ -472,9 +473,12 @@ export class CommunityFeeds {
     const embeds = official.slice(0, 10).map((item) => {
       const citations = findCitations(item, others).slice(0, 5);
       return {
-        title: clip(`${item.source} · ${item.title}`, 250),
+        title: clip(
+          `${item.source} · ${plainText(item.title, 300) || item.title}`,
+          250,
+        ),
         url: item.url,
-        description: clip(item.summary, 600),
+        description: clip(plainText(item.summary, 600) || item.summary, 600),
         ...(citations.length
           ? {
               fields: [
@@ -484,7 +488,7 @@ export class CommunityFeeds {
                     citations
                       .map(
                         (c) =>
-                          `[${clip(`${c.source}: ${c.title}`, 70)}](${c.url})`,
+                          `[${clip(`${c.source}: ${plainText(c.title, 200) || c.title}`, 70)}](${c.url})`,
                       )
                       .join("\n"),
                     1000,
@@ -569,7 +573,10 @@ export class CommunityFeeds {
         description: clip(
           items
             .slice(0, 10)
-            .map((i) => `- [${clip(i.title, 90)}](${i.url}) · ${i.source}`)
+            .map(
+              (i) =>
+                `- [${clip(plainText(i.title, 200) || i.title, 90)}](${i.url}) · ${i.source}`,
+            )
             .join("\n"),
           3900,
         ),
