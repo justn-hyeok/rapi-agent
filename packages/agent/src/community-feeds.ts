@@ -470,36 +470,38 @@ export class CommunityFeeds {
     const others: CitationCandidate[] = await this.store.citationCandidates(
       new Date(now.getTime() - 7 * 86_400_000),
     );
-    const embeds = official.slice(0, 10).map((item) => {
-      const citations = findCitations(item, others).slice(0, 5);
-      return {
-        title: clip(
-          `${item.source} · ${plainText(item.title, 300) || item.title}`,
-          250,
-        ),
-        url: item.url,
-        description: clip(plainText(item.summary, 600) || item.summary, 600),
-        ...(citations.length
-          ? {
-              fields: [
-                {
-                  name: `이 글을 다룬 곳 ${citations.length}`,
-                  value: clip(
-                    citations
-                      .map(
-                        (c) =>
-                          `[${clip(`${c.source}: ${plainText(c.title, 200) || c.title}`, 70)}](${c.url})`,
-                      )
-                      .join("\n"),
-                    1000,
-                  ),
-                },
-              ],
-            }
-          : {}),
+    // One card per source, so a day with eight posts reads as three short lists.
+    const bySource = new Map<string, typeof official>();
+    for (const item of official.slice(0, 12))
+      bySource.set(item.source, [...(bySource.get(item.source) ?? []), item]);
+    const embeds = [...bySource.entries()]
+      .slice(0, 10)
+      .map(([source, items]) => ({
+        title: clip(`${source} · ${items.length}건`, 250),
+        description: items
+          .map((item) => {
+            const cited = findCitations(item, others).slice(0, 3);
+            const title = clip(plainText(item.title, 300) || item.title, 110);
+            const summary = clip(
+              plainText(item.summary, 400) || item.summary,
+              110,
+            );
+            return [
+              `**[${title.replace(/[[\]]/g, "")}](${item.url})**`,
+              summary,
+              ...(cited.length
+                ? [
+                    `-# 다룬 곳 ${cited.length} · ${cited
+                      .map((c) => `[${clip(c.source, 24)}](${c.url})`)
+                      .join(" · ")}`,
+                  ]
+                : []),
+            ].join("\n");
+          })
+          .join("\n\n")
+          .slice(0, 3900),
         color: 0x365d46,
-      };
-    });
+      }));
     await this.publish("ai-blogs", key, embeds);
   }
 
