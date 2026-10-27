@@ -142,7 +142,7 @@ CI, 외부 장애 감시와 백업·보관 정책의 현재 적용 범위를 기
 `/데이터삭제` 요청·확정·상태 확인과 백업 추적 절차를 기록했다.
 공개 글은 [라피 블로그](https://rapi-07ab7899e00f.justn.me/blog/)에서 볼 수 있다.
 
-`v0.1.3`에서 추가한 Mac Aside 브라우저 수집은 제거했다([D-011](docs/decisions.md)).
+Mac Aside 브라우저 수집은 제거했다([D-011](docs/decisions.md)).
 모든 수집은 VM에서 공식 피드·API로 수행한다.
 질문·관리자 답변 처리 중에는 Discord의 ‘입력 중’ 표시를 갱신한다.
 검증 기록: [typing indicator evidence](docs/evidence/typing-indicator-20260928.md).
