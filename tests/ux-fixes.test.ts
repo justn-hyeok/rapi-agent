@@ -132,6 +132,7 @@ test("[거절], a stale press and a bad id", async () => {
 
 interface Sent {
   content: string;
+  embeds?: Array<{ title?: string; description?: string }>;
   components?: unknown[];
   flags?: number;
   allowed_mentions?: unknown;
@@ -142,6 +143,7 @@ async function press(
   handle: (customId: string) => Promise<ButtonOutcome>,
   customId: string,
   messageContent = "원래 메시지",
+  messageEmbeds: unknown[] = [],
 ) {
   const keys = generateKeyPairSync("ed25519");
   const key = (keys.publicKey.export({ type: "spki", format: "der" }) as Buffer)
@@ -198,7 +200,7 @@ async function press(
         token: "tok",
         channel_id: "dm",
         user: { id: "owner" },
-        message: { content: messageContent },
+        message: { content: messageContent, embeds: messageEmbeds },
         data: { custom_id: customId },
       }),
     );
@@ -434,4 +436,20 @@ test("/취소 asks the chat process to stop the caller's running ChatOps run", a
     service(null, null).execute(identity, { name: "cancel", options: {} }),
     /취소할 작업이 없습니다/,
   );
+});
+
+test("a decision button on an embed message keeps the cards and adds the result card", async (t) => {
+  const { calls } = await press(
+    t,
+    async () => ({ result: "게시했어요." }),
+    "x_publish",
+    "",
+    [{ type: "rich", title: "초안", description: "본문" }],
+  );
+  assert.equal(calls.length, 1);
+  const edit = calls[0]!.body;
+  assert.equal(edit.content, "");
+  assert.equal(edit.embeds![0]!.title, "초안");
+  assert.equal(edit.embeds![1]!.title, "✅ 처리됨");
+  assert.match(edit.embeds![1]!.description!, /게시했어요\./);
 });

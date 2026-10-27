@@ -23,10 +23,12 @@ import {
 } from "@rapi/agent";
 import { loadEnvironment } from "@rapi/config";
 import {
+  CARD_COLOR,
   assertDiscordAccess,
   createGuildGate,
   createLocalHealthServer,
   decideGuildAdmission,
+  discordEmbed,
   isGuildAllowed,
   resolveHomeGuildId,
   splitDiscordMessage,
@@ -399,7 +401,17 @@ async function askGuildApproval(guildId: string, name: string): Promise<void> {
       await discordRequest(`/channels/${channel.id}/messages`, {
         method: "POST",
         body: JSON.stringify({
-          content: `라피가 새 서버에 초대됐습니다: ${name} (${guildId})\n허용하기 전까지 이 서버에서는 응답하지 않습니다.`,
+          embeds: [
+            discordEmbed({
+              title: "라피가 새 서버에 초대됐습니다",
+              description: "허용하기 전까지 이 서버에서는 응답하지 않습니다.",
+              fields: [
+                { name: "서버", value: name, inline: true },
+                { name: "서버 ID", value: guildId, inline: true },
+              ],
+              color: CARD_COLOR.warn,
+            }),
+          ],
           allowed_mentions: { parse: [] },
           components: [
             {

@@ -10,6 +10,7 @@ import {
   RapiAgent,
   WebhookAuthenticationError,
   WebhookManager,
+  composeButtonEmbeds,
   composeButtonMessage,
   type ButtonOutcome,
   type DiscordCommand,
@@ -710,7 +711,7 @@ export function createDiscordInteractionServer(
         user?: { id?: string };
         guild_id?: string;
         channel_id?: string;
-        message?: { content?: string };
+        message?: { content?: string; embeds?: unknown[] };
         data?: {
           name?: string;
           custom_id?: string;
@@ -871,8 +872,10 @@ export function createDiscordInteractionServer(
         const decision = integrations.decision;
         const customId = interaction.data.custom_id;
         const original = interaction.message?.content ?? "";
+        const originalEmbeds = interaction.message?.embeds ?? [];
         const run = async (): Promise<{
           content: string;
+          embeds?: unknown[];
           components?: unknown[];
           notice: boolean;
         }> => {
@@ -880,6 +883,20 @@ export function createDiscordInteractionServer(
             const outcome = await decision.handle(identity, customId);
             if (outcome.notice)
               return { content: outcome.notice, notice: true };
+            // Messages sent as embeds keep their cards and gain a result card;
+            // older text messages keep the text composition.
+            if (originalEmbeds.length)
+              return {
+                content: original,
+                embeds: composeButtonEmbeds(
+                  originalEmbeds,
+                  outcome,
+                  userId,
+                  new Date(),
+                ),
+                components: outcome.components ?? [],
+                notice: false,
+              };
             return {
               content: composeButtonMessage(
                 original,
@@ -916,6 +933,7 @@ export function createDiscordInteractionServer(
                   type: 7,
                   data: {
                     content: result.content,
+                    ...(result.embeds ? { embeds: result.embeds } : {}),
                     components: result.components,
                     allowed_mentions: { parse: [] },
                   },
@@ -943,6 +961,7 @@ export function createDiscordInteractionServer(
                   headers: { "content-type": "application/json" },
                   body: JSON.stringify({
                     content: result.content,
+                    ...(result.embeds ? { embeds: result.embeds } : {}),
                     components: result.components,
                     allowed_mentions: { parse: [] },
                   }),

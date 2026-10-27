@@ -2,6 +2,8 @@ import { ModelBudgetExceededError, type ModelClient } from "@rapi/adapters";
 import {
   blogPostMeta,
   blogSlug,
+  contentCard,
+  discordEmbed,
   parseGuideContent,
   renderGuidePost,
   renderIssuePost,
@@ -657,9 +659,7 @@ export class BlogService {
             ...(components
               ? {
                   discord: {
-                    embeds: [],
-                    content: content.slice(0, 1_900),
-                    flags: 4,
+                    embeds: [discordEmbed(contentCard(content))],
                     components,
                   },
                 }

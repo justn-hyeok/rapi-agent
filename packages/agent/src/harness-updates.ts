@@ -1,7 +1,10 @@
-import type {
-  DeliveryAdapter,
-  DeliveryPayload,
-  DeliveryTarget,
+import {
+  CARD_COLOR,
+  contentCard,
+  discordEmbed,
+  type DeliveryAdapter,
+  type DeliveryPayload,
+  type DeliveryTarget,
 } from "@rapi/core";
 import type {
   HarnessUpdateRecord,
@@ -479,7 +482,7 @@ export class HarnessUpdateService {
 
   private async dm(
     userId: string,
-    message: { content: string; components: unknown[] },
+    message: { content: string; components: unknown[]; warn?: boolean },
     key: string,
   ): Promise<boolean> {
     const target: DeliveryTarget = {
@@ -492,9 +495,14 @@ export class HarnessUpdateService {
       html: "",
       itemIds: [],
       discord: {
-        embeds: [],
-        content: message.content,
-        flags: 4,
+        embeds: [
+          discordEmbed(
+            contentCard(
+              message.content,
+              message.warn ? CARD_COLOR.warn : CARD_COLOR.info,
+            ),
+          ),
+        ],
         components: message.components,
       },
     };
