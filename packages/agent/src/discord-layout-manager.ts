@@ -9,6 +9,7 @@ import {
   type DiscordLayoutAction,
   type ManagedDiscordResource,
 } from "./discord-layout.js";
+import { helpMessageBody } from "./discord-help.js";
 
 export interface DiscordRest {
   request<T>(route: string, init?: RequestInit): Promise<T>;
@@ -520,6 +521,7 @@ export class DiscordLayoutManager {
       }
 
       await this.ensureVerificationMessage(guildId, ids, fresh.layoutDigest);
+      await this.ensureHelpMessage(guildId, fresh.layoutDigest);
       for (const key of ["rapi_questions", "rapi_admin"]) {
         const id = ids.get(resourceKey("channel", key));
         if (id) await this.store.enableChatChannel(guildId, id, actorId);
@@ -540,28 +542,60 @@ export class DiscordLayoutManager {
   ): Promise<void> {
     const channelId = ids.get(resourceKey("channel", "roles"));
     if (!channelId) throw new Error("Verification channel is missing");
-    const body = JSON.stringify({
-      content:
-        "규칙을 확인했다면 아래 버튼을 눌러 `라피 USER` 역할을 받고 입장하세요.",
-      allowed_mentions: { parse: [] },
-      components: [
-        {
-          type: 1,
-          components: [
-            {
-              type: 2,
-              style: 3,
-              label: "인증하고 입장",
-              custom_id: "rapi_verify:v1",
-            },
-          ],
-        },
-      ],
-    });
+    await this.ensureMessage(
+      guildId,
+      channelId,
+      "verification",
+      JSON.stringify({
+        content:
+          "규칙을 확인했다면 아래 버튼을 눌러 `라피 USER` 역할을 받고 입장하세요.",
+        allowed_mentions: { parse: [] },
+        components: [
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 3,
+                label: "인증하고 입장",
+                custom_id: "rapi_verify:v1",
+              },
+            ],
+          },
+        ],
+      }),
+      layoutDigest,
+    );
+  }
+
+  /** The usage guide in #라피-도움말, edited in place when its text changes. */
+  async ensureHelpMessage(guildId: string, layoutDigest = ""): Promise<void> {
+    const channelId = await this.store.managedDiscordResourceId(
+      guildId,
+      "channel",
+      "rapi_help",
+    );
+    if (!channelId) return;
+    await this.ensureMessage(
+      guildId,
+      channelId,
+      "help",
+      helpMessageBody(),
+      layoutDigest,
+    );
+  }
+
+  private async ensureMessage(
+    guildId: string,
+    channelId: string,
+    key: string,
+    body: string,
+    layoutDigest: string,
+  ): Promise<void> {
     const existing = await this.store.managedDiscordResourceId(
       guildId,
       "message",
-      "verification",
+      key,
     );
     let message: { id: string };
     if (existing) {
@@ -585,7 +619,7 @@ export class DiscordLayoutManager {
     await this.store.upsertManagedDiscordResource({
       guildId,
       resourceType: "message",
-      key: "verification",
+      key,
       discordId: message.id,
       layoutDigest,
     });

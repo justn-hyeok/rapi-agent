@@ -31,6 +31,7 @@ import {
   discordEmbed,
   isGuildAllowed,
   resolveHomeGuildId,
+  discordMarkdown,
   splitDiscordMessage,
   summarizeReadiness,
 } from "@rapi/core";
@@ -188,7 +189,7 @@ const chat = new ChatOrchestrator(
       await sendGithub(channel, content);
       return;
     }
-    const chunks = splitDiscordMessage(redactChat(content));
+    const chunks = splitDiscordMessage(discordMarkdown(redactChat(content)));
     for (const [index, chunk] of chunks.entries())
       await sendMessage(
         channel,
