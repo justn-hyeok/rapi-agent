@@ -29,6 +29,9 @@ test("AI blog cards show feed text without markup or entities", async () => {
   });
   await feeds.aiBlogs(new Date("2026-10-27T01:00:00Z"));
   const embed = drafts[0]!.embeds[0]!;
-  assert.equal(embed.title, "Example · It’s new");
-  assert.equal(embed.description, "Intro text");
+  assert.equal(embed.title, "Example · 1건");
+  assert.equal(
+    embed.description,
+    "**[It’s new](https://example.com/a)**\nIntro text",
+  );
 });

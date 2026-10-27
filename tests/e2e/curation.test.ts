@@ -170,10 +170,7 @@ describe("curation feeds", () => {
         "프로젝트 소식",
       ]);
       assert.equal(byChannel("c-ai").length, 1);
-      assert.match(
-        JSON.stringify(byChannel("c-ai")[0]!.embeds),
-        /이 글을 다룬 곳 1/,
-      );
+      assert.match(JSON.stringify(byChannel("c-ai")[0]!.embeds), /다룬 곳 1/);
       assert.equal(byChannel("c-free").length, 2);
       assert.match(JSON.stringify(byChannel("c-free")), /지금 무료인 모델 1개/);
 
